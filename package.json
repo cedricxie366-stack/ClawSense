@@ -9,7 +9,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/cedricxie366-stack/ClawSense.git"
+    "url": "git+https://github.com/cedricxie366-stack/ClawSense.git"
   },
   "license": "MIT",
   "type": "module",
