@@ -62,12 +62,19 @@
 
 ## 2. 当前仓库在发布前需要注意的地方
 
-当前代码已经能跑，但要公开发布，还要注意这几个点：
+当前代码已经能跑。最开始的几个发布阻塞项是：
 
-- `package.json` 里现在是 `"private": true`，这会直接阻止 npm 发布
-- `package.json` 里的包名现在是 `@clawsense/clawsense`，如果你没有这个 scope，就发不出去
-- 还没有显式 `LICENSE`
-- 还没有完善的 `repository` / `homepage` / `bugs` 元数据
+- `package.json` 里是 `"private": true`，这会直接阻止 npm 发布
+- `package.json` 里的包名是 `@clawsense/clawsense`，如果你没有这个 scope，就发不出去
+- 没有显式 `LICENSE`
+- 没有完善的 `repository` / `homepage` / `bugs` 元数据
+
+当前这份仓库已经改成了更适合第一次发布的状态：
+
+- `private: false`
+- 包名改为 `clawsense-openclaw-plugin`
+- 已补 `LICENSE`
+- 已补 `repository / homepage / bugs`
 
 ## 3. 先发布 GitHub 仓库
 

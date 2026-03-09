@@ -54,5 +54,5 @@ CLAWSENSE_SOURCE_URL="https://your-host.example/clawsense-plugin.tar.gz" bash in
 如果插件已经发布到 npm：
 
 ```bash
-CLAWSENSE_NPM_SPEC="@clawsense/clawsense@latest" bash install.sh
+CLAWSENSE_NPM_SPEC="clawsense-openclaw-plugin@latest" bash install.sh
 ```

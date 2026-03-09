@@ -1,8 +1,8 @@
 {
-  "name": "@clawsense/clawsense",
+  "name": "clawsense-openclaw-plugin",
   "version": "0.1.0",
-  "private": true,
-  "description": "ClawSense plugin for OpenClaw",
+  "private": false,
+  "description": "Always-on sensory companion plugin for OpenClaw",
   "homepage": "https://github.com/cedricxie366-stack/ClawSense",
   "bugs": {
     "url": "https://github.com/cedricxie366-stack/ClawSense/issues"
@@ -11,24 +11,33 @@
     "type": "git",
     "url": "https://github.com/cedricxie366-stack/ClawSense.git"
   },
+  "license": "MIT",
   "type": "module",
+  "main": "./dist/index.js",
+  "exports": {
+    ".": "./dist/index.js"
+  },
   "files": [
     "README.md",
-    "index.ts",
+    "LICENSE",
     "install.sh",
+    "dist/**/*.js",
     "openclaw.plugin.json",
-    "src/**/*.ts",
-    "tsconfig.json"
+    "package.json"
   ],
   "openclaw": {
     "extensions": [
-      "./index.ts"
+      "./dist/index.js"
     ]
   },
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('dist',{ recursive:true, force:true })\" && tsc -p tsconfig.json",
     "check": "npm run build",
-    "test": "vitest run --config vitest.config.ts"
+    "test": "vitest run --config vitest.config.ts",
+    "prepack": "npm run check && npm test"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "dependencies": {
     "@lancedb/lancedb": "^0.26.2",
