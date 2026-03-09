@@ -14,7 +14,7 @@
 
 如果你是第一次接手这个项目，建议先看总指南：
 
-- [小白部署与使用指南](/Users/cedric/Documents/ClawSense/docs/小白部署与使用指南.md)
+- [小白部署与使用指南](../docs/小白部署与使用指南.md)
 
 这份 `android/README.md` 只聚焦 Android 客户端本身，默认你已经知道：
 

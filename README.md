@@ -1,29 +1,101 @@
-# ClawSense Plugin
+# ClawSense
 
-ClawSense 是一个面向 OpenClaw 的全天候感知插件原型，提供：
+[![npm version](https://img.shields.io/npm/v/clawsense-openclaw-plugin)](https://www.npmjs.com/package/clawsense-openclaw-plugin)
+[![license](https://img.shields.io/github/license/cedricxie366-stack/ClawSense)](./LICENSE)
+[![release](https://img.shields.io/github/v/tag/cedricxie366-stack/ClawSense?label=release)](https://github.com/cedricxie366-stack/ClawSense/releases)
 
-- 终端二维码引导配对
-- 一次性 setup token 换永久 `deviceSecret`
-- Android 采集端上传音频、图片与心跳
-- 音频转写、视觉摘要与 LanceDB 记忆落库
+Turn an old Android phone into an always-on sensory node for OpenClaw.
 
-## 当前状态
+ClawSense is an OpenClaw plugin plus an Android client. It pairs once, keeps a long-lived `deviceSecret`, and continuously sends:
 
-当前仓库已经跑通下面这些主链路：
+- VAD-triggered audio clips
+- periodic image snapshots
+- heartbeat / liveness signals
+- memory-ready ingest events for OpenClaw
 
-- OpenClaw 服务端配对二维码生成
-- Android 真机扫码配对
-- 永久 `deviceSecret` 持久化
-- 前台感知服务启动 / 停止
-- 音频上传
-- 图片上传
-- 心跳上报
+## What Works Today
 
-如果你是第一次接触这个项目，先看这份文档：
+The following paths have been verified on a real server plus a real Android phone:
 
-- [小白部署与使用指南](/Users/cedric/Documents/ClawSense/docs/小白部署与使用指南.md)
+- OpenClaw server plugin loading
+- QR pairing
+- persistent `deviceSecret`
+- Android foreground service start / stop
+- clear runtime states in the app UI
+- audio upload
+- image upload
+- heartbeat reporting
+- server-side ClawSense journal persistence
 
-## 本地开发
+## Quick Links
+
+- [小白部署与使用指南](./docs/小白部署与使用指南.md)
+- [Android 客户端说明](./android/README.md)
+- [GitHub 与 npm 发布清单](./docs/GitHub与npm发布清单.md)
+- [npm package: clawsense-openclaw-plugin](https://www.npmjs.com/package/clawsense-openclaw-plugin)
+- [GitHub Releases](https://github.com/cedricxie366-stack/ClawSense/releases)
+
+## Fastest Install
+
+If OpenClaw is already available on the target machine, the most direct installation path is:
+
+```bash
+CLAWSENSE_NPM_SPEC="clawsense-openclaw-plugin@latest" bash install.sh
+```
+
+If you prefer source-based installation from this repo:
+
+```bash
+bash install.sh
+```
+
+If you want the server to download a source archive:
+
+```bash
+CLAWSENSE_SOURCE_URL="https://your-host.example/clawsense-plugin.tar.gz" bash install.sh
+```
+
+After installation, generate a pairing QR code:
+
+```bash
+openclaw clawsense pair
+```
+
+## Current Limits
+
+This is a real, working MVP, but not yet a fully polished public release.
+
+- `install.sh` works well on normal Linux environments, but `2GB` servers may still OOM during OpenClaw installation
+- when STT / embedding / vision backends are unavailable, ClawSense falls back to degraded summaries instead of hard failing
+- there is no full device management UI yet
+- low-memory deployment still needs a maintainer-style prebuilt path in some cases
+
+## Android Runtime States
+
+The Android client now exposes explicit runtime states instead of vague button feedback:
+
+- `未配对`
+- `启动中`
+- `运行中 · 完整模式`
+- `运行中 · 仅音频`
+- `运行中 · 仅图片`
+- `已停止`
+- `异常`
+
+That means users can tell whether the service actually started, whether it is degraded, and whether it has stopped cleanly.
+
+## Repository Layout
+
+- `src/`
+  OpenClaw plugin logic, pairing, ingest routes, memory flow
+- `android/`
+  Android client, foreground service, CameraX, audio capture, QR pairing
+- `docs/`
+  deployment notes, release checklist, beginner guide
+- `install.sh`
+  install / enable / restart helper for OpenClaw environments
+
+## Local Development
 
 ```bash
 npm install
@@ -31,28 +103,14 @@ npm run check
 npm test
 ```
 
-## 安装
+## Status
 
-当前有 3 种安装来源：
+Validated baseline:
 
-- 仓库源码已经在服务器上
-- 远程插件压缩包 URL
-- 已发布到 npm 的包名
+- OpenClaw `2026.3.2`
+- Android 13
+- real-device pairing and upload loop
 
-如果源码仓库已经在服务器上，直接在仓库根目录执行：
+If you are touching this project for the first time, start with:
 
-```bash
-bash install.sh
-```
-
-如果要让服务器从远程压缩包下载安装：
-
-```bash
-CLAWSENSE_SOURCE_URL="https://your-host.example/clawsense-plugin.tar.gz" bash install.sh
-```
-
-如果插件已经发布到 npm：
-
-```bash
-CLAWSENSE_NPM_SPEC="clawsense-openclaw-plugin@latest" bash install.sh
-```
+- [小白部署与使用指南](./docs/小白部署与使用指南.md)
