@@ -1,0 +1,12 @@
+<resources>
+    <string name="app_name">ClawSense</string>
+    <string name="notification_channel_name">ClawSense 感知服务</string>
+    <string name="notification_channel_desc">持续采集音频事件、定格视觉和心跳。</string>
+    <string name="notification_title">ClawSense 正在感知环境</string>
+    <string name="notification_text">音频 VAD、定格拍照与心跳正在运行。</string>
+    <string name="notification_text_audio_only">仅音频 VAD 与心跳正在运行，等待相机权限。</string>
+    <string name="notification_text_camera_only">仅定格拍照与心跳正在运行，等待麦克风权限。</string>
+    <string name="notification_text_waiting">已配对，等待权限或服务启动。</string>
+    <string name="notification_action_stop">停止</string>
+    <string name="notification_action_open">打开 App</string>
+</resources>

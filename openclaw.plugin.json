@@ -1,0 +1,45 @@
+{
+  "id": "clawsense",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "publicBaseUrl": {
+        "type": "string"
+      },
+      "gatewayPort": {
+        "type": "number"
+      },
+      "openaiApiKey": {
+        "type": "string"
+      },
+      "openaiBaseUrl": {
+        "type": "string"
+      },
+      "visionProvider": {
+        "type": "string"
+      },
+      "visionModel": {
+        "type": "string"
+      },
+      "embeddingModel": {
+        "type": "string"
+      },
+      "embeddingDimensions": {
+        "type": "number"
+      },
+      "memoryDbPath": {
+        "type": "string"
+      },
+      "memoryNamespace": {
+        "type": "string"
+      },
+      "pairingTtlSeconds": {
+        "type": "number"
+      },
+      "maxPendingTokens": {
+        "type": "number"
+      }
+    }
+  }
+}
