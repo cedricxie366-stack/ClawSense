@@ -61,15 +61,81 @@ process.stdout.write(JSON.stringify(list));
   "$OPENCLAW_BIN" config set plugins.allow "$next" --strict-json >/dev/null
 }
 
+cleanup_legacy_clawsense_state() {
+  log "清理旧版 clawsense-openclaw-plugin 残留配置"
+  node -e '
+const fs = require("fs");
+const file = process.argv[1];
+if (!file || !fs.existsSync(file)) process.exit(0);
+const raw = JSON.parse(fs.readFileSync(file, "utf8"));
+let changed = false;
+const plugins = (raw.plugins && typeof raw.plugins === "object") ? raw.plugins : (raw.plugins = {});
+if (Array.isArray(plugins.allow)) {
+  const next = plugins.allow.filter((item) => item !== "clawsense-openclaw-plugin");
+  if (next.length !== plugins.allow.length) {
+    plugins.allow = next;
+    changed = true;
+  }
+}
+if (Array.isArray(plugins.load)) {
+  const next = plugins.load.filter((item) => !String(item).includes("clawsense-openclaw-plugin"));
+  if (next.length !== plugins.load.length) {
+    plugins.load = next;
+    changed = true;
+  }
+}
+if (plugins.entries && typeof plugins.entries === "object") {
+  if (Object.prototype.hasOwnProperty.call(plugins.entries, "clawsense-openclaw-plugin")) {
+    delete plugins.entries["clawsense-openclaw-plugin"];
+    changed = true;
+  }
+  const clawsenseEntry = plugins.entries.clawsense;
+  if (
+    clawsenseEntry &&
+    typeof clawsenseEntry === "object" &&
+    (clawsenseEntry.idHint === "clawsense-openclaw-plugin" ||
+      clawsenseEntry.packageName === "clawsense-openclaw-plugin")
+  ) {
+    delete plugins.entries.clawsense;
+    changed = true;
+  }
+}
+if (plugins.installs && typeof plugins.installs === "object") {
+  if (Object.prototype.hasOwnProperty.call(plugins.installs, "clawsense-openclaw-plugin")) {
+    delete plugins.installs["clawsense-openclaw-plugin"];
+    changed = true;
+  }
+}
+if (changed) {
+  fs.writeFileSync(file, JSON.stringify(raw, null, 2));
+}
+' "$OPENCLAW_CONFIG_PATH"
+
+  rm -rf \
+    "$OPENCLAW_HOME/extensions/clawsense-openclaw-plugin" \
+    "$OPENCLAW_HOME/plugins/clawsense-openclaw-plugin"
+}
+
 prepare_local_source() {
+  if [ ! -f "$SCRIPT_DIR/dist/index.js" ]; then
+    log "检测到 dist 缺失，先执行本地构建"
+    npm run build --prefix "$SCRIPT_DIR"
+  fi
+
   rm -rf "$CLAWSENSE_PLUGIN_DIR"
   mkdir -p "$CLAWSENSE_PLUGIN_DIR"
   cp "$SCRIPT_DIR/package.json" "$CLAWSENSE_PLUGIN_DIR/package.json"
-  cp "$SCRIPT_DIR/package-lock.json" "$CLAWSENSE_PLUGIN_DIR/package-lock.json"
+  if [ -f "$SCRIPT_DIR/package-lock.json" ]; then
+    cp "$SCRIPT_DIR/package-lock.json" "$CLAWSENSE_PLUGIN_DIR/package-lock.json"
+  fi
   cp "$SCRIPT_DIR/openclaw.plugin.json" "$CLAWSENSE_PLUGIN_DIR/openclaw.plugin.json"
   cp "$SCRIPT_DIR/index.ts" "$CLAWSENSE_PLUGIN_DIR/index.ts"
   cp "$SCRIPT_DIR/tsconfig.json" "$CLAWSENSE_PLUGIN_DIR/tsconfig.json"
   cp -R "$SCRIPT_DIR/src" "$CLAWSENSE_PLUGIN_DIR/src"
+  cp -R "$SCRIPT_DIR/dist" "$CLAWSENSE_PLUGIN_DIR/dist"
+  if [ -d "$SCRIPT_DIR/skills" ]; then
+    cp -R "$SCRIPT_DIR/skills" "$CLAWSENSE_PLUGIN_DIR/skills"
+  fi
 }
 
 prepare_downloaded_source() {
@@ -83,9 +149,11 @@ prepare_downloaded_source() {
 }
 
 if [ -n "$CLAWSENSE_NPM_SPEC" ]; then
+  cleanup_legacy_clawsense_state
   log "使用 npm 规格安装插件：$CLAWSENSE_NPM_SPEC"
   "$OPENCLAW_BIN" plugins install "$CLAWSENSE_NPM_SPEC"
 else
+  cleanup_legacy_clawsense_state
   if [ -n "$CLAWSENSE_SOURCE_URL" ]; then
     log "从远程归档下载插件源码：$CLAWSENSE_SOURCE_URL"
     prepare_downloaded_source

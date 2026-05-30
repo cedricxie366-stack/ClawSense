@@ -1,5 +1,5 @@
 {
-  "name": "clawsense-openclaw-plugin",
+  "name": "clawsense",
   "version": "0.1.0",
   "private": false,
   "description": "Always-on sensory companion plugin for OpenClaw",
@@ -22,6 +22,7 @@
     "LICENSE",
     "install.sh",
     "dist/**/*.js",
+    "skills/**/*.md",
     "openclaw.plugin.json",
     "package.json"
   ],
@@ -33,7 +34,9 @@
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('dist',{ recursive:true, force:true })\" && tsc -p tsconfig.json",
     "check": "npm run build",
+    "check:release": "bash ./scripts/check-release-boundary.sh",
     "test": "vitest run --config vitest.config.ts",
+    "log:dev": "bash ./scripts/dev-log.sh",
     "prepack": "npm run check && npm test"
   },
   "publishConfig": {
@@ -53,5 +56,8 @@
   },
   "engines": {
     "node": ">=22.12.0"
+  },
+  "optionalDependencies": {
+    "sherpa-onnx-node": "^1.13.0"
   }
 }

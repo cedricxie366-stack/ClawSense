@@ -1,5 +1,6 @@
 {
   "id": "clawsense",
+  "skills": ["skills"],
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -28,6 +29,18 @@
       "embeddingDimensions": {
         "type": "number"
       },
+      "retrievalEmbeddingBackend": {
+        "type": "string"
+      },
+      "hostModelAudioMode": {
+        "type": "string"
+      },
+      "hostModelImageMode": {
+        "type": "string"
+      },
+      "hostModelVideoMode": {
+        "type": "string"
+      },
       "memoryDbPath": {
         "type": "string"
       },
@@ -37,7 +50,46 @@
       "pairingTtlSeconds": {
         "type": "number"
       },
+      "heartbeatIntervalSeconds": {
+        "type": "number"
+      },
       "maxPendingTokens": {
+        "type": "number"
+      },
+      "artifactRetentionDays": {
+        "type": "number"
+      },
+      "maxArtifactBytes": {
+        "type": "number"
+      },
+      "mediaRoot": {
+        "type": "string"
+      },
+      "analysisMode": {
+        "type": "string"
+      },
+      "reviewModel": {
+        "type": "string"
+      },
+      "sttFallbackModel": {
+        "type": "string"
+      },
+      "localAsrBackend": {
+        "type": "string"
+      },
+      "localAsrModelDir": {
+        "type": "string"
+      },
+      "localAsrModelFile": {
+        "type": "string"
+      },
+      "localAsrTokensFile": {
+        "type": "string"
+      },
+      "localAsrLanguage": {
+        "type": "string"
+      },
+      "localAsrNumThreads": {
         "type": "number"
       }
     }
