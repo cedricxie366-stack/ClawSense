@@ -59,6 +59,7 @@ import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.SettingsInputAntenna
 import androidx.compose.material.icons.outlined.StopCircle
+import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -270,6 +271,16 @@ private fun ClawSenseScreen(viewModel: MainViewModel) {
               ),
             )
             viewModel.setStatus("感知服务已停止，音频、拍照和心跳都已暂停。")
+          },
+          onCaptureVideo = {
+            if (uiState.runtimeStatus.phase != ServicePhase.RUNNING) {
+              viewModel.setStatus("请先启动感知服务，再录制视频片段。")
+            } else if (!permissions.camera) {
+              viewModel.setStatus("录制视频片段需要相机权限。")
+            } else {
+              SensorServiceController.captureVideoClip(context)
+              viewModel.setStatus("已请求录制 6 秒视频片段；如果主机未开启视频模式，会显示上传失败。")
+            }
           },
         )
         AssistantCard(
@@ -605,12 +616,18 @@ private fun ServiceRuntimeCard(
   permissions: PermissionSnapshot,
   onStart: () -> Unit,
   onStop: () -> Unit,
+  onCaptureVideo: () -> Unit,
 ) {
   val visual = runtimeVisual(uiState.runtimeStatus, uiState.session != null)
   val updatedAtText = formatTimestamp(uiState.runtimeStatus.updatedAt)
   val recentAudioText = formatTimestampOrPlaceholder(uiState.serviceActivity.lastAudioUploadAt)
   val recentImageText = formatTimestampOrPlaceholder(uiState.serviceActivity.lastImageUploadAt)
+  val recentVideoText = formatTimestampOrPlaceholder(uiState.serviceActivity.lastVideoUploadAt)
   val recentErrorText = formatRecentError(uiState.serviceActivity)
+  val canCaptureVideo =
+    uiState.session != null &&
+      permissions.camera &&
+      uiState.runtimeStatus.phase == ServicePhase.RUNNING
 
   Card(
     colors = CardDefaults.cardColors(containerColor = ClawSensePalette.Card),
@@ -687,11 +704,11 @@ private fun ServiceRuntimeCard(
         text = when {
           uiState.session == null -> "先完成配对，下面的启动按钮才会真正工作。"
           uiState.runtimeStatus.phase == ServicePhase.RUNNING &&
-            uiState.runtimeStatus.mode == CaptureMode.FULL -> "当前是完整模式：音频 VAD、定格拍照、心跳都在运行。"
+            uiState.runtimeStatus.mode == CaptureMode.FULL -> "当前是完整模式：音频 VAD、定格拍照、心跳都在运行；也可以手动录制 6 秒视频片段。"
           uiState.runtimeStatus.phase == ServicePhase.RUNNING &&
             uiState.runtimeStatus.mode == CaptureMode.AUDIO_ONLY -> "当前是仅音频模式：相机未参与，适合先验证录音上传。"
           uiState.runtimeStatus.phase == ServicePhase.RUNNING &&
-            uiState.runtimeStatus.mode == CaptureMode.IMAGE_ONLY -> "当前是仅图片模式：麦克风未参与，适合先验证定格拍照上传。"
+            uiState.runtimeStatus.mode == CaptureMode.IMAGE_ONLY -> "当前是仅图片模式：麦克风未参与，适合先验证定格拍照与手动视频片段上传。"
           uiState.runtimeStatus.phase == ServicePhase.STARTING -> "服务正在从 UI 切到前台通知模式，通常 1 到 2 秒内会进入运行中。"
           else -> "停止后，前台通知会消失，音频采集、定格拍照和心跳都会暂停。"
         },
@@ -725,6 +742,11 @@ private fun ServiceRuntimeCard(
             value = recentImageText,
           )
           ActivityRow(
+            icon = Icons.Outlined.Videocam,
+            label = "最近视频上传",
+            value = recentVideoText,
+          )
+          ActivityRow(
             icon = Icons.Outlined.WarningAmber,
             label = "最近错误",
             value = recentErrorText,
@@ -738,6 +760,20 @@ private fun ServiceRuntimeCard(
             )
           }
         }
+      }
+
+      FilledTonalButton(
+        onClick = onCaptureVideo,
+        modifier = Modifier.fillMaxWidth(),
+        enabled = canCaptureVideo,
+        colors = ButtonDefaults.filledTonalButtonColors(
+          containerColor = ClawSensePalette.CardStrong,
+          contentColor = ClawSensePalette.TextPrimary,
+        ),
+      ) {
+        Icon(Icons.Outlined.Videocam, contentDescription = null)
+        Spacer(Modifier.width(8.dp))
+        Text("录制 6 秒视频片段")
       }
 
       Row(

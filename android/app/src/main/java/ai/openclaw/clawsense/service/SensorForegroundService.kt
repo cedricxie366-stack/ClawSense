@@ -61,6 +61,7 @@ class SensorForegroundService : LifecycleService() {
 
   private var heartbeatJob: Job? = null
   private var stillCaptureJob: Job? = null
+  private var videoCaptureJob: Job? = null
   private var assistantQueryTimeoutJob: Job? = null
   private val shutdownScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
   private val shutdownMutex = Mutex()
@@ -69,6 +70,7 @@ class SensorForegroundService : LifecycleService() {
   @Volatile private var shuttingDown = false
   @Volatile private var sensorsReleased = false
   @Volatile private var audioSensorRunning = false
+  @Volatile private var videoSensorRunning = false
   @Volatile private var pendingAssistantQuery = false
   @Volatile private var pendingAssistantModeHint = AssistantModeHint.AUTO
   @Volatile private var pendingAssistantArmedAtElapsedMs = 0L
@@ -91,6 +93,7 @@ class SensorForegroundService : LifecycleService() {
     const val ASSISTANT_QUERY_ARM_TOLERANCE_MS = 150L
     const val ASSISTANT_QUERY_TIMEOUT_GRACE_MS = 1_000L
     const val ASSISTANT_ECHO_DRAIN_MS = AUDIO_SESSION_SILENCE_TIMEOUT_MS + 1_200L
+    const val MANUAL_VIDEO_CLIP_MS = 6_000L
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -116,6 +119,11 @@ class SensorForegroundService : LifecycleService() {
     if (SensorServiceController.isStopAssistantSpeakingAction(intent)) {
       lifecycleScope.launch {
         stopAssistantSpeaking()
+      }
+    }
+    if (SensorServiceController.isCaptureVideoClipAction(intent)) {
+      lifecycleScope.launch {
+        triggerManualVideoClip()
       }
     }
 
@@ -153,6 +161,7 @@ class SensorForegroundService : LifecycleService() {
   override fun onDestroy() {
     heartbeatJob?.cancel()
     stillCaptureJob?.cancel()
+    videoCaptureJob?.cancel()
     resetRuntimeTracking()
     repository.updateRuntimeStatus(
       ServiceRuntimeStatus(
@@ -242,6 +251,7 @@ class SensorForegroundService : LifecycleService() {
       runCatching { imageHal.start() }
         .onSuccess {
           imageActive = true
+          videoSensorRunning = true
           Log.d(tag, "Camera HAL started")
         }
         .onFailure {
@@ -372,6 +382,7 @@ class SensorForegroundService : LifecycleService() {
     shuttingDown = true
     heartbeatJob?.cancel()
     stillCaptureJob?.cancel()
+    videoCaptureJob?.cancel()
     resetRuntimeTracking()
     if (removeNotification) {
       ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
@@ -390,6 +401,7 @@ class SensorForegroundService : LifecycleService() {
         return@withLock
       }
       audioSensorRunning = false
+      videoSensorRunning = false
       assistantQueryTimeoutJob?.cancel()
       assistantQueryTimeoutJob = null
       pendingAssistantQuery = false
@@ -409,6 +421,7 @@ class SensorForegroundService : LifecycleService() {
   private fun resetRuntimeTracking() {
     started = false
     audioSensorRunning = false
+    videoSensorRunning = false
     assistantQueryTimeoutJob?.cancel()
     assistantQueryTimeoutJob = null
     pendingAssistantQuery = false
@@ -536,6 +549,43 @@ class SensorForegroundService : LifecycleService() {
     )
     repository.uploadAudio(clip)
     Log.d(tag, "Audio upload succeeded")
+  }
+
+  private suspend fun triggerManualVideoClip() {
+    if (!videoSensorRunning || repository.runtimeStatus.value.phase != ServicePhase.RUNNING) {
+      repository.recordError("视频录制需要相机服务正在运行，请先启动感知服务。")
+      return
+    }
+    if (videoCaptureJob?.isActive == true) {
+      repository.recordError("视频片段正在录制中，请稍后再试。")
+      return
+    }
+    videoCaptureJob = lifecycleScope.launch {
+      try {
+        Log.d(tag, "Manual video clip capture requested")
+        val clip = imageHal.recordVideoClip(MANUAL_VIDEO_CLIP_MS).copy(
+          note = "manual-video-clip androidVideoM2=1 clipMs=$MANUAL_VIDEO_CLIP_MS",
+        )
+        Log.d(
+          tag,
+          "Uploading video clip ${clip.fileName} bytes=${clip.bytes.size} keyframes=${clip.keyframes.size}",
+        )
+        repository.uploadVideo(clip)
+        Log.d(tag, "Video upload succeeded")
+      } catch (error: Throwable) {
+        if (error is CancellationException) {
+          throw error
+        }
+        if (error is ClawSenseAuthException) {
+          Log.e(tag, "Video upload unauthorized; stopping service", error)
+          WorkScheduler.cancelHeartbeat(this@SensorForegroundService)
+          beginShutdown(removeNotification = true)
+          return@launch
+        }
+        Log.e(tag, "Video capture/upload failed", error)
+        repository.recordError("视频上传失败：${error.message ?: "未知错误"}")
+      }
+    }
   }
 
   private fun isAssistantQueryCandidateTooLong(clip: CapturedAudioClip): Boolean {

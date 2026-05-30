@@ -89,6 +89,31 @@ class OkHttpClawSenseApi(
     )
   }
 
+  override suspend fun uploadVideo(session: DeviceSession, clip: CapturedVideoClip) {
+    request<VideoUploadRequest, UnitResponse>(
+      url = "${session.uploadBaseUrl}/ingest/video",
+      body = VideoUploadRequest(
+        videoBase64 = Base64.encodeToString(clip.bytes, Base64.NO_WRAP),
+        fileName = clip.fileName,
+        mime = clip.mime,
+        capturedAt = clip.capturedAt,
+        note = clip.note,
+        keyframes = clip.keyframes.map { keyframe ->
+          VideoUploadKeyframeRequest(
+            imageBase64 = Base64.encodeToString(keyframe.image.bytes, Base64.NO_WRAP),
+            fileName = keyframe.image.fileName,
+            mime = keyframe.image.mime,
+            capturedAt = keyframe.image.capturedAt,
+            note = keyframe.image.note,
+            videoOffsetMs = keyframe.videoOffsetMs,
+          )
+        },
+      ),
+      bearer = session.deviceSecret,
+      deviceId = session.deviceId,
+    )
+  }
+
   override suspend fun queryAssistant(
     session: DeviceSession,
     request: AssistantQueryRequest,

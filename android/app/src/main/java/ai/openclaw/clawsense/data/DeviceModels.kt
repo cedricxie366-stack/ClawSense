@@ -82,6 +82,41 @@ data class CapturedImageFrame(
   val note: String? = null,
 )
 
+data class CapturedVideoKeyframe(
+  val image: CapturedImageFrame,
+  val videoOffsetMs: Long,
+)
+
+data class CapturedVideoClip(
+  val bytes: ByteArray,
+  val mime: String = "video/mp4",
+  val fileName: String = "capture.mp4",
+  val capturedAt: Long = System.currentTimeMillis(),
+  val durationMs: Long? = null,
+  val note: String? = null,
+  val keyframes: List<CapturedVideoKeyframe> = emptyList(),
+)
+
+@Serializable
+data class VideoUploadKeyframeRequest(
+  val imageBase64: String,
+  val fileName: String,
+  val mime: String,
+  val capturedAt: Long,
+  val note: String? = null,
+  val videoOffsetMs: Long,
+)
+
+@Serializable
+data class VideoUploadRequest(
+  val videoBase64: String,
+  val fileName: String,
+  val mime: String,
+  val capturedAt: Long,
+  val note: String? = null,
+  val keyframes: List<VideoUploadKeyframeRequest> = emptyList(),
+)
+
 @Serializable
 data class ServiceRuntimeStatus(
   val phase: ServicePhase = ServicePhase.STOPPED,

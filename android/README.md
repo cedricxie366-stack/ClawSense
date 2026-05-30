@@ -9,6 +9,7 @@
 - 音频 VAD 触发上传
 - 基线 60 秒定格拍照上传
 - 音频活跃窗口内 10 秒定格拍照上传
+- 手动 6 秒视频片段上传
 - 现实世界实时语音提问与本地 TTS 播报
 - WorkManager 背景心跳
 
@@ -72,6 +73,7 @@
   - `POST /api/clawsense/pair`
   - `POST /api/clawsense/ingest/audio`
   - `POST /api/clawsense/ingest/image`
+  - `POST /api/clawsense/ingest/video`
   - `POST /api/clawsense/assistant/query`
   - `POST /api/clawsense/heartbeat`
 - 前台服务启动后：
@@ -79,11 +81,22 @@
   - 检测到声音片段后，打包为 WAV 上传
   - 相机在服务运行期间默认每 60 秒拍一张 JPEG 上传
   - 检测到音频活跃窗口后，相机临时提升为每 10 秒 1 张，持续 120 秒
+  - 页面可手动触发 6 秒视频片段上传，并附带起止关键帧
   - 心跳按服务端返回的间隔发送
 - 如果只授予了相机或麦克风中的一个权限，服务会自动进入降级模式：
   - 只有麦克风权限：只上传音频和心跳
   - 只有相机权限：只上传图片和心跳
 - WorkManager 每 15 分钟发送一次后台补偿心跳
+
+### 视频片段 M2
+
+当前视频能力是一个可控的 M2 验证块，不是全天候自动录像：
+
+- Android 端只提供手动按钮：“录制 6 秒视频片段”
+- 录制为 video-only MP4，不额外开启第二路麦克风，避免和现有 VAD 抢占音频链路
+- 上传时会同时带上起始 / 结束关键帧，方便服务端先做 OCR、caption 和视频片段关联
+- 如果服务端 `hostModelVideoMode` 仍为 `none`，`/api/clawsense/ingest/video` 会返回 `409 video_ingest_disabled`，App 会把它显示为最近错误
+- 这一步只验证“短视频采集、上传、入库、关键帧关联”成立；自动视频、唤醒词触发视频、长视频切片都还没进入 Android MVP
 
 ### 实时语音助手
 
@@ -112,9 +125,10 @@ Android 客户端本身不依赖多模态模型才能“上传成功”，但 Cl
 当前这版 Android 客户端的职责很明确：
 
 1. 负责持续采集音频、图片和心跳
-2. 把原始感知送回 ClawSense 数据面
-3. 作为语音入口，把用户的显式问题转发给 OpenClaw / ClawSense evidence 层
-4. 让你之后能在服务端打开媒体库，或生成 Daily Review
+2. 必要时手动采集短视频片段，补充动态场景证据
+3. 把原始感知送回 ClawSense 数据面
+4. 作为语音入口，把用户的显式问题转发给 OpenClaw / ClawSense evidence 层
+5. 让你之后能在服务端打开媒体库，或生成 Daily Review
 
 也就是说：
 
@@ -170,6 +184,6 @@ Android 客户端本身不依赖多模态模型才能“上传成功”，但 Cl
 - 更强的 VAD/降噪策略
 - 设备管理页（撤销设备、查看最近上传）
 - 用非废弃方案替换 `EncryptedSharedPreferences`
-- Android 端视频采集 / CameraX 录制 M2
+- 自动 / 持续视频采集
 - 语音开启视频
 - 基于面部画面的微表情、情绪或内在意图自动结论

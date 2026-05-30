@@ -116,6 +116,10 @@ class DeviceSessionRepository(
     submitUpload(PendingUpload.Image(image))
   }
 
+  suspend fun uploadVideo(clip: CapturedVideoClip) {
+    submitUpload(PendingUpload.Video(clip))
+  }
+
   suspend fun queryAssistant(
     clip: CapturedAudioClip,
     windowHint: AssistantRecentContextWindowHint = AssistantRecentContextWindowHint.LAST_60S,
@@ -243,6 +247,7 @@ class DeviceSessionRepository(
     when (upload) {
       is PendingUpload.Audio -> api.uploadAudio(session, upload.clip)
       is PendingUpload.Image -> api.uploadImage(session, upload.image)
+      is PendingUpload.Video -> api.uploadVideo(session, upload.clip)
     }
   }
 
@@ -263,6 +268,10 @@ class DeviceSessionRepository(
       )
       is PendingUpload.Image -> _activitySnapshot.value.copy(
         lastImageUploadAt = uploadedAt,
+        pendingUploads = pendingUploads.size,
+      )
+      is PendingUpload.Video -> _activitySnapshot.value.copy(
+        lastVideoUploadAt = uploadedAt,
         pendingUploads = pendingUploads.size,
       )
     }
@@ -359,6 +368,10 @@ class DeviceSessionRepository(
     data class Image(val image: CapturedImageFrame) : PendingUpload {
       override val label: String = "图片"
     }
+
+    data class Video(val clip: CapturedVideoClip) : PendingUpload {
+      override val label: String = "视频"
+    }
   }
 
   private companion object {
@@ -370,6 +383,7 @@ class DeviceSessionRepository(
 data class ServiceActivitySnapshot(
   val lastAudioUploadAt: Long? = null,
   val lastImageUploadAt: Long? = null,
+  val lastVideoUploadAt: Long? = null,
   val lastError: String? = null,
   val lastErrorAt: Long? = null,
   val pendingUploads: Int = 0,

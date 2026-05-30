@@ -12,6 +12,7 @@ object SensorServiceController {
   private const val ACTION_STOP = "ai.openclaw.clawsense.action.STOP"
   private const val ACTION_TRIGGER_ASSISTANT_QUERY = "ai.openclaw.clawsense.action.TRIGGER_ASSISTANT_QUERY"
   private const val ACTION_STOP_ASSISTANT_SPEAKING = "ai.openclaw.clawsense.action.STOP_ASSISTANT_SPEAKING"
+  private const val ACTION_CAPTURE_VIDEO_CLIP = "ai.openclaw.clawsense.action.CAPTURE_VIDEO_CLIP"
   private const val EXTRA_ASSISTANT_MODE_HINT = "assistant_mode_hint"
 
   fun start(context: Context) {
@@ -39,9 +40,15 @@ object SensorServiceController {
     ContextCompat.startForegroundService(context, intent)
   }
 
+  fun captureVideoClip(context: Context) {
+    val intent = Intent(context, SensorForegroundService::class.java).setAction(ACTION_CAPTURE_VIDEO_CLIP)
+    ContextCompat.startForegroundService(context, intent)
+  }
+
   internal fun isStopAction(intent: Intent?): Boolean = intent?.action == ACTION_STOP
   internal fun isAssistantQueryAction(intent: Intent?): Boolean = intent?.action == ACTION_TRIGGER_ASSISTANT_QUERY
   internal fun isStopAssistantSpeakingAction(intent: Intent?): Boolean = intent?.action == ACTION_STOP_ASSISTANT_SPEAKING
+  internal fun isCaptureVideoClipAction(intent: Intent?): Boolean = intent?.action == ACTION_CAPTURE_VIDEO_CLIP
   internal fun readAssistantModeHint(intent: Intent?): AssistantModeHint {
     val raw = intent?.getStringExtra(EXTRA_ASSISTANT_MODE_HINT)?.trim().orEmpty()
     return runCatching { AssistantModeHint.valueOf(raw) }.getOrDefault(AssistantModeHint.AUTO)
