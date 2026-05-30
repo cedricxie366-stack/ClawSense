@@ -17,6 +17,7 @@ data class DeviceSession(
 data class PairingSetup(
   val host: String,
   val token: String,
+  val warning: String? = null,
 )
 
 @Serializable
@@ -69,6 +70,7 @@ data class CapturedAudioClip(
   val mime: String = "audio/wav",
   val fileName: String = "capture.wav",
   val capturedAt: Long = System.currentTimeMillis(),
+  val durationMs: Long? = null,
   val note: String? = null,
 )
 
@@ -103,3 +105,102 @@ enum class CaptureMode {
   AUDIO_ONLY,
   IMAGE_ONLY,
 }
+
+@Serializable
+enum class AssistantInteractionPhase {
+  PASSIVE_SENSING,
+  WAKEWORD_ARMED,
+  RECORDING_QUERY,
+  WAITING_ANSWER,
+  SPEAKING_ANSWER,
+  ERROR_RECOVERY,
+}
+
+@Serializable
+enum class AssistantRecentContextWindowHint {
+  @SerialName("last_15s")
+  LAST_15S,
+
+  @SerialName("last_60s")
+  LAST_60S,
+
+  @SerialName("last_5m")
+  LAST_5M,
+}
+
+@Serializable
+enum class AssistantModeHint {
+  @SerialName("auto")
+  AUTO,
+
+  @SerialName("meeting")
+  MEETING,
+
+  @SerialName("desk")
+  DESK,
+}
+
+@Serializable
+data class AssistantQueryRequest(
+  val queryAudio: String,
+  val fileName: String,
+  @SerialName("queryMime") val queryMime: String,
+  val capturedAt: Long,
+  @SerialName("queryDurationMs") val queryDurationMs: Long? = null,
+  @SerialName("recentContextWindowHint")
+  val recentContextWindowHint: AssistantRecentContextWindowHint = AssistantRecentContextWindowHint.LAST_60S,
+  @SerialName("modeHint") val modeHint: AssistantModeHint = AssistantModeHint.AUTO,
+)
+
+@Serializable
+data class AssistantSupportingEvidence(
+  val windowId: String,
+  val timeRange: String,
+  val summary: String,
+  val transcriptExcerpt: String? = null,
+  val artifactUrls: List<String> = emptyList(),
+)
+
+@Serializable
+data class AssistantQuerySttDiagnostics(
+  val provider: String? = null,
+  val failureReason: String? = null,
+  val rawQueryText: String? = null,
+  val queryRewriteReason: String? = null,
+  val queryDurationMs: Long? = null,
+)
+
+@Serializable
+data class AssistantQueryResponse(
+  val ok: Boolean = true,
+  val queryText: String = "",
+  val answerText: String,
+  val answerSpokenText: String,
+  val supportingEvidence: List<AssistantSupportingEvidence> = emptyList(),
+  val modeUsed: AssistantModeHint = AssistantModeHint.AUTO,
+  val answeredAt: Long = System.currentTimeMillis(),
+  val answerSource: String? = null,
+  val actionIntent: AssistantActionIntent? = null,
+  val stt: AssistantQuerySttDiagnostics? = null,
+)
+
+@Serializable
+data class AssistantActionIntent(
+  val type: String = "none",
+  val title: String? = null,
+  val reason: String? = null,
+  val contentHint: String? = null,
+  val fileName: String? = null,
+  val filePath: String? = null,
+)
+
+data class AssistantInteractionSnapshot(
+  val phase: AssistantInteractionPhase = AssistantInteractionPhase.PASSIVE_SENSING,
+  val lastUpdatedAt: Long = System.currentTimeMillis(),
+  val mode: AssistantModeHint = AssistantModeHint.AUTO,
+  val lastError: String? = null,
+  val queryText: String? = null,
+  val answerText: String? = null,
+  val answerSpokenText: String? = null,
+  val answeredAt: Long? = null,
+)

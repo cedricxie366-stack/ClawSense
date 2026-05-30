@@ -13,5 +13,7 @@ interface ClawSenseApi {
 
   suspend fun uploadImage(session: DeviceSession, image: CapturedImageFrame)
 
+  suspend fun queryAssistant(session: DeviceSession, request: AssistantQueryRequest): AssistantQueryResponse
+
   suspend fun sendHeartbeat(session: DeviceSession, heartbeat: HeartbeatRequest): Int
 }

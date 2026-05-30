@@ -12,16 +12,22 @@ android {
     applicationId = "ai.openclaw.clawsense"
     minSdk = 29
     targetSdk = 34
-    versionCode = 1
-    versionName = "0.1.0"
+    versionCode = 2
+    versionName = "0.1.1-ui-textfix1"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     vectorDrawables.useSupportLibrary = true
   }
 
   buildTypes {
+    debug {
+      applicationIdSuffix = ".debug"
+      versionNameSuffix = "-debug"
+      manifestPlaceholders["appLabel"] = "ClawSense Dev"
+    }
     release {
       isMinifyEnabled = false
+      manifestPlaceholders["appLabel"] = "ClawSense"
       proguardFiles(
         getDefaultProguardFile("proguard-android-optimize.txt"),
         "proguard-rules.pro",

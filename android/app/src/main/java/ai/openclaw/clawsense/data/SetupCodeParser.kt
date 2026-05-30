@@ -1,6 +1,7 @@
 package ai.openclaw.clawsense.data
 
 import android.util.Base64
+import java.net.URI
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
@@ -34,12 +35,27 @@ object SetupCodeParser {
     if (host.isEmpty() || token.isEmpty()) {
       return null
     }
-    return PairingSetup(host = host, token = token)
+    return PairingSetup(
+      host = host,
+      token = token,
+      warning = resolveHostWarning(host),
+    )
   }
 
   private fun normalizeHost(host: String): String {
     val withProtocol = if (host.startsWith("http://") || host.startsWith("https://")) host else "http://$host"
     return withProtocol.trimEnd('/')
+  }
+
+  private fun resolveHostWarning(host: String): String? {
+    val hostname = runCatching { URI(host).host?.trim()?.lowercase() }.getOrNull()
+      ?: return null
+    return when (hostname) {
+      "lan" -> "二维码里的 Host 是 lan，手机无法解析。请在“手动兜底”里填写可访问的公网 IP/域名。"
+      "0.0.0.0", "::", "::1", "127.0.0.1", "localhost" ->
+        "二维码里的 Host 是本机回环/监听地址，外部手机无法访问。请改填服务器公网 IP/域名。"
+      else -> null
+    }
   }
 
   @Serializable

@@ -2,6 +2,8 @@ package ai.openclaw.clawsense
 
 import ai.openclaw.clawsense.data.DeviceSession
 import ai.openclaw.clawsense.data.DeviceSessionRepository
+import ai.openclaw.clawsense.data.AssistantInteractionSnapshot
+import ai.openclaw.clawsense.data.ServiceActivitySnapshot
 import ai.openclaw.clawsense.data.ServiceRuntimeStatus
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -26,19 +28,32 @@ class MainViewModel(
     repository.session,
     repository.serviceEnabled,
     repository.runtimeStatus,
-    formState,
-  ) { session, serviceEnabled, runtimeStatus, form ->
-    MainUiState(
+    repository.activitySnapshot,
+    repository.assistantSnapshot,
+  ) { session, serviceEnabled, runtimeStatus, activitySnapshot, assistantSnapshot ->
+    RuntimeComposite(
       session = session,
       serviceEnabled = serviceEnabled,
       runtimeStatus = runtimeStatus,
-      isBusy = form.isBusy,
-      statusMessage = form.statusMessage,
-      setupCode = form.setupCode,
-      manualHost = form.manualHost,
-      manualToken = form.manualToken,
-      deviceName = form.deviceName,
+      activitySnapshot = activitySnapshot,
+      assistantSnapshot = assistantSnapshot,
     )
+  }.let { runtimeState ->
+    combine(runtimeState, formState) { runtime, form ->
+      MainUiState(
+        session = runtime.session,
+        serviceEnabled = runtime.serviceEnabled,
+        runtimeStatus = runtime.runtimeStatus,
+        serviceActivity = runtime.activitySnapshot,
+        assistant = runtime.assistantSnapshot,
+        isBusy = form.isBusy,
+        statusMessage = form.statusMessage,
+        setupCode = form.setupCode,
+        manualHost = form.manualHost,
+        manualToken = form.manualToken,
+        deviceName = form.deviceName,
+      )
+    }
   }.stateIn(
     viewModelScope,
     SharingStarted.WhileSubscribed(5_000),
@@ -65,13 +80,13 @@ class MainViewModel(
     formState.update { it.copy(setupCode = value, statusMessage = "已读取二维码，请点击配对。") }
   }
 
-  fun pairFromSetupCode() {
+  fun pairFromSetupCode(preserveServiceEnabled: Boolean = false) {
     val snapshot = formState.value
     if (snapshot.setupCode.isBlank()) {
       formState.update { it.copy(statusMessage = "请先扫码，或粘贴引导码。") }
       return
     }
-    runPairing {
+    runPairing(preserveServiceEnabled = preserveServiceEnabled) {
       repository.pairWithSetupCode(
         setupCode = snapshot.setupCode,
         deviceName = snapshot.deviceName.ifBlank { "ClawSense Android" },
@@ -80,13 +95,13 @@ class MainViewModel(
     }
   }
 
-  fun pairManual() {
+  fun pairManual(preserveServiceEnabled: Boolean = false) {
     val snapshot = formState.value
     if (snapshot.manualHost.isBlank() || snapshot.manualToken.isBlank()) {
       formState.update { it.copy(statusMessage = "请填写 Host 和 Token。") }
       return
     }
-    runPairing {
+    runPairing(preserveServiceEnabled = preserveServiceEnabled) {
       repository.pairManual(
         host = snapshot.manualHost,
         token = snapshot.manualToken,
@@ -119,12 +134,17 @@ class MainViewModel(
     formState.update { it.copy(statusMessage = message) }
   }
 
-  private fun runPairing(block: suspend () -> DeviceSession) {
+  private fun runPairing(
+    preserveServiceEnabled: Boolean = false,
+    block: suspend () -> DeviceSession,
+  ) {
     viewModelScope.launch {
       formState.update { it.copy(isBusy = true, statusMessage = "正在和 ClawSense 服务端握手…") }
       runCatching { block() }
         .onSuccess { session ->
-          repository.setServiceEnabled(false)
+          if (!preserveServiceEnabled) {
+            repository.setServiceEnabled(false)
+          }
           formState.update {
             it.copy(
               isBusy = false,
@@ -150,6 +170,8 @@ data class MainUiState(
   val session: DeviceSession? = null,
   val serviceEnabled: Boolean = false,
   val runtimeStatus: ServiceRuntimeStatus = ServiceRuntimeStatus(),
+  val serviceActivity: ServiceActivitySnapshot = ServiceActivitySnapshot(),
+  val assistant: AssistantInteractionSnapshot = AssistantInteractionSnapshot(),
   val isBusy: Boolean = false,
   val statusMessage: String? = null,
   val setupCode: String = "",
@@ -165,4 +187,12 @@ private data class FormState(
   val manualHost: String = "",
   val manualToken: String = "",
   val deviceName: String = "ClawSense Android",
+)
+
+private data class RuntimeComposite(
+  val session: DeviceSession?,
+  val serviceEnabled: Boolean,
+  val runtimeStatus: ServiceRuntimeStatus,
+  val activitySnapshot: ServiceActivitySnapshot,
+  val assistantSnapshot: AssistantInteractionSnapshot,
 )

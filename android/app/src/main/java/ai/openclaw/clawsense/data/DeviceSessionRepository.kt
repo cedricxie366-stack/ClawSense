@@ -1,9 +1,13 @@
 package ai.openclaw.clawsense.data
 
 import android.os.Build
+import java.util.ArrayDeque
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 class DeviceSessionRepository(
   private val store: SecureSessionStore,
@@ -12,10 +16,17 @@ class DeviceSessionRepository(
   private val _session = MutableStateFlow(store.loadSession())
   private val _serviceEnabled = MutableStateFlow(store.loadServiceEnabled())
   private val _runtimeStatus = MutableStateFlow(store.loadRuntimeStatus())
+  private val _activitySnapshot = MutableStateFlow(ServiceActivitySnapshot())
+  private val _assistantSnapshot = MutableStateFlow(AssistantInteractionSnapshot())
+  private val uploadMutex = Mutex()
+  private val pendingUploads = ArrayDeque<PendingUpload>()
+  private var backpressureUntilMs: Long = 0L
 
   val session: StateFlow<DeviceSession?> = _session.asStateFlow()
   val serviceEnabled: StateFlow<Boolean> = _serviceEnabled.asStateFlow()
   val runtimeStatus: StateFlow<ServiceRuntimeStatus> = _runtimeStatus.asStateFlow()
+  val activitySnapshot: StateFlow<ServiceActivitySnapshot> = _activitySnapshot.asStateFlow()
+  val assistantSnapshot: StateFlow<AssistantInteractionSnapshot> = _assistantSnapshot.asStateFlow()
 
   suspend fun pairWithSetupCode(
     setupCode: String,
@@ -24,6 +35,9 @@ class DeviceSessionRepository(
   ): DeviceSession {
     val pairingSetup = SetupCodeParser.parse(setupCode)
       ?: throw IllegalArgumentException("二维码/引导码无法解析，请重新扫码。")
+    pairingSetup.warning?.let { warning ->
+      throw IllegalArgumentException(warning)
+    }
     return pairManual(
       host = pairingSetup.host,
       token = pairingSetup.token,
@@ -64,6 +78,10 @@ class DeviceSessionRepository(
     store.clearSession()
     store.saveServiceEnabled(false)
     updateRuntimeStatus(ServiceRuntimeStatus())
+    pendingUploads.clear()
+    backpressureUntilMs = 0L
+    _activitySnapshot.value = ServiceActivitySnapshot()
+    _assistantSnapshot.value = AssistantInteractionSnapshot()
     _session.value = null
     _serviceEnabled.value = false
   }
@@ -78,20 +96,281 @@ class DeviceSessionRepository(
     _runtimeStatus.value = status
   }
 
+  fun recordError(message: String, occurredAt: Long = System.currentTimeMillis()) {
+    _activitySnapshot.value = _activitySnapshot.value.copy(
+      lastError = message,
+      lastErrorAt = occurredAt,
+      pendingUploads = pendingUploads.size,
+    )
+  }
+
+  fun updateAssistantSnapshot(snapshot: AssistantInteractionSnapshot) {
+    _assistantSnapshot.value = snapshot
+  }
+
   suspend fun uploadAudio(clip: CapturedAudioClip) {
-    api.uploadAudio(requireSession(), clip)
+    submitUpload(PendingUpload.Audio(clip))
   }
 
   suspend fun uploadImage(image: CapturedImageFrame) {
-    api.uploadImage(requireSession(), image)
+    submitUpload(PendingUpload.Image(image))
+  }
+
+  suspend fun queryAssistant(
+    clip: CapturedAudioClip,
+    windowHint: AssistantRecentContextWindowHint = AssistantRecentContextWindowHint.LAST_60S,
+    modeHint: AssistantModeHint = AssistantModeHint.AUTO,
+  ): AssistantQueryResponse {
+    val session = requireSession()
+    return try {
+      api.queryAssistant(
+        session = session,
+        request = AssistantQueryRequest(
+          queryAudio = android.util.Base64.encodeToString(clip.bytes, android.util.Base64.NO_WRAP),
+          fileName = clip.fileName,
+          queryMime = clip.mime,
+          capturedAt = clip.capturedAt,
+          queryDurationMs = clip.durationMs,
+          recentContextWindowHint = windowHint,
+          modeHint = modeHint,
+        ),
+      )
+    } catch (error: Throwable) {
+      if (error is CancellationException) {
+        throw error
+      }
+      if (error is ClawSenseAuthException) {
+        invalidateSession("设备凭证已失效（401 unauthorized），请重新配对。")
+      }
+      throw error
+    }
   }
 
   suspend fun sendHeartbeat(heartbeat: HeartbeatRequest): Int {
-    return api.sendHeartbeat(requireSession(), heartbeat)
+    val session = requireSession()
+    return try {
+      val nextInterval = api.sendHeartbeat(session, heartbeat)
+      runCatching { retryPendingUploads(session) }
+        .onFailure { error ->
+          if (error is CancellationException) {
+            throw error
+          }
+          recordError("网络已恢复，但补传仍失败：${error.message ?: "未知错误"}")
+        }
+      nextInterval
+    } catch (error: Throwable) {
+      if (error is CancellationException) {
+        throw error
+      }
+      if (error is ClawSenseAuthException) {
+        invalidateSession("设备凭证已失效（401 unauthorized），请重新配对。")
+        throw error
+      }
+      recordError("心跳失败：${error.message ?: "未知错误"}")
+      throw error
+    }
+  }
+
+  private suspend fun submitUpload(upload: PendingUpload) {
+    val session = requireSession()
+    var failure: Throwable? = null
+
+    uploadMutex.withLock {
+      failure = runCatching {
+        flushPendingUploadsLocked(session)
+        performUpload(session, upload)
+        markUploadSuccess(upload)
+      }.exceptionOrNull()
+
+      val error = failure
+      if (error != null) {
+        if (error is CancellationException) {
+          throw error
+        }
+        if (error is ClawSenseAuthException) {
+          invalidateSessionLocked("设备凭证已失效（401 unauthorized），请重新配对。")
+          recordError("${upload.label}上传失败：设备凭证已失效，请重新配对。")
+        } else if (error is ClawSenseBackpressureException) {
+          applyBackpressureLocked(error)
+          enqueueLocked(upload)
+          val waitSec = error.retryAfterSec ?: DEFAULT_BACKPRESSURE_RETRY_SEC
+          val queueInfo = error.queueDepth?.let { "（服务端队列深度 $it）" } ?: ""
+          recordError("${upload.label}上传遇到拥堵，已加入补传队列${queueInfo}，预计 ${waitSec}s 后重试。")
+          failure = null
+        } else {
+          enqueueLocked(upload)
+          recordError("${upload.label}上传失败，已加入重试队列：${error.message ?: "未知错误"}")
+        }
+      }
+    }
+
+    failure?.let { throw it }
+  }
+
+  private suspend fun retryPendingUploads(session: DeviceSession) {
+    uploadMutex.withLock {
+      flushPendingUploadsLocked(session)
+    }
+  }
+
+  private suspend fun flushPendingUploadsLocked(session: DeviceSession) {
+    if (System.currentTimeMillis() < backpressureUntilMs) {
+      return
+    }
+    while (pendingUploads.isNotEmpty()) {
+      val pending = pendingUploads.first()
+      try {
+        performUpload(session, pending)
+      } catch (error: Throwable) {
+        if (error is CancellationException) {
+          throw error
+        }
+        if (error is ClawSenseBackpressureException) {
+          applyBackpressureLocked(error)
+          val waitSec = error.retryAfterSec ?: DEFAULT_BACKPRESSURE_RETRY_SEC
+          recordError("服务端仍在拥堵，暂停补传 ${waitSec}s 后再试。")
+          return
+        }
+        recordError("重试${pending.label}失败：${error.message ?: "未知错误"}")
+        throw error
+      }
+      pendingUploads.removeFirst()
+      markUploadSuccess(pending)
+    }
+  }
+
+  private suspend fun performUpload(session: DeviceSession, upload: PendingUpload) {
+    when (upload) {
+      is PendingUpload.Audio -> api.uploadAudio(session, upload.clip)
+      is PendingUpload.Image -> api.uploadImage(session, upload.image)
+    }
+  }
+
+  private fun enqueueLocked(upload: PendingUpload) {
+    if (pendingUploads.size >= MAX_PENDING_UPLOADS) {
+      pendingUploads.removeFirst()
+      recordError("待补传队列已满，已丢弃最旧的一条上传。")
+    }
+    pendingUploads.addLast(upload)
+    _activitySnapshot.value = _activitySnapshot.value.copy(pendingUploads = pendingUploads.size)
+  }
+
+  private fun markUploadSuccess(upload: PendingUpload, uploadedAt: Long = System.currentTimeMillis()) {
+    _activitySnapshot.value = when (upload) {
+      is PendingUpload.Audio -> _activitySnapshot.value.copy(
+        lastAudioUploadAt = uploadedAt,
+        pendingUploads = pendingUploads.size,
+      )
+      is PendingUpload.Image -> _activitySnapshot.value.copy(
+        lastImageUploadAt = uploadedAt,
+        pendingUploads = pendingUploads.size,
+      )
+    }
+  }
+
+  private fun invalidateSession(message: String, occurredAt: Long = System.currentTimeMillis()) {
+    uploadMutex.tryLock().let { locked ->
+      try {
+        if (locked) {
+          invalidateSessionLocked(message, occurredAt)
+        } else {
+          pendingUploads.clear()
+          backpressureUntilMs = 0L
+          _activitySnapshot.value = _activitySnapshot.value.copy(
+            pendingUploads = 0,
+            lastError = message,
+            lastErrorAt = occurredAt,
+          )
+          _assistantSnapshot.value = AssistantInteractionSnapshot(
+            phase = AssistantInteractionPhase.ERROR_RECOVERY,
+            lastUpdatedAt = occurredAt,
+            lastError = message,
+          )
+          store.saveServiceEnabled(false)
+          _serviceEnabled.value = false
+          store.saveRuntimeStatus(
+            ServiceRuntimeStatus(
+              phase = ServicePhase.ERROR,
+              mode = CaptureMode.NONE,
+              lastError = message,
+              updatedAt = occurredAt,
+            ),
+          )
+          _runtimeStatus.value = ServiceRuntimeStatus(
+            phase = ServicePhase.ERROR,
+            mode = CaptureMode.NONE,
+            lastError = message,
+            updatedAt = occurredAt,
+          )
+        }
+      } finally {
+        if (locked) {
+          uploadMutex.unlock()
+        }
+      }
+    }
+  }
+
+  private fun invalidateSessionLocked(message: String, occurredAt: Long = System.currentTimeMillis()) {
+    pendingUploads.clear()
+    backpressureUntilMs = 0L
+    _activitySnapshot.value = _activitySnapshot.value.copy(
+      pendingUploads = 0,
+      lastError = message,
+      lastErrorAt = occurredAt,
+    )
+    _assistantSnapshot.value = AssistantInteractionSnapshot(
+      phase = AssistantInteractionPhase.ERROR_RECOVERY,
+      lastUpdatedAt = occurredAt,
+      lastError = message,
+    )
+    store.saveServiceEnabled(false)
+    _serviceEnabled.value = false
+    val status = ServiceRuntimeStatus(
+      phase = ServicePhase.ERROR,
+      mode = CaptureMode.NONE,
+      lastError = message,
+      updatedAt = occurredAt,
+    )
+    store.saveRuntimeStatus(status)
+    _runtimeStatus.value = status
   }
 
   private fun buildFingerprint(): String {
     return listOf(Build.BRAND, Build.MODEL, Build.DEVICE, Build.VERSION.SDK_INT.toString())
       .joinToString(":")
   }
+
+  private fun applyBackpressureLocked(error: ClawSenseBackpressureException) {
+    val retryAfterSec = (error.retryAfterSec ?: DEFAULT_BACKPRESSURE_RETRY_SEC).coerceIn(1, 60)
+    val candidate = System.currentTimeMillis() + retryAfterSec * 1_000L
+    if (candidate > backpressureUntilMs) {
+      backpressureUntilMs = candidate
+    }
+  }
+
+  private sealed interface PendingUpload {
+    val label: String
+
+    data class Audio(val clip: CapturedAudioClip) : PendingUpload {
+      override val label: String = "音频"
+    }
+
+    data class Image(val image: CapturedImageFrame) : PendingUpload {
+      override val label: String = "图片"
+    }
+  }
+
+  private companion object {
+    const val MAX_PENDING_UPLOADS = 6
+    const val DEFAULT_BACKPRESSURE_RETRY_SEC = 3
+  }
 }
+
+data class ServiceActivitySnapshot(
+  val lastAudioUploadAt: Long? = null,
+  val lastImageUploadAt: Long? = null,
+  val lastError: String? = null,
+  val lastErrorAt: Long? = null,
+  val pendingUploads: Int = 0,
+)

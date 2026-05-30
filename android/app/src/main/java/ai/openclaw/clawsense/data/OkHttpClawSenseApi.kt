@@ -5,6 +5,7 @@ import android.content.Context
 import android.os.Build
 import android.util.Base64
 import java.io.IOException
+import java.net.URI
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -48,7 +49,10 @@ class OkHttpClawSenseApi(
       host = normalizedHost,
       deviceId = response.deviceId,
       deviceSecret = response.deviceSecret,
-      uploadBaseUrl = response.uploadBaseUrl.trimEnd('/'),
+      uploadBaseUrl = resolveUploadBaseUrl(
+        pairingHost = normalizedHost,
+        responseUploadBaseUrl = response.uploadBaseUrl,
+      ),
       heartbeatIntervalSec = response.heartbeatIntervalSec,
       memoryNamespace = response.memoryNamespace,
       pairedAt = response.pairedAt,
@@ -66,6 +70,7 @@ class OkHttpClawSenseApi(
         note = clip.note,
       ),
       bearer = session.deviceSecret,
+      deviceId = session.deviceId,
     )
   }
 
@@ -80,6 +85,19 @@ class OkHttpClawSenseApi(
         note = image.note,
       ),
       bearer = session.deviceSecret,
+      deviceId = session.deviceId,
+    )
+  }
+
+  override suspend fun queryAssistant(
+    session: DeviceSession,
+    request: AssistantQueryRequest,
+  ): AssistantQueryResponse {
+    return request<AssistantQueryRequest, AssistantQueryResponse>(
+      url = "${session.uploadBaseUrl}/assistant/query",
+      body = request,
+      bearer = session.deviceSecret,
+      deviceId = session.deviceId,
     )
   }
 
@@ -88,6 +106,7 @@ class OkHttpClawSenseApi(
       url = "${session.uploadBaseUrl}/heartbeat",
       body = heartbeat,
       bearer = session.deviceSecret,
+      deviceId = session.deviceId,
     )
     return response.heartbeatIntervalSec
   }
@@ -96,6 +115,7 @@ class OkHttpClawSenseApi(
     url: String,
     body: B,
     bearer: String? = null,
+    deviceId: String? = null,
   ): T = withContext(Dispatchers.IO) {
     val requestBody = json.encodeToString(body).toRequestBody(JSON_MEDIA_TYPE)
     val request = Request.Builder()
@@ -107,13 +127,43 @@ class OkHttpClawSenseApi(
         if (!bearer.isNullOrBlank()) {
           header("Authorization", "Bearer $bearer")
         }
+        if (!deviceId.isNullOrBlank()) {
+          header("X-ClawSense-Device-Id", deviceId)
+        }
       }
       .build()
 
     client.newCall(request).execute().use { response ->
       val raw = response.body?.string().orEmpty()
       if (!response.isSuccessful) {
-        throw IOException("HTTP ${response.code}: ${raw.ifBlank { response.message }}")
+        val message = "HTTP ${response.code}: ${raw.ifBlank { response.message }}"
+        if (response.code == 401) {
+          val apiError = decodeApiError(raw)
+          val reason = apiError?.reason?.takeIf { it.isNotBlank() } ?: "unauthorized"
+          val hint = apiError?.hint?.takeIf { it.isNotBlank() }
+          val normalizedMessage = buildString {
+            append(message)
+            append(" (reason=")
+            append(reason)
+            append(")")
+            if (!hint.isNullOrBlank()) {
+              append(" ")
+              append(hint)
+            }
+          }
+          throw ClawSenseAuthException(normalizedMessage)
+        }
+        if (response.code == 503) {
+          val apiError = decodeApiError(raw)
+          if (apiError?.error == "ingest_queue_full") {
+            throw ClawSenseBackpressureException(
+              message = message,
+              retryAfterSec = apiError.retryAfterSec ?: parseRetryAfterSeconds(response.header("Retry-After")),
+              queueDepth = apiError.queueDepth,
+            )
+          }
+        }
+        throw IOException(message)
       }
       if (T::class == UnitResponse::class && raw.isBlank()) {
         @Suppress("UNCHECKED_CAST")
@@ -137,6 +187,32 @@ class OkHttpClawSenseApi(
     return withProtocol.trimEnd('/')
   }
 
+  private fun resolveUploadBaseUrl(pairingHost: String, responseUploadBaseUrl: String): String {
+    val normalizedPairingUploadBase = "${pairingHost.trimEnd('/')}/api/clawsense"
+    val normalizedResponse = responseUploadBaseUrl.trim().trimEnd('/')
+    if (normalizedResponse.isBlank()) {
+      return normalizedPairingUploadBase
+    }
+    val pairingHostName = normalizedUrlHost(pairingHost)
+    val responseHostName = normalizedUrlHost(normalizedResponse)
+    if (isLoopbackHost(pairingHostName) || isNonRoutableHost(responseHostName)) {
+      return normalizedPairingUploadBase
+    }
+    return normalizedResponse
+  }
+
+  private fun normalizedUrlHost(url: String): String? {
+    return runCatching { URI(url).host?.trim()?.lowercase() }.getOrNull()
+  }
+
+  private fun isLoopbackHost(host: String?): Boolean {
+    return host == "127.0.0.1" || host == "::1" || host == "localhost"
+  }
+
+  private fun isNonRoutableHost(host: String?): Boolean {
+    return host == null || host == "lan" || host == "0.0.0.0" || host == "::" || host == "*"
+  }
+
   private fun buildUserAgent(): String {
     return "ClawSenseAndroid/${BuildConfig.VERSION_NAME} (${Build.MANUFACTURER} ${Build.MODEL}; Android ${Build.VERSION.RELEASE}; ${context.packageName})"
   }
@@ -150,7 +226,40 @@ class OkHttpClawSenseApi(
     val heartbeatIntervalSec: Int = 60,
   )
 
+  @kotlinx.serialization.Serializable
+  private data class ErrorResponse(
+    val ok: Boolean? = null,
+    val error: String? = null,
+    val reason: String? = null,
+    val hint: String? = null,
+    val rePairRequired: Boolean? = null,
+    val queueDepth: Int? = null,
+    val retryAfterSec: Int? = null,
+  )
+
+  private fun decodeApiError(raw: String): ErrorResponse? {
+    if (raw.isBlank()) {
+      return null
+    }
+    return runCatching { json.decodeFromString<ErrorResponse>(raw) }.getOrNull()
+  }
+
+  private fun parseRetryAfterSeconds(value: String?): Int? {
+    val parsed = value?.trim()?.toIntOrNull() ?: return null
+    return parsed.coerceIn(1, 60)
+  }
+
   companion object {
     private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
   }
 }
+
+class ClawSenseAuthException(
+  message: String,
+) : IOException(message)
+
+class ClawSenseBackpressureException(
+  message: String,
+  val retryAfterSec: Int?,
+  val queueDepth: Int?,
+) : IOException(message)

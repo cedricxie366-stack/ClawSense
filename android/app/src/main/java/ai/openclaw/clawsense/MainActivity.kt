@@ -4,6 +4,9 @@ package ai.openclaw.clawsense
 
 import ai.openclaw.clawsense.data.CaptureMode
 import ai.openclaw.clawsense.data.DeviceSession
+import ai.openclaw.clawsense.data.AssistantInteractionPhase
+import ai.openclaw.clawsense.data.AssistantModeHint
+import ai.openclaw.clawsense.data.ServiceActivitySnapshot
 import ai.openclaw.clawsense.data.ServicePhase
 import ai.openclaw.clawsense.data.ServiceRuntimeStatus
 import ai.openclaw.clawsense.service.SensorServiceController
@@ -18,6 +21,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,6 +41,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -64,12 +70,13 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -81,8 +88,13 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.foundation.text.selection.TextSelectionColors
+import androidx.compose.foundation.text.selection.LocalTextSelectionColors
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -118,6 +130,11 @@ private object ClawSensePalette {
   val Warning = Color(0xFFFFC857)
   val Danger = Color(0xFFFF6B6B)
   val Stroke = Color(0x332A8BB8)
+  val FieldText = Color(0xFFF7FBFF)
+  val FieldBorder = Color(0x889FB5CC)
+  val FieldBorderFocused = Color(0xFF81D4FA)
+  val FieldBackground = Color(0x22162B40)
+  val FieldBackgroundFocused = Color(0x2D1C3550)
 }
 
 data class PermissionSnapshot(
@@ -148,7 +165,6 @@ private fun ClawSenseScreen(viewModel: MainViewModel) {
   ) {
     val refreshed = permissionSnapshot(context)
     if (refreshed.notifications && (refreshed.camera || refreshed.microphone)) {
-      SensorServiceController.start(context)
       viewModel.setServiceEnabled(true)
       viewModel.setStatus(buildStartMessage(refreshed))
     } else {
@@ -172,6 +188,19 @@ private fun ClawSenseScreen(viewModel: MainViewModel) {
     }
   }
 
+  LaunchedEffect(uiState.runtimeStatus.phase) {
+    if (
+      uiState.session != null &&
+      uiState.serviceEnabled &&
+      uiState.runtimeStatus.phase == ServicePhase.STOPPED &&
+      canStartSensing(context)
+    ) {
+      // The persisted runtime status can be stale after package replacement or a process kill.
+      // Starting the foreground service is idempotent, so prefer restoring sensing automatically.
+      SensorServiceController.start(context)
+    }
+  }
+
   if (scannerOpen) {
     QrScannerDialog(
       onDismiss = { scannerOpen = false },
@@ -182,89 +211,326 @@ private fun ClawSenseScreen(viewModel: MainViewModel) {
     )
   }
 
-  Scaffold(
-    topBar = {
-      TopAppBar(
-        title = { Text("ClawSense", color = ClawSensePalette.TextPrimary) },
-        modifier = Modifier.statusBarsPadding(),
-      )
-    },
-  ) { padding ->
-    Column(
-      modifier = Modifier
-        .fillMaxSize()
-        .background(
-          Brush.verticalGradient(
-            listOf(
-              ClawSensePalette.BackgroundTop,
-              ClawSensePalette.BackgroundMid,
-              ClawSensePalette.BackgroundBottom,
-            ),
+  Box(
+    modifier = Modifier
+      .fillMaxSize()
+      .background(
+        Brush.verticalGradient(
+          listOf(
+            ClawSensePalette.BackgroundTop,
+            ClawSensePalette.BackgroundMid,
+            ClawSensePalette.BackgroundBottom,
+          ),
+        ),
+      ),
+  ) {
+    Scaffold(
+      containerColor = Color.Transparent,
+      topBar = {
+        TopAppBar(
+          title = { Text("ClawSense", color = ClawSensePalette.TextPrimary) },
+          modifier = Modifier.statusBarsPadding(),
+          colors = TopAppBarDefaults.topAppBarColors(
+            containerColor = Color.Transparent,
+            scrolledContainerColor = Color.Transparent,
+            navigationIconContentColor = ClawSensePalette.TextPrimary,
+            titleContentColor = ClawSensePalette.TextPrimary,
+            actionIconContentColor = ClawSensePalette.TextPrimary,
           ),
         )
-        .verticalScroll(rememberScrollState())
-        .padding(padding)
-        .padding(horizontal = 16.dp, vertical = 12.dp),
-      verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-      HeroCard(uiState.session != null, uiState.runtimeStatus, permissions)
-      ServiceRuntimeCard(
-        uiState = uiState,
-        permissions = permissions,
-        onStart = {
-          if (canStartSensing(context)) {
-            SensorServiceController.start(context)
-            viewModel.setServiceEnabled(true)
-            viewModel.setStatus(buildStartMessage(permissions))
-          } else {
-            sensorPermissionsLauncher.launch(requiredSensorPermissions().toTypedArray())
-          }
-        },
-        onStop = {
-          SensorServiceController.stop(context)
-          viewModel.setServiceEnabled(false)
-          viewModel.updateRuntimeStatus(
-            ServiceRuntimeStatus(
-              phase = ServicePhase.STOPPED,
-              mode = CaptureMode.NONE,
-            ),
-          )
-          viewModel.setStatus("感知服务已停止，音频、拍照和心跳都已暂停。")
-        },
-      )
-      PermissionCard(permissions)
-      EventCard(uiState.statusMessage, uiState.isBusy)
-
-      if (session == null) {
-        PairingCard(
+      },
+    ) { padding ->
+      Column(
+        modifier = Modifier
+          .fillMaxSize()
+          .verticalScroll(rememberScrollState())
+          .padding(padding)
+          .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+      ) {
+        HeroCard(uiState.session != null, uiState.runtimeStatus, permissions)
+        ServiceRuntimeCard(
           uiState = uiState,
-          onSetupCodeChanged = viewModel::onSetupCodeChanged,
-          onManualHostChanged = viewModel::onManualHostChanged,
-          onManualTokenChanged = viewModel::onManualTokenChanged,
-          onDeviceNameChanged = viewModel::onDeviceNameChanged,
-          onOpenScanner = {
-            if (permissions.camera) {
-              scannerOpen = true
+          permissions = permissions,
+          onStart = {
+            if (canStartSensing(context)) {
+              viewModel.setServiceEnabled(true)
+              viewModel.setStatus(buildStartMessage(permissions))
             } else {
-              scannerPermissionLauncher.launch(Manifest.permission.CAMERA)
+              sensorPermissionsLauncher.launch(requiredSensorPermissions().toTypedArray())
             }
           },
-          onPairFromCode = viewModel::pairFromSetupCode,
-          onPairManual = viewModel::pairManual,
-        )
-      } else {
-        SessionSummaryCard(
-          session = session,
-          serviceEnabled = uiState.serviceEnabled,
-          runtimeStatus = uiState.runtimeStatus,
-          onClearPairing = {
+          onStop = {
             SensorServiceController.stop(context)
-            viewModel.clearSession()
+            viewModel.setServiceEnabled(false)
+            viewModel.updateRuntimeStatus(
+              ServiceRuntimeStatus(
+                phase = ServicePhase.STOPPED,
+                mode = CaptureMode.NONE,
+              ),
+            )
+            viewModel.setStatus("感知服务已停止，音频、拍照和心跳都已暂停。")
           },
         )
+        AssistantCard(
+          uiState = uiState,
+          permissions = permissions,
+          onTrigger = { modeHint ->
+            if (uiState.runtimeStatus.phase != ServicePhase.RUNNING) {
+              viewModel.setStatus("请先启动感知服务，再问实时助手。")
+            } else if (!permissions.microphone) {
+              viewModel.setStatus("实时助手需要麦克风权限。")
+            } else {
+              SensorServiceController.triggerAssistantQuery(context, modeHint)
+              viewModel.setStatus(
+                when (modeHint) {
+                  AssistantModeHint.MEETING -> "会议模式已开始听问题了，请直接问讨论重点、任务或刚才谁说了什么。"
+                  AssistantModeHint.DESK -> "工位模式已开始听问题了，请直接问谁来过、说了什么。"
+                  else -> "实时助手开始听问题了，请用一句短话直接提问。"
+                },
+              )
+            }
+          },
+          onStopSpeaking = {
+            SensorServiceController.stopAssistantSpeaking(context)
+            viewModel.setStatus("已请求停止当前朗读。")
+          },
+        )
+        PermissionCard(permissions)
+        EventCard(uiState.statusMessage, uiState.isBusy)
+
+        if (session == null) {
+          PairingCard(
+            uiState = uiState,
+            onSetupCodeChanged = viewModel::onSetupCodeChanged,
+            onManualHostChanged = viewModel::onManualHostChanged,
+            onManualTokenChanged = viewModel::onManualTokenChanged,
+            onDeviceNameChanged = viewModel::onDeviceNameChanged,
+            onOpenScanner = {
+              if (permissions.camera) {
+                scannerOpen = true
+              } else {
+                scannerPermissionLauncher.launch(Manifest.permission.CAMERA)
+              }
+            },
+            onPairFromCode = { viewModel.pairFromSetupCode() },
+            onPairManual = { viewModel.pairManual() },
+          )
+        } else {
+          SessionSummaryCard(
+            session = session,
+            serviceEnabled = uiState.serviceEnabled,
+            runtimeStatus = uiState.runtimeStatus,
+            onClearPairing = {
+              SensorServiceController.stop(context)
+              viewModel.clearSession()
+            },
+          )
+          RefreshPairingCard(
+            session = session,
+            uiState = uiState,
+            onSetupCodeChanged = viewModel::onSetupCodeChanged,
+            onManualHostChanged = viewModel::onManualHostChanged,
+            onManualTokenChanged = viewModel::onManualTokenChanged,
+            onOpenScanner = {
+              if (permissions.camera) {
+                scannerOpen = true
+              } else {
+                scannerPermissionLauncher.launch(Manifest.permission.CAMERA)
+              }
+            },
+            onPairFromCode = { viewModel.pairFromSetupCode(preserveServiceEnabled = true) },
+            onPairManual = { viewModel.pairManual(preserveServiceEnabled = true) },
+          )
+        }
       }
     }
   }
+}
+
+@Composable
+private fun AssistantCard(
+  uiState: MainUiState,
+  permissions: PermissionSnapshot,
+  onTrigger: (AssistantModeHint) -> Unit,
+  onStopSpeaking: () -> Unit,
+) {
+  val snapshot = uiState.assistant
+  var selectedMode by rememberSaveable { mutableStateOf(AssistantModeHint.AUTO) }
+  val canTrigger =
+    uiState.session != null &&
+      uiState.runtimeStatus.phase == ServicePhase.RUNNING &&
+      permissions.microphone &&
+      snapshot.phase != AssistantInteractionPhase.RECORDING_QUERY &&
+      snapshot.phase != AssistantInteractionPhase.WAITING_ANSWER &&
+      snapshot.phase != AssistantInteractionPhase.SPEAKING_ANSWER
+  val phaseLabel = when (snapshot.phase) {
+    AssistantInteractionPhase.PASSIVE_SENSING -> "待机中"
+    AssistantInteractionPhase.WAKEWORD_ARMED -> "就绪中"
+    AssistantInteractionPhase.RECORDING_QUERY -> "正在听你说"
+    AssistantInteractionPhase.WAITING_ANSWER -> "正在思考"
+    AssistantInteractionPhase.SPEAKING_ANSWER -> "正在回答"
+    AssistantInteractionPhase.ERROR_RECOVERY -> "刚刚出错"
+  }
+  val phaseDetail = when (snapshot.phase) {
+    AssistantInteractionPhase.PASSIVE_SENSING -> "服务未进入语音助手就绪态。"
+    AssistantInteractionPhase.WAKEWORD_ARMED -> "现在可以手动触发一轮语音提问。"
+    AssistantInteractionPhase.RECORDING_QUERY -> "请直接对着手机说出一句短问题，比如“刚才他们说了什么”。"
+    AssistantInteractionPhase.WAITING_ANSWER -> "问题已经录到，主机正在结合最近证据生成答案。"
+    AssistantInteractionPhase.SPEAKING_ANSWER -> "手机正在用本地 TTS 朗读回答，同时保留文本。"
+    AssistantInteractionPhase.ERROR_RECOVERY -> snapshot.lastError ?: "上一轮问答出了点问题，但不影响继续重试。"
+  }
+
+  Card(
+    colors = CardDefaults.cardColors(containerColor = ClawSensePalette.CardMuted),
+    shape = RoundedCornerShape(26.dp),
+  ) {
+    Column(
+      modifier = Modifier.padding(20.dp),
+      verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+          Text("实时助手", style = MaterialTheme.typography.titleLarge, color = ClawSensePalette.TextPrimary)
+          Text(
+            phaseDetail,
+            style = MaterialTheme.typography.bodyMedium,
+            color = ClawSensePalette.TextSecondary,
+          )
+        }
+        StatusPill(
+          label = phaseLabel,
+          color = when (snapshot.phase) {
+            AssistantInteractionPhase.SPEAKING_ANSWER -> ClawSensePalette.AccentStrong
+            AssistantInteractionPhase.ERROR_RECOVERY -> ClawSensePalette.Warning
+            AssistantInteractionPhase.RECORDING_QUERY,
+            AssistantInteractionPhase.WAITING_ANSWER -> ClawSensePalette.Accent
+            else -> ClawSensePalette.TextSecondary
+          },
+        )
+      }
+
+      Text(
+        text = "首版先走“手动触发单轮提问”，主机返回文本，手机本地 TTS 朗读。后面再把常开唤醒词接进来。",
+        style = MaterialTheme.typography.bodySmall,
+        color = ClawSensePalette.TextSecondary,
+      )
+
+      FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+      ) {
+        AssistantModeChip(
+          label = "自动",
+          selected = selectedMode == AssistantModeHint.AUTO,
+          onClick = { selectedMode = AssistantModeHint.AUTO },
+        )
+        AssistantModeChip(
+          label = "会议",
+          selected = selectedMode == AssistantModeHint.MEETING,
+          onClick = { selectedMode = AssistantModeHint.MEETING },
+        )
+        AssistantModeChip(
+          label = "工位",
+          selected = selectedMode == AssistantModeHint.DESK,
+          onClick = { selectedMode = AssistantModeHint.DESK },
+        )
+      }
+
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+      ) {
+        Button(
+          onClick = { onTrigger(selectedMode) },
+          enabled = canTrigger,
+          modifier = Modifier.weight(1f),
+          colors = ButtonDefaults.buttonColors(containerColor = ClawSensePalette.Accent),
+          contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+        ) {
+          Icon(Icons.Outlined.GraphicEq, contentDescription = null)
+          Spacer(Modifier.width(8.dp))
+          Text("问实时助手")
+        }
+        if (snapshot.phase == AssistantInteractionPhase.SPEAKING_ANSWER) {
+          FilledTonalButton(
+            onClick = onStopSpeaking,
+            modifier = Modifier.weight(1f),
+            colors = ButtonDefaults.filledTonalButtonColors(
+              containerColor = ClawSensePalette.CardStrong,
+              contentColor = ClawSensePalette.TextPrimary,
+            ),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+          ) {
+            Icon(Icons.Outlined.StopCircle, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text("停止朗读")
+          }
+        }
+      }
+
+      if (!snapshot.queryText.isNullOrBlank() || !snapshot.answerText.isNullOrBlank() || !snapshot.lastError.isNullOrBlank()) {
+        Surface(
+          color = Color(0x66172233),
+          shape = RoundedCornerShape(18.dp),
+        ) {
+          Column(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+          ) {
+            if (!snapshot.queryText.isNullOrBlank()) {
+              Text("最近显式提问", style = MaterialTheme.typography.labelLarge, color = ClawSensePalette.Accent)
+              Text(snapshot.queryText, style = MaterialTheme.typography.bodyMedium, color = ClawSensePalette.TextPrimary)
+            }
+            if (!snapshot.answerText.isNullOrBlank()) {
+              Text("最近回答", style = MaterialTheme.typography.labelLarge, color = ClawSensePalette.AccentStrong)
+              Text(snapshot.answerText, style = MaterialTheme.typography.bodyMedium, color = ClawSensePalette.TextPrimary)
+            }
+            if (!snapshot.lastError.isNullOrBlank()) {
+              Text("最近失败", style = MaterialTheme.typography.labelLarge, color = ClawSensePalette.Warning)
+              Text(snapshot.lastError, style = MaterialTheme.typography.bodySmall, color = ClawSensePalette.Warning)
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun AssistantModeChip(
+  label: String,
+  selected: Boolean,
+  onClick: () -> Unit,
+) {
+  AssistChip(
+    onClick = onClick,
+    label = {
+      Text(
+        label,
+        color = if (selected) ClawSensePalette.TextPrimary else ClawSensePalette.TextSecondary,
+      )
+    },
+    colors = androidx.compose.material3.AssistChipDefaults.assistChipColors(
+      containerColor = if (selected) {
+        ClawSensePalette.Accent.copy(alpha = 0.22f)
+      } else {
+        Color(0x66172233)
+      },
+      labelColor = if (selected) ClawSensePalette.TextPrimary else ClawSensePalette.TextSecondary,
+      leadingIconContentColor = ClawSensePalette.Accent,
+    ),
+    border = androidx.compose.foundation.BorderStroke(
+      width = 1.dp,
+      color = if (selected) ClawSensePalette.Accent else ClawSensePalette.Stroke,
+    ),
+  )
 }
 
 @Composable
@@ -342,6 +608,9 @@ private fun ServiceRuntimeCard(
 ) {
   val visual = runtimeVisual(uiState.runtimeStatus, uiState.session != null)
   val updatedAtText = formatTimestamp(uiState.runtimeStatus.updatedAt)
+  val recentAudioText = formatTimestampOrPlaceholder(uiState.serviceActivity.lastAudioUploadAt)
+  val recentImageText = formatTimestampOrPlaceholder(uiState.serviceActivity.lastImageUploadAt)
+  val recentErrorText = formatRecentError(uiState.serviceActivity)
 
   Card(
     colors = CardDefaults.cardColors(containerColor = ClawSensePalette.Card),
@@ -429,6 +698,47 @@ private fun ServiceRuntimeCard(
         style = MaterialTheme.typography.bodyMedium,
         color = ClawSensePalette.TextSecondary,
       )
+
+      Surface(
+        color = Color(0x66172233),
+        shape = RoundedCornerShape(22.dp),
+      ) {
+        Column(
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+          verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+          Text(
+            text = "最近活动",
+            style = MaterialTheme.typography.titleMedium,
+            color = ClawSensePalette.TextPrimary,
+          )
+          ActivityRow(
+            icon = Icons.Outlined.GraphicEq,
+            label = "最近音频上传",
+            value = recentAudioText,
+          )
+          ActivityRow(
+            icon = Icons.Outlined.PhotoCamera,
+            label = "最近图片上传",
+            value = recentImageText,
+          )
+          ActivityRow(
+            icon = Icons.Outlined.WarningAmber,
+            label = "最近错误",
+            value = recentErrorText,
+            emphasize = uiState.serviceActivity.lastError != null,
+          )
+          if (uiState.serviceActivity.pendingUploads > 0) {
+            Text(
+              text = "待补传 ${uiState.serviceActivity.pendingUploads} 条",
+              style = MaterialTheme.typography.labelLarge,
+              color = ClawSensePalette.Warning,
+            )
+          }
+        }
+      }
 
       Row(
         modifier = Modifier.fillMaxWidth(),
@@ -553,20 +863,29 @@ private fun PairingCard(
         style = MaterialTheme.typography.bodyMedium,
         color = ClawSensePalette.TextSecondary,
       )
+      Surface(
+        color = ClawSensePalette.AccentStrong.copy(alpha = 0.18f),
+        shape = RoundedCornerShape(12.dp),
+      ) {
+        Text(
+          "构建版本 ${BuildConfig.VERSION_NAME} · pairing text fix",
+          modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+          style = MaterialTheme.typography.labelMedium,
+          color = ClawSensePalette.TextPrimary,
+        )
+      }
 
-      OutlinedTextField(
+      PairingInputField(
+        label = "设备名称",
         value = uiState.deviceName,
         onValueChange = onDeviceNameChanged,
-        modifier = Modifier.fillMaxWidth(),
-        label = { Text("设备名称") },
         singleLine = true,
       )
-      OutlinedTextField(
+      PairingInputField(
+        label = "二维码内容 / 引导码",
         value = uiState.setupCode,
         onValueChange = onSetupCodeChanged,
-        modifier = Modifier.fillMaxWidth(),
-        label = { Text("二维码内容 / 引导码") },
-        placeholder = { Text("扫码后这里会自动填入") },
+        placeholder = "扫码后这里会自动填入",
         minLines = 3,
       )
 
@@ -587,20 +906,18 @@ private fun PairingCard(
       }
 
       Text("手动兜底", style = MaterialTheme.typography.titleMedium, color = ClawSensePalette.TextPrimary)
-      OutlinedTextField(
+      PairingInputField(
+        label = "Host",
         value = uiState.manualHost,
         onValueChange = onManualHostChanged,
-        modifier = Modifier.fillMaxWidth(),
-        label = { Text("Host") },
-        placeholder = { Text("http://你的服务器IP:18789") },
+        placeholder = "http://你的服务器IP:18789",
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
         singleLine = true,
       )
-      OutlinedTextField(
+      PairingInputField(
+        label = "Setup Token",
         value = uiState.manualToken,
         onValueChange = onManualTokenChanged,
-        modifier = Modifier.fillMaxWidth(),
-        label = { Text("Setup Token") },
         singleLine = true,
       )
       FilledTonalButton(onClick = onPairManual, modifier = Modifier.fillMaxWidth()) {
@@ -611,6 +928,87 @@ private fun PairingCard(
     }
   }
 }
+
+@Composable
+private fun PairingInputField(
+  label: String,
+  value: String,
+  onValueChange: (String) -> Unit,
+  placeholder: String? = null,
+  minLines: Int = 1,
+  singleLine: Boolean = false,
+  keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+) {
+  val interactionSource = MutableInteractionSource()
+  val shape = RoundedCornerShape(18.dp)
+  var isFocused by rememberSaveable { mutableStateOf(false) }
+  val selectionColors = TextSelectionColors(
+    handleColor = ClawSensePalette.AccentStrong,
+    backgroundColor = ClawSensePalette.AccentStrong.copy(alpha = 0.35f),
+  )
+
+  Column(
+    verticalArrangement = Arrangement.spacedBy(8.dp),
+  ) {
+    Text(
+      label,
+      style = MaterialTheme.typography.labelLarge,
+      color = ClawSensePalette.TextSecondary,
+    )
+    CompositionLocalProvider(LocalTextSelectionColors provides selectionColors) {
+      BasicTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = Modifier
+          .fillMaxWidth()
+          .onFocusChanged { focusState -> isFocused = focusState.isFocused },
+        textStyle = pairingFieldTextStyle().copy(color = ClawSensePalette.FieldText),
+        cursorBrush = SolidColor(ClawSensePalette.AccentStrong),
+        singleLine = singleLine,
+        minLines = minLines,
+        keyboardOptions = keyboardOptions,
+        interactionSource = interactionSource,
+        decorationBox = { innerTextField ->
+          Box(
+            modifier = Modifier
+              .fillMaxWidth()
+              .background(
+                color = if (isFocused) {
+                  ClawSensePalette.FieldBackgroundFocused
+                } else {
+                  ClawSensePalette.FieldBackground
+                },
+                shape = shape,
+              )
+              .border(
+                width = 1.dp,
+                color = if (isFocused) {
+                  ClawSensePalette.FieldBorderFocused
+                } else {
+                  ClawSensePalette.FieldBorder
+                },
+                shape = shape,
+              )
+              .padding(horizontal = 16.dp, vertical = 12.dp),
+          ) {
+            if (value.isBlank() && !placeholder.isNullOrBlank()) {
+              Text(
+                text = placeholder,
+                style = pairingFieldTextStyle(),
+                color = ClawSensePalette.TextSecondary.copy(alpha = 0.8f),
+              )
+            }
+            innerTextField()
+          }
+        },
+      )
+    }
+  }
+}
+
+@Composable
+private fun pairingFieldTextStyle(): TextStyle =
+  MaterialTheme.typography.bodyLarge.copy(color = ClawSensePalette.FieldText)
 
 @Composable
 private fun SessionSummaryCard(
@@ -648,6 +1046,92 @@ private fun SessionSummaryCard(
         Icon(Icons.Outlined.WarningAmber, contentDescription = null)
         Spacer(Modifier.width(8.dp))
         Text("清除配对")
+      }
+    }
+  }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun RefreshPairingCard(
+  session: DeviceSession,
+  uiState: MainUiState,
+  onSetupCodeChanged: (String) -> Unit,
+  onManualHostChanged: (String) -> Unit,
+  onManualTokenChanged: (String) -> Unit,
+  onOpenScanner: () -> Unit,
+  onPairFromCode: () -> Unit,
+  onPairManual: () -> Unit,
+) {
+  Card(
+    colors = CardDefaults.cardColors(containerColor = ClawSensePalette.Card),
+    shape = RoundedCornerShape(28.dp),
+  ) {
+    Column(
+      modifier = Modifier.padding(20.dp),
+      verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+      Text("刷新主机配对", style = MaterialTheme.typography.titleLarge, color = ClawSensePalette.TextPrimary)
+      Text(
+        "当 Mac / 云端地址变化、二维码里的 Host 失效或服务端重装时，在这里重新填入引导码或 Host + Token。这个操作会更新安全会话，但不会清空待补传队列。",
+        style = MaterialTheme.typography.bodyMedium,
+        color = ClawSensePalette.TextSecondary,
+      )
+      Surface(
+        color = ClawSensePalette.AccentStrong.copy(alpha = 0.16f),
+        shape = RoundedCornerShape(12.dp),
+      ) {
+        Text(
+          "当前 Host：${session.host}",
+          modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+          style = MaterialTheme.typography.labelMedium,
+          color = ClawSensePalette.TextPrimary,
+        )
+      }
+
+      PairingInputField(
+        label = "新的二维码内容 / 引导码",
+        value = uiState.setupCode,
+        onValueChange = onSetupCodeChanged,
+        placeholder = "粘贴新的 setup code，或点击扫码",
+        minLines = 3,
+      )
+
+      FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+      ) {
+        Button(onClick = onOpenScanner) {
+          Icon(Icons.Outlined.QrCodeScanner, contentDescription = null)
+          Spacer(Modifier.width(8.dp))
+          Text("扫码")
+        }
+        FilledTonalButton(onClick = onPairFromCode) {
+          Icon(Icons.Outlined.Link, contentDescription = null)
+          Spacer(Modifier.width(8.dp))
+          Text("刷新配对")
+        }
+      }
+
+      Text("手动刷新", style = MaterialTheme.typography.titleMedium, color = ClawSensePalette.TextPrimary)
+      PairingInputField(
+        label = "新 Host",
+        value = uiState.manualHost,
+        onValueChange = onManualHostChanged,
+        placeholder = "http://新的服务器IP:18789",
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+        singleLine = true,
+      )
+      PairingInputField(
+        label = "新 Setup Token",
+        value = uiState.manualToken,
+        onValueChange = onManualTokenChanged,
+        singleLine = true,
+      )
+      FilledTonalButton(onClick = onPairManual, modifier = Modifier.fillMaxWidth()) {
+        Icon(Icons.Outlined.Lock, contentDescription = null)
+        Spacer(Modifier.width(8.dp))
+        Text("手动刷新配对")
       }
     }
   }
@@ -692,6 +1176,39 @@ private fun MetricRow(icon: ImageVector, label: String, value: String) {
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
       Text(label, color = ClawSensePalette.Accent, style = MaterialTheme.typography.labelLarge)
       Text(value, color = ClawSensePalette.TextPrimary, style = MaterialTheme.typography.bodyLarge)
+    }
+  }
+}
+
+@Composable
+private fun ActivityRow(
+  icon: ImageVector,
+  label: String,
+  value: String,
+  emphasize: Boolean = false,
+) {
+  Row(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.spacedBy(12.dp),
+    verticalAlignment = Alignment.Top,
+  ) {
+    Icon(
+      icon,
+      contentDescription = null,
+      tint = if (emphasize) ClawSensePalette.Warning else ClawSensePalette.Accent,
+      modifier = Modifier.padding(top = 2.dp),
+    )
+    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+      Text(
+        text = label,
+        color = ClawSensePalette.TextSecondary,
+        style = MaterialTheme.typography.labelLarge,
+      )
+      Text(
+        text = value,
+        color = if (emphasize) ClawSensePalette.Warning else ClawSensePalette.TextPrimary,
+        style = MaterialTheme.typography.bodyMedium,
+      )
     }
   }
 }
@@ -828,6 +1345,20 @@ private fun captureModeLabel(mode: CaptureMode): String {
 
 private fun formatTimestamp(timestamp: Long): String {
   return SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(timestamp))
+}
+
+private fun formatTimestampOrPlaceholder(timestamp: Long?, placeholder: String = "暂无"): String {
+  return timestamp?.let(::formatTimestamp) ?: placeholder
+}
+
+private fun formatRecentError(activity: ServiceActivitySnapshot): String {
+  val message = activity.lastError ?: return "暂无错误"
+  val occurredAt = activity.lastErrorAt?.let(::formatTimestamp)
+  return if (occurredAt == null) {
+    message
+  } else {
+    "$occurredAt · $message"
+  }
 }
 
 private fun requiredSensorPermissions(): List<String> {
