@@ -49,6 +49,7 @@
 说明：
 
 - 我在 `2026-03-09` 实测查过 npm registry，`clawsense`、`clawsense-openclaw-plugin`、`@clawsense/clawsense` 这三个名字当时都没有现成公开包。
+- 我在 `2026-05-30` 复查 `npm view clawsense`，仍返回 404，说明 `clawsense` 目标包名当前尚未发布。
 - 但 `@clawsense/clawsense` 只有在你拥有 `clawsense` 这个 npm scope 时才能发，不适合作为第一次发布的默认方案。
 
 ### 第三步：以后再考虑 ClawHub
@@ -72,7 +73,7 @@
 当前这份仓库已经改成了更适合第一次发布的状态：
 
 - `private: false`
-- 包名改为 `clawsense-openclaw-plugin`
+- 包名改为 `clawsense`
 - 已补 `LICENSE`
 - 已补 `repository / homepage / bugs`
 
@@ -126,36 +127,34 @@ https://github.com/你的GitHub用户名/ClawSense.git
 
 ## 4. 再发布 npm 包
 
-### 4.1 先决定 npm 包名
+### 4.1 当前 npm 包名
 
-如果这是你第一次发 npm，我建议：
-
-- 首选：`@你的-npm-用户名/clawsense`
-
-例子：
+当前仓库已经把首发包名定为：
 
 ```json
 {
-  "name": "@cedric/clawsense"
+  "name": "clawsense"
 }
 ```
 
-这样做的好处：
+发布前必须再确认一次：
 
-- 不需要先建 npm 组织
-- 不需要先抢品牌 scope
-- 你能马上发出去
+```bash
+npm view clawsense version
+```
+
+如果仍然是 404，说明这个无 scope 包名还可用于首发；如果已经被占用，就需要改成 `@你的-npm-用户名/clawsense` 并同步 README / install docs。
 
 ### 4.2 发布前要改哪些字段
 
-发布前，至少把 `package.json` 调整到下面这类状态：
+发布前，至少确认 `package.json` 保持下面这类状态：
 
 ```json
 {
-  "name": "@你的-npm-用户名/clawsense",
+  "name": "clawsense",
   "version": "0.1.0",
   "private": false,
-  "description": "ClawSense plugin for OpenClaw",
+  "description": "Always-on sensory companion plugin for OpenClaw",
   "license": "MIT"
 }
 ```
@@ -185,6 +184,7 @@ npm login
 确认无误后执行：
 
 ```bash
+npm run check:release
 npm publish --access public
 ```
 
@@ -198,19 +198,19 @@ npm publish --access public
 如果你最终发布成：
 
 ```text
-@你的用户名/clawsense
+clawsense
 ```
 
 那用户安装可以写成：
 
 ```bash
-CLAWSENSE_NPM_SPEC="@你的用户名/clawsense@latest" bash install.sh
+CLAWSENSE_NPM_SPEC="clawsense@latest" bash install.sh
 ```
 
 后面如果 OpenClaw 侧完全走标准插件安装，也可以直接写：
 
 ```bash
-openclaw plugins install @你的用户名/clawsense
+openclaw plugins install clawsense
 ```
 
 ## 5. 我建议你第一次发布时这样做

@@ -1,0 +1,9 @@
+#:schema https://developers.openai.com/codex/config-schema.json
+
+[[skills.config]]
+path = ".codex/skills/local-openclaw-dev"
+enabled = true
+
+[[skills.config]]
+path = ".codex/skills/android-pairing-debug"
+enabled = true
