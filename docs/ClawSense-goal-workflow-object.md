@@ -21,8 +21,8 @@
 id: clawsense-realtime-voice-agent
 owner: Cedric + Codex
 status: active
-phase: Phase 8 delivery closure + Video M1 evidence chain
-updatedAt: 2026-05-30
+phase: Phase 8 delivery closure + Android Video M2 manual clip rollout
+updatedAt: 2026-05-31
 
 longTermGoal:
   title: 全天候多模态 OpenClaw 记忆层
@@ -39,6 +39,7 @@ currentGoal:
     - 主模型能基于 transcript + 图片/场景 evidence 自然回答
     - 手机能读摘要、显示全文、支持继续追问和停止朗读
     - 可把回答沉淀成 markdown 草稿
+    - Android 端可手动录制 6 秒 video-only MP4，并上传起止关键帧
     - 上传后的视频片段、关键帧 caption/OCR、关键帧到视频片段的回链可被 evidence/followups/chat 消费
     - 当前 npm 包和安装入口可发布，开发-only 材料不会进入 runtime 包
 
@@ -50,13 +51,14 @@ freezeLine:
     - 连续追问 previousTurn
     - draft_document 草稿文件
     - 视频 M1 evidence：上传后视频、关键帧 caption/OCR、offset/videoRequestId 回链
+    - Android Video M2：手动 6 秒 video-only MP4、起止关键帧、上传状态可见
     - npm package boundary / install.sh / runtime skills
     - 真实办公/课堂验收
   outOfScopeUntilNextPhase:
     - 真正 speaker diarization
     - 整天 100% transcript 覆盖
     - 聚会主动洞察
-    - Android 端 CameraX 视频录制 M2
+    - 自动 / 连续 / 唤醒词触发的视频录制
     - 全天向量化记忆增强
     - 所有 provider 的完美配置矩阵
 
@@ -126,6 +128,8 @@ currentState:
     - Phase 8 验收稳定性口径已拆分数据面与语义分析失败
     - 标注建议过滤伪人物噪声，并且 speaker/person 任一实名注释都可满足当前身份闭环验收
     - 视频 M1 已完成结构化 keyframe marker、caption/OCR、videoOffset、videoRequestId 聚合与 evidence/followups 回链
+    - Android Video M2 手动 6 秒视频片段已落地：CameraX video-only MP4、起止关键帧、上传链路、端侧状态反馈
+    - 服务端新增 `clawsense video-config` 与 `status.videoIngest`，用于确认 `hostModelVideoMode` 和推荐开启命令
     - 发布边界门禁 `npm run check:release` 已落地并通过
     - 当前分批提交计划和交付收口清单已建立
     - repo-local OpenClaw 命令面已复测：status / acceptance / evidence-video / followups / acceptance-plan 可运行
@@ -139,12 +143,14 @@ currentState:
     - 真实办公/课堂素材上的 4 小时回顾质量
     - 人物注释后是否能在聊天回答里自然复用实名 / 角色
     - 课堂 / 学习场景是否能沉淀待确认知识点和 speaker/person 线索
+    - 真机视频上传是否在可访问 Host + `hostModelVideoMode=keyframes` 下成功入库
   knownRisks:
     - ASR 覆盖不足会让模型看不到真实会议内容
     - 手机连接旧 gateway 会误判代码无效
     - 过短 answerSpokenText 会让用户以为回答缺失
     - 过长 answerSpokenText 会降低实时互动感
     - 按钮触发后的短提问边界仍需要真人验证，避免背景声继续污染 query
+    - 旧配对 Host 若仍是 `127.0.0.1` / `localhost` / `lan`，Android 会本地拦截并要求重新配对
 ```
 
 ## 3. Active Execution Plan
@@ -196,7 +202,7 @@ currentState:
 
 不在本阶段扩展：
 
-- Android 端 CameraX 视频录制 M2
+- 自动 / 连续 / 唤醒词触发的视频录制
 - speaker diarization
 - 全天向量化
 
@@ -220,7 +226,7 @@ currentState:
 - 需要迁移/重写本地 state 数据结构。
 - 真机连续两轮验证失败，且问题无法通过本地复现定位。
 - 需要在“云端优先”和“本机优先”之间重新取舍。
-- 需要决定是否进入 Android 视频录制 M2、全天向量化记忆增强或正式 npm publish。
+- 需要决定是否进入自动/连续视频录制、全天向量化记忆增强或正式 npm publish。
 
 ## 5. Recovery Protocol
 
@@ -248,9 +254,9 @@ cd android && JAVA_HOME='/Applications/Android Studio.app/Contents/jbr/Contents/
 1. 按分批提交计划继续做最终清点。
 2. 真机验收语音入口和真实数据覆盖由验收线程继续推进。
 3. 如果验收失败，按失败类型回到 Step C，只修当前 goal 阻塞项。
-4. 若代码、文档、包边界、Android 构建和 repo-local 命令面都稳定，则进入用户决策点：是否分批提交 / 发布 / 开启 Android 视频 M2。
+4. 若代码、文档、包边界、Android 构建和 repo-local 命令面都稳定，则进入用户决策点：是否分批提交 / 发布 / 进入自动视频或全天记忆增强。
 
-当前不主动进入 Android 视频 M2，除非用户明确拍板；视频 M1 的上传后 evidence 链按当前阶段收口处理。
+Android Video M2 当前只收口“手动短视频片段 + 关键帧证据链”，不进入自动录像、连续录像或唤醒词触发录像。
 
 2026-05-30 最新进展：
 
@@ -260,3 +266,9 @@ cd android && JAVA_HOME='/Applications/Android Studio.app/Contents/jbr/Contents/
 - repo-local OpenClaw 命令面复测通过：`status`、`acceptance`、`evidence-video`、`followups`、`acceptance-plan`。
 - 当前 repo-local runtime 没有 24h 新事件、没有活跃设备，acceptance 停在 `collecting-data` 是数据状态，不是代码错误。
 - Host/Android 只读复审没有剩余 P0/P1；剩余风险是真机 TTS echo drain、背景音拒收和大视频慢速 LAN 上传 30s timeout 压测。
+
+2026-05-31 最新进展：
+
+- Android 手动 6 秒视频片段已从实验块进入 M2 收口：UI 按钮、状态反馈、CameraX video-only MP4、起止关键帧和上传队列链路已落地。
+- Android 端会识别 `127.0.0.1` / `localhost` / `lan` 等手机不可达 Host，并阻止继续启动感知或录制视频，避免用户误以为采集失败是模型问题。
+- 服务端 `status.videoIngest` / `clawsense video-config` 已用于暴露视频模式、ingest endpoint 和推荐开启命令。

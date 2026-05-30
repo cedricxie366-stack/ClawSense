@@ -100,6 +100,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import java.net.URI
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -152,6 +153,13 @@ data class RuntimeVisual(
   val icon: ImageVector,
 )
 
+data class HostWarning(
+  val title: String,
+  val detail: String,
+  val action: String,
+  val blocksStart: Boolean = true,
+)
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun ClawSenseScreen(viewModel: MainViewModel) {
@@ -160,6 +168,8 @@ private fun ClawSenseScreen(viewModel: MainViewModel) {
   val session = uiState.session
   var scannerOpen by rememberSaveable { mutableStateOf(false) }
   val permissions = permissionSnapshot(context)
+  val hostWarning = session?.let(::resolveSessionHostWarning)
+  val hostBlocksStart = hostWarning?.blocksStart == true
 
   val sensorPermissionsLauncher = rememberLauncherForActivityResult(
     contract = ActivityResultContracts.RequestMultiplePermissions(),
@@ -184,7 +194,7 @@ private fun ClawSenseScreen(viewModel: MainViewModel) {
   }
 
   LaunchedEffect(uiState.session?.deviceId, uiState.serviceEnabled) {
-    if (uiState.session != null && uiState.serviceEnabled && canStartSensing(context)) {
+    if (uiState.session != null && !hostBlocksStart && uiState.serviceEnabled && canStartSensing(context)) {
       SensorServiceController.start(context)
     }
   }
@@ -192,6 +202,7 @@ private fun ClawSenseScreen(viewModel: MainViewModel) {
   LaunchedEffect(uiState.runtimeStatus.phase) {
     if (
       uiState.session != null &&
+      !hostBlocksStart &&
       uiState.serviceEnabled &&
       uiState.runtimeStatus.phase == ServicePhase.STOPPED &&
       canStartSensing(context)
@@ -250,11 +261,17 @@ private fun ClawSenseScreen(viewModel: MainViewModel) {
         verticalArrangement = Arrangement.spacedBy(16.dp),
       ) {
         HeroCard(uiState.session != null, uiState.runtimeStatus, permissions)
+        if (hostWarning != null) {
+          HostWarningCard(hostWarning)
+        }
         ServiceRuntimeCard(
           uiState = uiState,
           permissions = permissions,
+          hostWarning = hostWarning,
           onStart = {
-            if (canStartSensing(context)) {
+            if (hostBlocksStart && hostWarning != null) {
+              viewModel.setStatus(hostWarning.action)
+            } else if (canStartSensing(context)) {
               viewModel.setServiceEnabled(true)
               viewModel.setStatus(buildStartMessage(permissions))
             } else {
@@ -273,7 +290,9 @@ private fun ClawSenseScreen(viewModel: MainViewModel) {
             viewModel.setStatus("感知服务已停止，音频、拍照和心跳都已暂停。")
           },
           onCaptureVideo = {
-            if (uiState.runtimeStatus.phase != ServicePhase.RUNNING) {
+            if (hostBlocksStart && hostWarning != null) {
+              viewModel.setStatus(hostWarning.action)
+            } else if (uiState.runtimeStatus.phase != ServicePhase.RUNNING) {
               viewModel.setStatus("请先启动感知服务，再录制视频片段。")
             } else if (!permissions.camera) {
               viewModel.setStatus("录制视频片段需要相机权限。")
@@ -611,9 +630,38 @@ private fun HeroCard(
 }
 
 @Composable
+private fun HostWarningCard(warning: HostWarning) {
+  Card(
+    colors = CardDefaults.cardColors(containerColor = ClawSensePalette.Warning.copy(alpha = 0.13f)),
+    shape = RoundedCornerShape(24.dp),
+  ) {
+    Row(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(18.dp),
+      horizontalArrangement = Arrangement.spacedBy(14.dp),
+      verticalAlignment = Alignment.Top,
+    ) {
+      Icon(
+        Icons.Outlined.WarningAmber,
+        contentDescription = null,
+        tint = ClawSensePalette.Warning,
+        modifier = Modifier.padding(top = 2.dp),
+      )
+      Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(warning.title, style = MaterialTheme.typography.titleMedium, color = ClawSensePalette.TextPrimary)
+        Text(warning.detail, style = MaterialTheme.typography.bodyMedium, color = ClawSensePalette.TextSecondary)
+        Text(warning.action, style = MaterialTheme.typography.bodySmall, color = ClawSensePalette.Warning)
+      }
+    }
+  }
+}
+
+@Composable
 private fun ServiceRuntimeCard(
   uiState: MainUiState,
   permissions: PermissionSnapshot,
+  hostWarning: HostWarning?,
   onStart: () -> Unit,
   onStop: () -> Unit,
   onCaptureVideo: () -> Unit,
@@ -623,11 +671,14 @@ private fun ServiceRuntimeCard(
   val recentAudioText = formatTimestampOrPlaceholder(uiState.serviceActivity.lastAudioUploadAt)
   val recentImageText = formatTimestampOrPlaceholder(uiState.serviceActivity.lastImageUploadAt)
   val recentVideoText = formatTimestampOrPlaceholder(uiState.serviceActivity.lastVideoUploadAt)
+  val videoStatusText = formatVideoStatus(uiState.serviceActivity)
   val recentErrorText = formatRecentError(uiState.serviceActivity)
   val canCaptureVideo =
     uiState.session != null &&
+      hostWarning?.blocksStart != true &&
       permissions.camera &&
-      uiState.runtimeStatus.phase == ServicePhase.RUNNING
+      uiState.runtimeStatus.phase == ServicePhase.RUNNING &&
+      !uiState.serviceActivity.videoCaptureInProgress
 
   Card(
     colors = CardDefaults.cardColors(containerColor = ClawSensePalette.Card),
@@ -747,6 +798,13 @@ private fun ServiceRuntimeCard(
             value = recentVideoText,
           )
           ActivityRow(
+            icon = Icons.Outlined.Videocam,
+            label = "视频片段状态",
+            value = videoStatusText,
+            emphasize = uiState.serviceActivity.videoCaptureInProgress ||
+              (uiState.serviceActivity.lastVideoStatus?.contains("失败") == true),
+          )
+          ActivityRow(
             icon = Icons.Outlined.WarningAmber,
             label = "最近错误",
             value = recentErrorText,
@@ -783,7 +841,7 @@ private fun ServiceRuntimeCard(
         Button(
           onClick = onStart,
           modifier = Modifier.weight(1f),
-          enabled = uiState.session != null && !uiState.isBusy,
+          enabled = uiState.session != null && hostWarning?.blocksStart != true && !uiState.isBusy,
           colors = ButtonDefaults.buttonColors(containerColor = ClawSensePalette.AccentStrong),
         ) {
           Icon(Icons.Outlined.PlayCircleOutline, contentDescription = null)
@@ -1394,6 +1452,52 @@ private fun formatRecentError(activity: ServiceActivitySnapshot): String {
     message
   } else {
     "$occurredAt · $message"
+  }
+}
+
+private fun formatVideoStatus(activity: ServiceActivitySnapshot): String {
+  val status = activity.lastVideoStatus ?: return if (activity.lastVideoUploadAt != null) {
+    "最近一次视频已上传。"
+  } else {
+    "暂无视频片段"
+  }
+  val occurredAt = activity.lastVideoStatusAt?.let(::formatTimestamp)
+  return if (occurredAt == null) {
+    status
+  } else {
+    "$occurredAt · $status"
+  }
+}
+
+private fun resolveSessionHostWarning(session: DeviceSession): HostWarning? {
+  val badHost = findUnreachableHost(session.host) ?: findUnreachableHost(session.uploadBaseUrl)
+  return badHost?.let {
+    val localLoopback = it == "localhost" || it == "127.0.0.1" || it == "::1"
+    val debugLoopbackAllowed = BuildConfig.DEBUG && localLoopback
+    HostWarning(
+      title = if (debugLoopbackAllowed) "当前配对 Host 需要 USB 反向代理" else "当前配对 Host 不可被手机访问",
+      detail = if (debugLoopbackAllowed) {
+        "当前会话指向 $it。Debug 调试时只有在 adb reverse tcp:<port> tcp:<port> 生效时才可访问；真机离开 USB 后会上传失败。"
+      } else {
+        "当前会话仍指向 $it。旧手机访问自己的 127.0.0.1 / localhost / lan 时不会到达 OpenClaw 主机，所以音频、图片、视频都会进入失败重试。"
+      },
+      action = if (debugLoopbackAllowed) {
+        "本地调试请确认 adb reverse 已开启；云端/局域网使用请重新扫码或手动填写可访问 Host + 新 Setup Token。"
+      } else {
+        "请在“刷新主机配对”里重新扫码，或手动填写云端/局域网可访问的 Host + 新 Setup Token。"
+      },
+      blocksStart = !debugLoopbackAllowed,
+    )
+  }
+}
+
+private fun findUnreachableHost(url: String): String? {
+  val host = runCatching {
+    URI(url).host?.trim()?.lowercase()?.removePrefix("[")?.removeSuffix("]")
+  }.getOrNull() ?: return null
+  return when (host) {
+    "lan", "localhost", "127.0.0.1", "0.0.0.0", "::", "::1", "*" -> host
+    else -> null
   }
 }
 

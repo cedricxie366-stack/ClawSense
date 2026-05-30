@@ -174,6 +174,7 @@ Then the main operator-facing commands are:
 openclaw clawsense devices
 openclaw clawsense status
 openclaw clawsense doctor
+openclaw clawsense video-config
 openclaw clawsense media today
 openclaw clawsense library-url today
 openclaw clawsense review today
@@ -207,7 +208,7 @@ scripts/local-openclaw.sh followups
 Recommended daily usage path after installation:
 
 1. Pair the old Android phone and start sensing.
-2. Open the media library on the same host you already use for OpenClaw to verify the raw audio and image timeline for the day.
+2. Open the media library on the same host you already use for OpenClaw to verify the raw audio, image, and video/keyframe timeline for the day.
 3. Run `openclaw clawsense review today` or use [ClawSense Daily Review Skill](./skills/clawsense-daily-review/SKILL.md) in the normal chat page for the assistant-style recap.
 4. Run `openclaw clawsense acceptance 7` to see whether the current short-term phase has reached the 5 completion criteria.
    The report now includes `completion.phaseState` (`collecting-data | hardening | ready-to-close`), top-level `blockers`, and per-criterion `targets` (`current vs target`) so you can drive acceptance without guessing.
@@ -276,12 +277,18 @@ openclaw config set plugins.entries.clawsense.config.hostModelAudioMode "\"balan
 openclaw config set plugins.entries.clawsense.config.hostModelImageMode "\"multimodal\"" --strict-json
 openclaw config set plugins.entries.clawsense.config.retrievalEmbeddingBackend "\"text\"" --strict-json
 
+# Android Video M2 recommended mode: accept 6s MP4 clips + keyframe evidence
+openclaw config set plugins.entries.clawsense.config.hostModelVideoMode "\"keyframes\"" --strict-json
+openclaw clawsense video-config
+
 # conservative fallback mode (audio 先走 ASR，图像仅元数据)
 openclaw config set plugins.entries.clawsense.config.hostModelAudioMode "\"asr-first\"" --strict-json
 openclaw config set plugins.entries.clawsense.config.hostModelImageMode "\"metadata-only\"" --strict-json
 
 openclaw gateway restart --json || openclaw gateway start --json
 ```
+
+For Android Video M2, `hostModelVideoMode=keyframes` is the recommended MVP setting. In this mode the old phone uploads a 6-second video-only MP4 plus start/end keyframes, and the media library/evidence layer can link keyframe captions/OCR back to the original video segment. If the mode remains `none`, video upload intentionally fails with `video_ingest_disabled`.
 
 ### Copy-Paste Setup: Local Open-Source ASR
 
@@ -486,7 +493,7 @@ This is a real, working MVP, but not yet a fully polished public release.
 - the current implementation still needs to be fully decoupled from the OpenClaw Control UI shell in some deployments; the product target is a same-host independent page, not a chat/control sub-experience
 - there is still no polished device management UI
 - low-memory deployment still needs a maintainer-style prebuilt path in some cases
-- video acceptance is now tracked as `video-evidence`; when `hostModelVideoMode=none`, this criterion is treated as intentionally disabled and will not block phase closure
+- video acceptance is now tracked as `video-evidence`; for Android Video M2 validation, set `hostModelVideoMode=keyframes` before expecting `/ingest/video` to accept MP4 uploads
 - voice-triggered video recording remains out of scope for this phase
 - ClawSense does not make automatic micro-expression, emotion, or inner-state conclusions from faces or images
 
@@ -525,12 +532,12 @@ Default retention:
 Default storage pressure guard:
 
 - ClawSense also keeps a raw-media soft cap of `2 GiB` by default
-- if raw artifacts grow past that cap, the host will delete the **oldest audio/image originals first**
+- if raw artifacts grow past that cap, the host will delete the **oldest audio/image/video originals first**
 - event indexes and daily reviews stay available even after the raw files are removed
 - you can change the cap with plugin config `maxArtifactBytes`
 - set `maxArtifactBytes` to `0` if you explicitly want to disable the size cap
 
-If you do **not** want ClawSense to auto-delete raw audio/image originals:
+If you do **not** want ClawSense to auto-delete raw audio/image/video originals:
 
 - set `artifactRetentionDays` to `0` to disable time-based raw cleanup
 - set `maxArtifactBytes` to `0` to disable size-cap pruning

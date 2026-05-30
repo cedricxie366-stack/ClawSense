@@ -28,7 +28,7 @@
 - [docs/当前阶段分批提交计划.md](/Users/cedric/Documents/ClawSense/docs/当前阶段分批提交计划.md)
 - [docs/dev/开发日志.md](/Users/cedric/Documents/ClawSense/docs/dev/开发日志.md)
 
-如果本轮重点是视频 M1，再额外重点看：
+如果本轮重点是视频 M2 / keyframe evidence，再额外重点看：
 
 - [src/assistant-tool.ts](/Users/cedric/Documents/ClawSense/src/assistant-tool.ts)
 - [test/assistant-tool.test.ts](/Users/cedric/Documents/ClawSense/test/assistant-tool.test.ts)
@@ -63,7 +63,7 @@
 3. Android 配对 / 心跳 / 上传链路
 4. 图片 ingest 与媒体库可浏览
 5. 音频 ingest、转写 / fallback、聊天问答引用
-6. 视频 M1：视频 + keyframe 聚合、追问、语义层增益
+6. 视频 M2 / keyframe evidence：Android 短视频 + keyframe 聚合、追问、语义层增益
 7. 聊天页 / context / followups 对统一证据入口的消费
 8. 验收 CLI（`acceptance` / `acceptance-plan` / `doctor`）
 
@@ -163,10 +163,11 @@ scripts/local-openclaw.sh followups
 - `review` 不只是空壳
 - `followups` 能返回结构化追问目标
 
-### 5. 视频 M1 专项验收
+### 5. 视频 M2 / 关键帧专项验收
 
-这一轮视频 M1 的核心不是“只要有视频就算过”，而是要确认：
+这一轮视频验收的核心不是“只要有视频就算过”，而是要确认：
 
+- 服务端 `hostModelVideoMode=keyframes` 时能接受 Android 手动 6 秒 MP4
 - 同次上传的视频和关键帧能稳定聚合
 - 关键帧有 `caption`
 - 关键帧能抽出 `ocrHints`
@@ -177,11 +178,14 @@ scripts/local-openclaw.sh followups
 
 ```bash
 cd /Users/cedric/Documents/ClawSense
+scripts/local-openclaw.sh openclaw clawsense video-config
 scripts/local-openclaw.sh evidence-video
 scripts/local-openclaw.sh followups
 scripts/local-openclaw.sh acceptance
 scripts/local-openclaw.sh acceptance-plan
 ```
+
+如果 `video-config` 显示 `hostModelVideoMode=none`，先记录为“视频 ingest 未开启”；不要把它判成 Android 视频通过。
 
 必要时补充：
 
@@ -190,7 +194,7 @@ cd /Users/cedric/Documents/ClawSense
 scripts/local-openclaw.sh openclaw clawsense evidence today --modality video --focus what_happened --question "今天有哪些视频片段和关键帧值得回看"
 ```
 
-视频 M1 必查字段：
+视频必查字段：
 
 - `evidenceBundle.videoEvidenceGroups[*].videoDetails[*]`
   - `caption`
@@ -218,7 +222,7 @@ scripts/local-openclaw.sh openclaw clawsense evidence today --modality video --f
   - `linkedVideoTime`
   - `linkMethod`
 
-视频 M1 通过标准：
+视频通过标准：
 
 - 至少 1 组视频证据有 `videoRequestId` 级聚合
 - 至少 1 张关键帧有非空 `ocrHints`
@@ -302,7 +306,7 @@ scripts/local-openclaw.sh library-url today
 
 ```text
 本轮验收范围：
-- 视频 M1
+- 视频 M2 / keyframe evidence
 - followups
 - 媒体库页
 
@@ -330,8 +334,8 @@ scripts/local-openclaw.sh library-url today
 - responseHints.videoFollowUpTargets[0].ocrHints[0] = "..."
 
 建议回给开发线程的结论：
-- host 侧视频 M1 语义层已可验收
-- 下一步建议继续做真机素材回流验证
+- host 侧视频语义层已可验收
+- 下一步建议继续做 Android 真机短视频素材回流验证
 ```
 
 ## 什么时候要立刻停下来

@@ -1,6 +1,6 @@
 # ClawSense 实时语音入口当前验收说明（2026-05-14）
 
-> 用途：给真人验证 / 验证 Agent 使用。当前重点不是视频 M1，而是 Phase 8：旧手机作为 OpenClaw 现实世界语音入口。
+> 用途：给真人验证 / 验证 Agent 使用。当前重点仍是 Phase 8：旧手机作为 OpenClaw 现实世界语音入口；如果顺手验视频，只验 Android 手动 6 秒短视频和 keyframe evidence。
 
 ## 当前必须验证的能力
 
@@ -57,7 +57,7 @@ scripts/local-openclaw.sh media-today
 - 本地验证场景下有 `tcp:18789 tcp:18789`
 - gateway running
 - `devices` 中真实 Android 设备 `lastSeenAt/lastHeartbeatAt` 最近更新
-- `media-today` 中能看到新 audio/image 事件
+- `media-today` 中能看到新 audio/image 事件；如验证视频，则应能看到 video 事件与 keyframe image 事件
 
 ## 接口快速检查
 

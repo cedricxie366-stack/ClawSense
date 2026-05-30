@@ -64,6 +64,8 @@
 - 支持手动输入 `Host + Setup Token`
 - 支持粘贴服务端输出的整段引导码
 - 如果二维码里的 Host 是 `lan / localhost / 127.0.0.1 / 0.0.0.0` 这类不可直连地址，App 会提示改用手动 Host，避免一直握手失败
+- 如果已保存的旧会话仍指向这些不可达 Host，首页会显示醒目的 Host 警告，并阻止启动感知或录制视频，直到重新配对到可访问的云端 / 局域网地址
+- Debug 构建下的 `127.0.0.1 / localhost` 是例外：如果你明确使用 `adb reverse tcp:<port> tcp:<port>` 做本地验证，App 只提示风险但不拦截；离开 USB 后仍应重新配对到真实可访问 Host
 - 配对成功后，把 `host + deviceSecret + uploadBaseUrl` 写入安全存储
 - 当前 MVP 默认允许明文 HTTP，原因是现阶段服务端仍可能部署在 `http://你的服务器IP:18789`
 
@@ -96,6 +98,7 @@
 - 录制为 video-only MP4，不额外开启第二路麦克风，避免和现有 VAD 抢占音频链路
 - 上传时会同时带上起始 / 结束关键帧，方便服务端先做 OCR、caption 和视频片段关联
 - 如果服务端 `hostModelVideoMode` 仍为 `none`，`/api/clawsense/ingest/video` 会返回 `409 video_ingest_disabled`，App 会把它显示为最近错误
+- App 会在“最近活动”里显示视频录制中、上传中、成功或失败状态，避免用户只能从 logcat 判断视频链路是否工作
 - 这一步只验证“短视频采集、上传、入库、关键帧关联”成立；自动视频、唤醒词触发视频、长视频切片都还没进入 Android MVP
 
 ### 实时语音助手

@@ -96,6 +96,7 @@ Commands:
   pair               Generate ClawSense pairing QR code
   devices            Show paired devices
   media-today        Show today's media summary
+  video-config       Show ClawSense video ingest mode and enable commands
   library-url [date] Print media library URL(s) and token status (default: today)
   review-today       Show today's review summary
   evidence-video     Show today's video-focused evidence bundle
@@ -180,6 +181,9 @@ case "$cmd" in
     ;;
   media-today)
     run_passthrough clawsense media today
+    ;;
+  video-config)
+    run_passthrough clawsense video-config
     ;;
   library-url)
     shift

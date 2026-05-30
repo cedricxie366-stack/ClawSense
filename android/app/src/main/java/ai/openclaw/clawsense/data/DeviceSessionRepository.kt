@@ -104,6 +104,19 @@ class DeviceSessionRepository(
     )
   }
 
+  fun updateVideoCaptureStatus(
+    message: String?,
+    inProgress: Boolean,
+    occurredAt: Long = System.currentTimeMillis(),
+  ) {
+    _activitySnapshot.value = _activitySnapshot.value.copy(
+      videoCaptureInProgress = inProgress,
+      lastVideoStatus = message,
+      lastVideoStatusAt = occurredAt,
+      pendingUploads = pendingUploads.size,
+    )
+  }
+
   fun updateAssistantSnapshot(snapshot: AssistantInteractionSnapshot) {
     _assistantSnapshot.value = snapshot
   }
@@ -272,6 +285,9 @@ class DeviceSessionRepository(
       )
       is PendingUpload.Video -> _activitySnapshot.value.copy(
         lastVideoUploadAt = uploadedAt,
+        videoCaptureInProgress = false,
+        lastVideoStatus = "视频片段已上传。",
+        lastVideoStatusAt = uploadedAt,
         pendingUploads = pendingUploads.size,
       )
     }
@@ -384,6 +400,9 @@ data class ServiceActivitySnapshot(
   val lastAudioUploadAt: Long? = null,
   val lastImageUploadAt: Long? = null,
   val lastVideoUploadAt: Long? = null,
+  val videoCaptureInProgress: Boolean = false,
+  val lastVideoStatus: String? = null,
+  val lastVideoStatusAt: Long? = null,
   val lastError: String? = null,
   val lastErrorAt: Long? = null,
   val pendingUploads: Int = 0,

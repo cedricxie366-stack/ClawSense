@@ -563,26 +563,38 @@ class SensorForegroundService : LifecycleService() {
     videoCaptureJob = lifecycleScope.launch {
       try {
         Log.d(tag, "Manual video clip capture requested")
+        repository.updateVideoCaptureStatus("正在录制 6 秒视频片段…", inProgress = true)
         val clip = imageHal.recordVideoClip(MANUAL_VIDEO_CLIP_MS).copy(
           note = "manual-video-clip androidVideoM2=1 clipMs=$MANUAL_VIDEO_CLIP_MS",
+        )
+        repository.updateVideoCaptureStatus(
+          "正在上传视频片段（${clip.bytes.size / 1024} KB，关键帧 ${clip.keyframes.size} 张）…",
+          inProgress = true,
         )
         Log.d(
           tag,
           "Uploading video clip ${clip.fileName} bytes=${clip.bytes.size} keyframes=${clip.keyframes.size}",
         )
         repository.uploadVideo(clip)
+        repository.updateVideoCaptureStatus("视频片段已提交；如果服务端拥堵，会自动补传。", inProgress = false)
         Log.d(tag, "Video upload succeeded")
       } catch (error: Throwable) {
         if (error is CancellationException) {
+          repository.updateVideoCaptureStatus(null, inProgress = false)
           throw error
         }
         if (error is ClawSenseAuthException) {
           Log.e(tag, "Video upload unauthorized; stopping service", error)
+          repository.updateVideoCaptureStatus("视频上传失败：设备凭证失效，请重新配对。", inProgress = false)
           WorkScheduler.cancelHeartbeat(this@SensorForegroundService)
           beginShutdown(removeNotification = true)
           return@launch
         }
         Log.e(tag, "Video capture/upload failed", error)
+        repository.updateVideoCaptureStatus(
+          "视频上传失败：${error.message ?: "未知错误"}",
+          inProgress = false,
+        )
         repository.recordError("视频上传失败：${error.message ?: "未知错误"}")
       }
     }

@@ -304,6 +304,47 @@ const plugin = {
       };
     };
 
+    const buildVideoConfigStatus = () => {
+      const mode = cfg.hostModelVideoMode;
+      return {
+        hostModelVideoMode: mode,
+        ingestEnabled: mode !== "none",
+        directVideoUnderstanding: mode === "direct",
+        recommendedMvpMode: "keyframes",
+        ingestEndpoint: `${stripTrailingSlash(publicBaseUrl())}/api/clawsense/ingest/video`,
+        androidM2: {
+          supported: true,
+          mode: "manual-6s-video-only",
+          keyframes: "start/end",
+          note: "Android M2 records video-only MP4 clips and uploads start/end keyframes.",
+        },
+        commands: {
+          enableKeyframes:
+            "openclaw config set plugins.entries.clawsense.config.hostModelVideoMode '\"keyframes\"' --strict-json",
+          enableDirect:
+            "openclaw config set plugins.entries.clawsense.config.hostModelVideoMode '\"direct\"' --strict-json",
+          disable:
+            "openclaw config set plugins.entries.clawsense.config.hostModelVideoMode '\"none\"' --strict-json",
+          restartGateway: "openclaw gateway restart --json || openclaw gateway start --json",
+        },
+        hints:
+          mode === "none"
+            ? [
+                "Video ingest is currently disabled; Android video upload will return 409 video_ingest_disabled.",
+                "For the current MVP, use keyframes first. Direct mode should only be used with a provider/model that accepts native video input.",
+              ]
+            : mode === "keyframes"
+              ? [
+                  "Video ingest is enabled. Raw MP4 is stored and semantic understanding comes from uploaded keyframes.",
+                  "This is the recommended Android M2 validation mode.",
+                ]
+              : [
+                  "Video ingest is enabled and direct video understanding will be attempted first.",
+                  "If the provider/model rejects video input, ClawSense will degrade to metadata/keyframe evidence.",
+                ],
+      };
+    };
+
     const buildOperationalStatus = async () => {
       const now = Date.now();
       const devices = await stateStore.listDevices();
@@ -330,7 +371,16 @@ const plugin = {
         (event) => !event.transcript?.trim() && event.analysisStatus !== "succeeded",
       );
       const publicUrl = publicBaseUrl();
-      const publicHostLooksAlias = /^https?:\/\/(?:lan|0\.0\.0\.0|\*|::)(?::|\/|$)/i.test(publicUrl);
+      const publicHost = (() => {
+        try {
+          return new URL(publicUrl).hostname.trim().toLowerCase();
+        } catch {
+          return "";
+        }
+      })();
+      const publicHostLooksAlias = ["lan", "localhost", "127.0.0.1", "0.0.0.0", "::", "::1", "*"].includes(
+        publicHost,
+      );
       const effectiveRetrievalEmbeddingBackend = cfg.retrievalEmbeddingBackend === "none" ? "none" : "text";
 
       return {
@@ -344,6 +394,7 @@ const plugin = {
           retrievalEmbeddingBackend: cfg.retrievalEmbeddingBackend,
           effectiveRetrievalEmbeddingBackend,
         },
+        videoIngest: buildVideoConfigStatus(),
         queue: {
           depth: queueDepth,
           maxPending: MAX_PENDING_INGEST_JOBS,
@@ -417,6 +468,7 @@ const plugin = {
         );
       }
       if (status.capabilities.hostModelVideoMode === "none") {
+        warnings.push("hostModelVideoMode=none：Android 视频 M2 已可录制，但服务端会拒绝 /ingest/video。");
         nextActions.push(
           "如需开启视频输入：openclaw config set plugins.entries.clawsense.config.hostModelVideoMode '\"keyframes\"' --strict-json（或 direct）",
         );
@@ -1589,6 +1641,10 @@ const plugin = {
         clawsense.command("doctor").description("输出 ClawSense 运行诊断和下一步建议").action(async () => {
           const payload = await buildOperationalDoctor();
           process.stdout.write(`${safeJsonStringify(payload)}\n`);
+        });
+
+        clawsense.command("video-config").description("输出视频 ingest 配置、推荐模式与开启命令").action(async () => {
+          process.stdout.write(`${safeJsonStringify({ ok: true, ...buildVideoConfigStatus() })}\n`);
         });
 
         clawsense.command("media [date]").description("列出某天的媒体库事件").action(async (date?: string) => {

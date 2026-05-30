@@ -65,7 +65,7 @@ scripts/local-openclaw.sh media-today
 - 本地验证时应有 `tcp:18789 tcp:18789`。
 - gateway running。
 - `devices` 中真实 Android 设备的 `lastSeenAt / lastHeartbeatAt` 最近更新。
-- `media-today` 能看到新 audio/image 事件。
+- `media-today` 能看到新 audio/image 事件；如验证视频，则应能看到 video 事件与 keyframe image 事件。
 
 如果没有 `adb reverse`，优先执行：
 
@@ -178,7 +178,7 @@ scripts/local-openclaw.sh openclaw clawsense acceptance-plan 7
 当前已知：
 
 - `audio-reinforcement` 应该通过。
-- `video-evidence` 当前允许通过，因为 `hostModelVideoMode=none` 是有意关闭。
+- `video-evidence` 若要验 Android Video M2，请先设 `hostModelVideoMode=keyframes`；若仍为 `none`，只能记录为“视频 ingest 未开启”，不能当作真机视频通过。
 - `annotation-and-stability` 需要至少一条真实 person/speaker 身份注释。
 - `school-recap` 需要真实课堂 / 学习样本，否则可能继续 needs-work。
 
@@ -187,7 +187,7 @@ scripts/local-openclaw.sh openclaw clawsense acceptance-plan 7
 报告失败时请归类：
 
 - `pairing-or-device`: 设备不在线、心跳不更新、token 错。
-- `upload`: audio/image 上传失败，HTTP 401/503，队列堆积。
+- `upload`: audio/image/video 上传失败，HTTP 401/409/503，队列堆积或 `hostModelVideoMode=none`。
 - `query-trigger`: 点击提问后没有进入 assistant query。
 - `query-pollution`: 环境音 / 视频音频被误当成用户提问。
 - `time-range-routing`: 过去 4 小时 / 昨天 / 刚才 时间范围选错。

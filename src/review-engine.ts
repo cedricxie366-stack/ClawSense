@@ -2305,6 +2305,28 @@ export class ClawSenseReviewEngine {
         padding-top: 14px;
         border-top: 1px solid rgba(255, 255, 255, 0.05);
       }
+      .video-insight {
+        margin-top: 14px;
+        padding: 14px;
+        border-radius: 16px;
+        border: 1px solid rgba(110, 231, 255, 0.16);
+        background: rgba(110, 231, 255, 0.06);
+      }
+      .video-insight-grid {
+        display: grid;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      .video-insight-row {
+        color: #d8e8ff;
+        font-size: 14px;
+        line-height: 1.65;
+        word-break: break-word;
+      }
+      .video-insight-row strong {
+        color: var(--accent);
+        font-weight: 600;
+      }
       .detail-label {
         margin-bottom: 8px;
         color: var(--muted);
@@ -2699,6 +2721,81 @@ export class ClawSenseReviewEngine {
           .trim();
       }
 
+      function decodeNoteValue(value) {
+        const raw = String(value || "").trim();
+        if (!raw) return "";
+        try {
+          return decodeURIComponent(raw);
+        } catch {
+          return raw;
+        }
+      }
+
+      function readNoteField(note, names) {
+        const text = String(note || "");
+        for (const name of names) {
+          const match = new RegExp("\\\\b" + name + "=([^\\\\s]+)", "i").exec(text);
+          if (match && match[1]) {
+            return decodeNoteValue(match[1]);
+          }
+        }
+        return "";
+      }
+
+      function formatVideoOffset(ms) {
+        if (!Number.isFinite(ms) || ms < 0) return "";
+        const totalSeconds = Math.round(ms / 1000);
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+        return String(minutes).padStart(2, "0") + ":" + String(seconds).padStart(2, "0");
+      }
+
+      function parseVideoMarker(note) {
+        const text = String(note || "");
+        const requestId = readNoteField(text, ["videoRequestId"]);
+        const keyframeIndexRaw = readNoteField(text, ["keyframe"]);
+        const videoOffsetMsRaw = readNoteField(text, ["videoOffsetMs", "offsetMs", "frameOffsetMs", "timeMs"]);
+        const videoOffsetSecRaw = readNoteField(text, ["videoOffsetSec", "offsetSec", "frameOffsetSec", "timeSec"]);
+        let videoOffsetMs = Number(videoOffsetMsRaw);
+        if (!Number.isFinite(videoOffsetMs) && videoOffsetSecRaw) {
+          videoOffsetMs = Number(videoOffsetSecRaw) * 1000;
+        }
+        return {
+          requestId,
+          isKeyframe: /\\bvideoKeyframe=1\\b/i.test(text) || Boolean(keyframeIndexRaw),
+          keyframeIndex: Number.isFinite(Number(keyframeIndexRaw)) ? Number(keyframeIndexRaw) : null,
+          videoOffsetLabel: Number.isFinite(videoOffsetMs) ? formatVideoOffset(videoOffsetMs) : "",
+          caption: readNoteField(text, ["caption"]),
+          ocr: readNoteField(text, ["ocr", "ocrText", "ocrHints"]),
+        };
+      }
+
+      function renderVideoInsight(event) {
+        const marker = parseVideoMarker(event.note);
+        if (!marker.requestId && !marker.isKeyframe && !marker.caption && !marker.ocr) {
+          return "";
+        }
+        const rows = [];
+        if (marker.requestId) rows.push(["视频组", marker.requestId]);
+        if (event.modality === "video") rows.push(["类型", "原始视频片段"]);
+        if (marker.isKeyframe) {
+          const label = marker.keyframeIndex ? "关键帧 #" + marker.keyframeIndex : "视频关键帧";
+          rows.push(["类型", marker.videoOffsetLabel ? label + " / 片段内 " + marker.videoOffsetLabel : label]);
+        }
+        if (marker.caption) rows.push(["关键帧 caption", marker.caption]);
+        if (marker.ocr) rows.push(["关键帧 OCR", marker.ocr.replaceAll("|", " / ")]);
+        if (!rows.length) {
+          return "";
+        }
+        return (
+          '<section class="video-insight"><div class="detail-label">视频线索</div><div class="video-insight-grid">' +
+          rows
+            .map((row) => '<div class="video-insight-row"><strong>' + escapeHtml(row[0]) + '：</strong>' + escapeHtml(row[1]) + "</div>")
+            .join("") +
+          "</div></section>"
+        );
+      }
+
       function createAuthorizedUrl(url) {
         return url;
       }
@@ -2833,11 +2930,18 @@ export class ClawSenseReviewEngine {
           } else {
             meta.push('<span class="pill danger">无原件</span>');
           }
+          const videoMarker = parseVideoMarker(event.note);
+          if (videoMarker.isKeyframe) {
+            meta.push('<span class="pill primary">视频关键帧</span>');
+          } else if (videoMarker.requestId && event.modality === "video") {
+            meta.push('<span class="pill primary">视频片段</span>');
+          }
           const transcript = event.transcript
             ? '<section class="detail-block"><div class="detail-label">语音片段</div><pre class="transcript">' +
               escapeHtml(event.transcript) +
               "</pre></section>"
             : "";
+          const videoInsight = renderVideoInsight(event);
           const cleanNote = sanitizeNote(event.note);
           const note = cleanNote
             ? '<section class="detail-block"><div class="detail-label">补充备注</div><p class="note-text">' +
@@ -2891,6 +2995,7 @@ export class ClawSenseReviewEngine {
             escapeHtml(formatTime(event.capturedAt)) +
             " 记录的一条原始感知事件，用来保留事实线索，而不是直接下结论。</div></div></div>" +
             transcript +
+            videoInsight +
             note +
             media;
           cards.appendChild(card);

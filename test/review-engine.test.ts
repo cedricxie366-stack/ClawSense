@@ -57,6 +57,11 @@ describe("ClawSenseReviewEngine", () => {
     expect(html).toContain('id="followupsList"');
     expect(html).toContain("继续追问（复制）");
     expect(html).toContain("data-followup-index");
+    expect(html).toContain("parseVideoMarker");
+    expect(html).toContain("video-insight");
+    expect(html).toContain("视频线索");
+    expect(html).toContain("关键帧 caption");
+    expect(html).toContain("视频关键帧");
   });
 
   it("reuses cached reviews, refreshes on new events, and honors force recompute", async () => {

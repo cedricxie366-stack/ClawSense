@@ -4,7 +4,7 @@
 
 把 ClawSense 从“ingest 阶段就产出最终 summary 的插件”，改成“为 OpenClaw 主模型提供全天 evidence 的记忆层”。
 
-## 当前进展快照（2026-05-30）
+## 当前进展快照（2026-05-31）
 
 ### 产品主线调整
 
@@ -12,9 +12,9 @@
 
 > **先把 ClawSense 做成 OpenClaw 的现实世界语音对话入口，再继续推进视频和更强识别能力。**
 
-当前 worktree 已进入交付收口整理：后续先按 [当前阶段交付收口清单](./当前阶段交付收口清单.md) 和 [当前阶段分批提交计划](./当前阶段分批提交计划.md) 将 Host evidence runtime、Android realtime voice client、测试矩阵、文档验收、安装发布五组分批 review 和提交，再进入 Android 视频 M2 的新依赖/录制策略决策。
+当前 worktree 已进入交付收口整理：Host evidence runtime、Android realtime voice client、测试矩阵、文档验收、安装发布五组已分批提交；Android Video M2 也已先按“手动 6 秒短视频 + 关键帧”完成最小闭环。下一步不再讨论“是否进入 M2”，而是收口手动短视频体验、验证可访问 Host + `hostModelVideoMode=keyframes` 下的真机入库，再决定是否进入自动/连续视频。
 
-Phase 8 的代码闭环已先按通过处理，真实长对话素材由验收线程逐步补齐；主开发线重新推进视频 M1 和证据质量增强。短期仍以语音对话入口成立为产品闭环，但不再让长对话验证阻塞视频证据链建设。
+Phase 8 的代码闭环已先按通过处理，真实长对话素材由验收线程逐步补齐；主开发线已完成视频 M1 evidence 链，并把 Android Video M2 收窄为手动 6 秒短视频验证块。短期仍以语音对话入口成立为产品闭环，但不再让长对话验证阻塞视频证据链建设。
 
 - 手机端语音提问
 - 服务端 evidence 检索
@@ -42,7 +42,7 @@ Phase 8 的代码闭环已先按通过处理，真实长对话素材由验收线
 - Phase 7（验收矩阵）：进行中（主要阻塞项）
   - CLI 验收能力已可跑：`acceptance` / `acceptance-plan` / `doctor`
   - 真实素材覆盖与连续多天验证仍是主阻塞
-- Phase 2（结构化层）：视频子项已进入 M1（关键帧结构化与片段关联）阶段
+- Phase 2（结构化层）：视频子项已进入 M2 手动短视频收口
   - `/api/clawsense/ingest/video` 已可入队/入库（受 `hostModelVideoMode` 开关控制）
   - `keyframes` 模式：视频原片保留 + 可选关键帧入队，视频事件仍以 metadata/degraded 方式落库
   - `direct` 模式：会先尝试主模型原生视频理解，失败再回退 metadata/degraded，不阻塞上传链路
@@ -52,7 +52,9 @@ Phase 8 的代码闭环已先按通过处理，真实长对话素材由验收线
   - 关键帧 evidence 已结构化输出 `caption`、`ocrHints`、`linkedVideo...` 片段回链
   - 当前补强：支持从关键帧 note marker 读取结构化 `caption` / `ocr` / `videoOffsetMs`，并用片段内 offset 稳定回链原始视频
   - `/api/clawsense/ingest/video` 已支持在 `keyframes[]` item 中附带 `caption` / `ocrHints` / `ocrText` / `videoOffsetMs`，服务端会写入稳定 marker
-  - 下一步：进入 Android 视频 M2 前，需要决定是否引入 CameraX VideoCapture（`androidx.camera:camera-video`）以及录制策略（短片段时长、触发方式、上传频率、隐私提示）
+  - Android 端已引入 CameraX VideoCapture（`androidx.camera:camera-video`），当前策略固定为手动 6 秒 video-only MP4
+  - Android 上传会附带起止关键帧，UI 会显示录制中 / 上传中 / 成功 / 失败状态
+  - 下一步：只验证手动短视频入库和媒体库可见性；自动视频、唤醒词触发视频、长视频切片仍需单独决策
 - Phase 8（语音 Agent 对话层）：代码闭环已收口，真实素材验收继续并行
   - 显式提问、时间范围解析、日级回顾、TTS 摘要已接入
   - `/api/clawsense/assistant/query` 开始支持“模型回答 + 模板兜底”
@@ -305,7 +307,8 @@ Phase 8 的代码闭环已先按通过处理，真实长对话素材由验收线
 3. 已完成首版：`draft_document` action intent 与 markdown 草稿落地
 4. 下一步：真机语音验收和草稿文件 UI/聊天页可见性
 5. 再补 transcript / OCR / keyframe 检索
-6. 再进入视频 M1 和全天记忆向量化增强
+6. 再验证 Android 手动短视频入库与媒体库可见性
+7. 再决定是否进入自动/连续视频和全天记忆向量化增强
 
 ## 里程碑
 
