@@ -3,10 +3,11 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 export function createJsonRoute(
   path: string,
   handler: (req: IncomingMessage, res: ServerResponse) => Promise<boolean | void>,
+  options?: { auth?: "plugin" | "gateway" },
 ) {
   return {
     path,
-    auth: "plugin" as const,
+    auth: options?.auth ?? ("plugin" as const),
     handler,
   };
 }
@@ -52,10 +53,23 @@ export function methodNotAllowed(res: ServerResponse, allow: string[]): void {
   json(res, 405, { ok: false, error: "method_not_allowed", allow });
 }
 
-export function unauthorized(res: ServerResponse): void {
+export function unauthorized(
+  res: ServerResponse,
+  details?: {
+    reason?: string;
+    hint?: string;
+    rePairRequired?: boolean;
+  },
+): void {
   res.statusCode = 401;
   res.setHeader("www-authenticate", 'Bearer realm="clawsense"');
-  json(res, 401, { ok: false, error: "unauthorized" });
+  json(res, 401, {
+    ok: false,
+    error: "unauthorized",
+    reason: details?.reason,
+    hint: details?.hint,
+    rePairRequired: details?.rePairRequired,
+  });
 }
 
 export function parseBearerToken(header: string | string[] | undefined): string | null {

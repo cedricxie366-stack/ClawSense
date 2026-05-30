@@ -10,8 +10,33 @@ export type PluginLogger = {
 
 export type HttpRoute = {
   path: string;
-  auth: "plugin";
+  auth: "plugin" | "gateway";
   handler: (req: IncomingMessage, res: ServerResponse) => Promise<boolean | void>;
+};
+
+export type AgentToolResult = {
+  content: Array<{ type: string; text?: string }>;
+  details?: unknown;
+};
+
+export type AnyAgentTool = {
+  name: string;
+  label?: string;
+  description: string;
+  parameters: unknown;
+  execute(
+    toolCallId: string,
+    params: Record<string, unknown>,
+    signal?: AbortSignal,
+    onUpdate?: unknown,
+  ): Promise<AgentToolResult> | AgentToolResult;
+  ownerOnly?: boolean;
+};
+
+export type OpenClawPluginToolFactory = (ctx: { sandboxed?: boolean }) => AnyAgentTool | null;
+export type OpenClawPluginToolOptions = {
+  optional?: boolean;
+  name?: string;
 };
 
 export type OpenClawPluginApi = {
@@ -34,6 +59,7 @@ export type OpenClawPluginApi = {
       requestHeartbeatNow(): Promise<void>;
     };
   };
+  registerTool(tool: AnyAgentTool | OpenClawPluginToolFactory, options?: OpenClawPluginToolOptions): void;
   registerHttpRoute(route: HttpRoute): void;
   registerCli(
     register: (params: {
