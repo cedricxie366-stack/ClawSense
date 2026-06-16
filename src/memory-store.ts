@@ -14,6 +14,7 @@ import {
 } from "./openai-client.js";
 import type {
   ClawSenseArtifactRecord,
+  ClawSenseCaptureEvent,
   ClawSenseDeviceRecord,
   ClawSenseIngestReceipt,
   ClawSenseStateStore,
@@ -111,6 +112,30 @@ type VideoInputDiagnostics = {
   mimeMismatch: boolean;
 };
 
+type ClawSenseAnalysisCallbacks = {
+  describeImage: (args: {
+    buffer: Buffer;
+    fileName: string;
+    mime?: string;
+  }) => Promise<{ text: string; analysisProvider?: string; analysisFailureReason?: string }>;
+  describeVideo?: (args: {
+    buffer: Buffer;
+    fileName: string;
+    mime?: string;
+  }) => Promise<{ text: string; analysisProvider?: string; analysisFailureReason?: string }>;
+  transcribeAudio: (args: { filePath: string; mime?: string }) => Promise<{ text?: string }>;
+};
+
+type StoredCaptureAnalysis = {
+  summary: string;
+  transcript?: string;
+  analysisMode: ClawSenseCaptureEvent["analysisMode"];
+  analysisProvider?: ClawSenseCaptureEvent["analysisProvider"];
+  analysisStatus?: ClawSenseCaptureEvent["analysisStatus"];
+  analysisFailureReason?: ClawSenseCaptureEvent["analysisFailureReason"];
+  sttProvider?: ClawSenseCaptureEvent["sttProvider"];
+};
+
 const TABLE_NAME = "memories";
 const MIN_SPEECH_CLIP_DURATION_MS = 1_200;
 const NEVER_EXPIRE_TIMESTAMP = 253402300799000;
@@ -128,6 +153,7 @@ export class ClawSenseMemoryStore {
   private readonly openai;
   private readonly providerOpenAiClients = new Map<string, ReturnType<typeof resolveOpenAiClient>>();
   private warnedMultimodalEmbeddingFallback = false;
+  private warnedEmbeddingRequestFallback = false;
 
   constructor(params: {
     cfg: ClawSenseConfig;
@@ -152,17 +178,9 @@ export class ClawSenseMemoryStore {
     mime?: string;
     capturedAt?: number;
     note?: string;
-    describeImage: (args: {
-      buffer: Buffer;
-      fileName: string;
-      mime?: string;
-    }) => Promise<{ text: string; analysisProvider?: string; analysisFailureReason?: string }>;
-    describeVideo?: (args: {
-      buffer: Buffer;
-      fileName: string;
-      mime?: string;
-    }) => Promise<{ text: string; analysisProvider?: string; analysisFailureReason?: string }>;
-    transcribeAudio: (args: { filePath: string; mime?: string }) => Promise<{ text?: string }>;
+    describeImage: ClawSenseAnalysisCallbacks["describeImage"];
+    describeVideo?: ClawSenseAnalysisCallbacks["describeVideo"];
+    transcribeAudio: ClawSenseAnalysisCallbacks["transcribeAudio"];
   }): Promise<ClawSenseIngestReceipt> {
     const createdAt = params.capturedAt ?? Date.now();
     const mediaInput = resolveArtifactMime({
@@ -192,56 +210,28 @@ export class ClawSenseMemoryStore {
     });
 
     try {
-      const audioResult =
-        params.modality === "audio"
-          ? await this.safeTranscribeAudio({
-              filePath: stored.absolutePath,
-              fileName: stored.fileName,
-              body: params.body,
-              input: audioInput!,
-              transcribeAudio: params.transcribeAudio,
-            })
-          : null;
-      const imageResult =
-        params.modality === "image"
-          ? await this.safeDescribeImage({
-              buffer: params.body,
-              fileName: params.fileName,
-              input: imageInput!,
-              note: params.note,
-              describeImage: params.describeImage,
-            })
-          : null;
-      const videoResult =
-        params.modality === "video"
-          ? await this.safeDescribeVideo({
-              buffer: params.body,
-              fileName: params.fileName,
-              input: videoInput!,
-              note: params.note,
-              describeVideo: params.describeVideo,
-            })
-          : null;
-      const summary =
-        params.modality === "audio"
-          ? summarizeAudio({
-              transcript: audioResult?.transcript ?? "",
-              semanticSummary: audioResult?.summary,
-              note: params.note,
-              analysisFailureReason: audioResult?.analysisFailureReason,
-            })
-          : params.modality === "image"
-            ? imageResult?.summary ??
-              buildImageDegradedSummary(params.note, imageResult?.analysisFailureReason)
-            : videoResult?.summary ??
-              buildVideoDegradedSummary(params.note, videoResult?.analysisFailureReason);
+      const analysis = await this.analyzeStoredCapture({
+        modality: params.modality,
+        body: params.body,
+        fileName: stored.fileName,
+        requestedFileName: params.fileName,
+        absolutePath: stored.absolutePath,
+        mime: mediaInput.mime,
+        audioInput,
+        imageInput,
+        videoInput,
+        note: params.note,
+        describeImage: params.describeImage,
+        describeVideo: params.describeVideo,
+        transcribeAudio: params.transcribeAudio,
+      });
 
       const embeddingText = [
         `source=${this.cfg.memoryNamespace}`,
         `device=${params.device.deviceId}`,
         `modality=${params.modality}`,
-        summary,
-        audioResult?.transcript ?? "",
+        analysis.summary,
+        analysis.transcript ?? "",
         params.note ?? "",
       ]
         .filter(Boolean)
@@ -259,8 +249,8 @@ export class ClawSenseMemoryStore {
               namespace: this.cfg.memoryNamespace,
               deviceId: params.device.deviceId,
               modality: params.modality,
-              summary,
-              transcript: audioResult?.transcript ?? "",
+              summary: analysis.summary,
+              transcript: analysis.transcript ?? "",
               note: params.note ?? "",
               sourcePath: stored.absolutePath,
               createdAt,
@@ -279,8 +269,8 @@ export class ClawSenseMemoryStore {
         namespace: this.cfg.memoryNamespace,
         deviceId: params.device.deviceId,
         modality: params.modality,
-        summary,
-        transcript: audioResult?.transcript || undefined,
+        summary: analysis.summary,
+        transcript: analysis.transcript || undefined,
         note: params.note || undefined,
         createdAt,
         capturedAt: createdAt,
@@ -291,31 +281,11 @@ export class ClawSenseMemoryStore {
         storageRelPath: stored.relativePath,
         retentionExpiresAt: resolveRetentionExpiresAt(createdAt, this.cfg.artifactRetentionDays),
         embeddingModel,
-        analysisMode:
-          params.modality === "audio"
-            ? audioResult?.analysisMode ?? "metadata-only"
-            : params.modality === "image"
-              ? imageResult?.analysisMode ?? "metadata-only"
-              : videoResult?.analysisMode ?? "metadata-only",
-        analysisProvider:
-          params.modality === "audio"
-            ? audioResult?.analysisProvider ?? "metadata-only"
-            : params.modality === "image"
-              ? imageResult?.analysisProvider ?? "metadata-only"
-              : videoResult?.analysisProvider ?? "metadata-only",
-        analysisStatus:
-          params.modality === "audio"
-            ? audioResult?.analysisStatus ?? "degraded"
-            : params.modality === "image"
-              ? imageResult?.analysisStatus ?? "degraded"
-              : videoResult?.analysisStatus ?? "degraded",
-        analysisFailureReason:
-          params.modality === "audio"
-            ? audioResult?.analysisFailureReason
-            : params.modality === "image"
-              ? imageResult?.analysisFailureReason
-              : videoResult?.analysisFailureReason,
-        sttProvider: params.modality === "audio" ? audioResult?.sttProvider : undefined,
+        analysisMode: analysis.analysisMode,
+        analysisProvider: analysis.analysisProvider,
+        analysisStatus: analysis.analysisStatus,
+        analysisFailureReason: analysis.analysisFailureReason,
+        sttProvider: analysis.sttProvider,
       });
 
       await this.pruneExpiredArtifacts();
@@ -325,8 +295,8 @@ export class ClawSenseMemoryStore {
         memoryId,
         deviceId: params.device.deviceId,
         modality: params.modality,
-        summary,
-        transcript: audioResult?.transcript || undefined,
+        summary: analysis.summary,
+        transcript: analysis.transcript || undefined,
         createdAt,
         storedAt: stored.absolutePath,
         namespace: this.cfg.memoryNamespace,
@@ -338,6 +308,130 @@ export class ClawSenseMemoryStore {
       await fs.unlink(stored.absolutePath).catch(() => {});
       throw error;
     }
+  }
+
+  async ingestPending(params: {
+    device: ClawSenseDeviceRecord;
+    modality: "audio" | "image" | "video";
+    body: Buffer;
+    fileName: string;
+    mime?: string;
+    capturedAt?: number;
+    note?: string;
+  }): Promise<ClawSenseIngestReceipt> {
+    const createdAt = params.capturedAt ?? Date.now();
+    const mediaInput = resolveArtifactMime({
+      body: params.body,
+      fileName: params.fileName,
+      mime: params.mime,
+      modality: params.modality,
+    });
+    const stored = await this.writeBinaryArtifact({
+      body: params.body,
+      fileName: params.fileName,
+      capturedAt: createdAt,
+      modality: params.modality,
+      device: params.device,
+    });
+    const memoryId = randomUUID();
+    const summary = buildPendingSummary(params.modality, params.note);
+    const { artifact, event } = await this.stateStore.recordCapture({
+      memoryId,
+      namespace: this.cfg.memoryNamespace,
+      deviceId: params.device.deviceId,
+      modality: params.modality,
+      summary,
+      note: params.note || undefined,
+      createdAt,
+      capturedAt: createdAt,
+      sourcePath: stored.absolutePath,
+      fileName: stored.fileName,
+      mime: mediaInput.mime,
+      sizeBytes: params.body.length,
+      storageRelPath: stored.relativePath,
+      retentionExpiresAt: resolveRetentionExpiresAt(createdAt, this.cfg.artifactRetentionDays),
+      analysisMode: "metadata-only",
+      analysisProvider: "analysis-queue",
+      analysisStatus: "degraded",
+      analysisFailureReason: "analysis_pending",
+    });
+
+    await this.pruneExpiredArtifacts();
+    await this.enforceArtifactBudget();
+
+    return {
+      memoryId,
+      deviceId: params.device.deviceId,
+      modality: params.modality,
+      summary,
+      createdAt,
+      storedAt: stored.absolutePath,
+      namespace: this.cfg.memoryNamespace,
+      windowId: event.windowId,
+      artifactId: artifact.artifactId,
+      analysisMode: event.analysisMode,
+    };
+  }
+
+  async analyzeCaptureArtifact(params: {
+    artifactId: string;
+    describeImage: ClawSenseAnalysisCallbacks["describeImage"];
+    describeVideo?: ClawSenseAnalysisCallbacks["describeVideo"];
+    transcribeAudio: ClawSenseAnalysisCallbacks["transcribeAudio"];
+  }): Promise<{ updated: boolean; event: ClawSenseCaptureEvent | null }> {
+    const artifact = await this.stateStore.getArtifact(params.artifactId);
+    if (!artifact || artifact.deletedAt) {
+      return { updated: false, event: null };
+    }
+    const event = (await this.stateStore.listEvents()).find((item) => item.artifactId === artifact.artifactId);
+    if (!event) {
+      return { updated: false, event: null };
+    }
+    const body = await fs.readFile(artifact.storagePath);
+    const mediaInput = resolveArtifactMime({
+      body,
+      fileName: artifact.fileName,
+      mime: artifact.mime,
+      modality: artifact.modality,
+    });
+    const audioInput =
+      artifact.modality === "audio"
+        ? buildAudioInputDiagnostics(body, mediaInput.mime, mediaInput.mismatch)
+        : null;
+    const imageInput =
+      artifact.modality === "image"
+        ? buildImageInputDiagnostics(mediaInput.mime, mediaInput.mismatch)
+        : null;
+    const videoInput =
+      artifact.modality === "video"
+        ? buildVideoInputDiagnostics(mediaInput.mime, mediaInput.mismatch)
+        : null;
+    const analysis = await this.analyzeStoredCapture({
+      modality: artifact.modality,
+      body,
+      fileName: artifact.fileName,
+      requestedFileName: artifact.fileName,
+      absolutePath: artifact.storagePath,
+      mime: mediaInput.mime,
+      audioInput,
+      imageInput,
+      videoInput,
+      note: event.note,
+      describeImage: params.describeImage,
+      describeVideo: params.describeVideo,
+      transcribeAudio: params.transcribeAudio,
+    });
+
+    return await this.stateStore.backfillCaptureAnalysis({
+      artifactId: artifact.artifactId,
+      summary: analysis.summary,
+      transcript: analysis.transcript,
+      analysisMode: analysis.analysisMode,
+      analysisProvider: analysis.analysisProvider,
+      analysisStatus: analysis.analysisStatus,
+      analysisFailureReason: analysis.analysisFailureReason,
+      sttProvider: analysis.sttProvider,
+    });
   }
 
   async searchRelevantMemories(params: {
@@ -567,8 +661,16 @@ export class ClawSenseMemoryStore {
       model: this.cfg.embeddingModel,
       input,
       dimensions: this.cfg.embeddingDimensions,
+    }).catch((error) => {
+      if (!this.warnedEmbeddingRequestFallback) {
+        this.warnedEmbeddingRequestFallback = true;
+        this.logger.warn(
+          "[clawsense] embedding request failed; using deterministic fallback vectors. Configure embeddingModel or set retrievalEmbeddingBackend=none to silence semantic recall fallback.",
+        );
+      }
+      return undefined;
     });
-    return response.data[0].embedding;
+    return response?.data[0]?.embedding ?? fallbackEmbed(input, this.cfg.embeddingDimensions ?? 1536);
   }
 
   private resolveEffectiveEmbeddingBackend(): "none" | "text" {
@@ -796,6 +898,86 @@ export class ClawSenseMemoryStore {
     );
   }
 
+  private async analyzeStoredCapture(params: {
+    modality: "audio" | "image" | "video";
+    body: Buffer;
+    fileName: string;
+    requestedFileName: string;
+    absolutePath: string;
+    mime: string;
+    audioInput: AudioInputDiagnostics | null;
+    imageInput: ImageInputDiagnostics | null;
+    videoInput: VideoInputDiagnostics | null;
+    note?: string;
+    describeImage: ClawSenseAnalysisCallbacks["describeImage"];
+    describeVideo?: ClawSenseAnalysisCallbacks["describeVideo"];
+    transcribeAudio: ClawSenseAnalysisCallbacks["transcribeAudio"];
+  }): Promise<StoredCaptureAnalysis> {
+    const audioResult =
+      params.modality === "audio"
+        ? await this.safeTranscribeAudio({
+            filePath: params.absolutePath,
+            fileName: params.fileName,
+            body: params.body,
+            input: params.audioInput!,
+            transcribeAudio: params.transcribeAudio,
+          })
+        : null;
+    const imageResult =
+      params.modality === "image"
+        ? await this.safeDescribeImage({
+            buffer: params.body,
+            fileName: params.requestedFileName,
+            input: params.imageInput!,
+            note: params.note,
+            describeImage: params.describeImage,
+          })
+        : null;
+    const videoResult =
+      params.modality === "video"
+        ? await this.safeDescribeVideo({
+            buffer: params.body,
+            fileName: params.requestedFileName,
+            input: params.videoInput!,
+            note: params.note,
+            describeVideo: params.describeVideo,
+          })
+        : null;
+
+    if (params.modality === "audio") {
+      return {
+        summary: summarizeAudio({
+          transcript: audioResult?.transcript ?? "",
+          semanticSummary: audioResult?.summary,
+          note: params.note,
+          analysisFailureReason: audioResult?.analysisFailureReason,
+        }),
+        transcript: audioResult?.transcript || undefined,
+        analysisMode: audioResult?.analysisMode ?? "metadata-only",
+        analysisProvider: audioResult?.analysisProvider ?? "metadata-only",
+        analysisStatus: audioResult?.analysisStatus ?? "degraded",
+        analysisFailureReason: audioResult?.analysisFailureReason,
+        sttProvider: audioResult?.sttProvider,
+      };
+    }
+    if (params.modality === "image") {
+      return {
+        summary: imageResult?.summary ?? buildImageDegradedSummary(params.note, imageResult?.analysisFailureReason),
+        analysisMode: imageResult?.analysisMode ?? "metadata-only",
+        analysisProvider: imageResult?.analysisProvider ?? "metadata-only",
+        analysisStatus: imageResult?.analysisStatus ?? "degraded",
+        analysisFailureReason: imageResult?.analysisFailureReason,
+      };
+    }
+    return {
+      summary: videoResult?.summary ?? buildVideoDegradedSummary(params.note, videoResult?.analysisFailureReason),
+      analysisMode: videoResult?.analysisMode ?? "metadata-only",
+      analysisProvider: videoResult?.analysisProvider ?? "metadata-only",
+      analysisStatus: videoResult?.analysisStatus ?? "degraded",
+      analysisFailureReason: videoResult?.analysisFailureReason,
+    };
+  }
+
   private resolveMultimodalClient(providerId?: string) {
     const normalized = providerId?.trim().toLowerCase();
     if (!normalized) {
@@ -995,6 +1177,18 @@ function summarizeAudio(params: {
       : trimmed;
   }
   return buildAudioDegradedSummary(params.note, params.analysisFailureReason);
+}
+
+function buildPendingSummary(modality: "audio" | "image" | "video", note: string | undefined): string {
+  const cleanedNote = normalizeSemanticText(note);
+  const suffix = cleanedNote ? ` Sensor note: ${cleanedNote}.` : "";
+  if (modality === "audio") {
+    return `Audio captured; analysis is pending.${suffix}`;
+  }
+  if (modality === "image") {
+    return `Image captured; visual analysis is pending.${suffix}`;
+  }
+  return `Video captured; analysis is pending.${suffix}`;
 }
 
 function degradedAudioAnalysisResult(

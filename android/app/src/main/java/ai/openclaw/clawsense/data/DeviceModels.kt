@@ -65,6 +65,30 @@ data class HeartbeatRequest(
   val appState: String? = null,
 )
 
+@Serializable
+data class CaptureVideoDirective(
+  val type: String = "video_clip",
+  val directiveId: String,
+  val durationMs: Long = 6_000L,
+  val reason: String,
+  val sourceEventId: String? = null,
+  val sourceText: String? = null,
+  val issuedAt: Long? = null,
+  val expiresAt: Long? = null,
+)
+
+data class HeartbeatResult(
+  val heartbeatIntervalSec: Int,
+  val captureDirective: CaptureVideoDirective? = null,
+)
+
+@Serializable
+data class CapturePreferences(
+  val autoVideoEnabled: Boolean = false,
+  val autoVideoMaxPerHour: Int = 2,
+  val autoVideoMaxPerDay: Int = 8,
+)
+
 data class CapturedAudioClip(
   val bytes: ByteArray,
   val mime: String = "audio/wav",
@@ -95,6 +119,13 @@ data class CapturedVideoClip(
   val durationMs: Long? = null,
   val note: String? = null,
   val keyframes: List<CapturedVideoKeyframe> = emptyList(),
+)
+
+data class IngestUploadResult(
+  val stored: Boolean = true,
+  val analysisQueued: Boolean? = null,
+  val queueDepth: Int? = null,
+  val analysisQueueDepth: Int? = null,
 )
 
 @Serializable
@@ -206,6 +237,18 @@ data class AssistantQuerySttDiagnostics(
 )
 
 @Serializable
+data class AssistantAudioRecheckDiagnostics(
+  val attempted: Boolean = false,
+  val refreshed: Boolean = false,
+  val reason: String? = null,
+  val maxWindows: Int = 0,
+  val resultCount: Int = 0,
+  val transcriptCount: Int = 0,
+  val summaryCount: Int = 0,
+  val failureReasons: List<String> = emptyList(),
+)
+
+@Serializable
 data class AssistantQueryResponse(
   val ok: Boolean = true,
   val queryText: String = "",
@@ -217,6 +260,7 @@ data class AssistantQueryResponse(
   val answerSource: String? = null,
   val actionIntent: AssistantActionIntent? = null,
   val stt: AssistantQuerySttDiagnostics? = null,
+  val audioRecheck: AssistantAudioRecheckDiagnostics? = null,
 )
 
 @Serializable

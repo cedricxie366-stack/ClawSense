@@ -1,6 +1,7 @@
 package ai.openclaw.clawsense.service
 
 import ai.openclaw.clawsense.AppGraph
+import ai.openclaw.clawsense.BuildConfig
 import ai.openclaw.clawsense.MainActivity
 import ai.openclaw.clawsense.R
 import ai.openclaw.clawsense.data.AssistantInteractionPhase
@@ -9,6 +10,7 @@ import ai.openclaw.clawsense.data.AssistantModeHint
 import ai.openclaw.clawsense.data.AssistantQueryResponse
 import ai.openclaw.clawsense.data.AssistantRecentContextWindowHint
 import ai.openclaw.clawsense.data.CaptureMode
+import ai.openclaw.clawsense.data.CaptureVideoDirective
 import ai.openclaw.clawsense.data.CapturedAudioClip
 import ai.openclaw.clawsense.data.ClawSenseAuthException
 import ai.openclaw.clawsense.data.DeviceSessionRepository
@@ -50,6 +52,7 @@ class SensorForegroundService : LifecycleService() {
       context = this,
       config = AndroidAudioSensorHal.Config(
         silenceTimeoutMs = AUDIO_SESSION_SILENCE_TIMEOUT_MS,
+        minVoicedMs = AUDIO_SESSION_MIN_VOICED_MS,
         maxClipMs = AUDIO_SESSION_MAX_CLIP_MS,
         uploadCooldownMs = AUDIO_SESSION_UPLOAD_COOLDOWN_MS,
         conversationContinuationGapMs = AUDIO_SESSION_CONTINUATION_GAP_MS,
@@ -71,29 +74,36 @@ class SensorForegroundService : LifecycleService() {
   @Volatile private var sensorsReleased = false
   @Volatile private var audioSensorRunning = false
   @Volatile private var videoSensorRunning = false
-  @Volatile private var pendingAssistantQuery = false
-  @Volatile private var pendingAssistantModeHint = AssistantModeHint.AUTO
-  @Volatile private var pendingAssistantArmedAtElapsedMs = 0L
-  @Volatile private var pendingAssistantArmedAtWallMs = 0L
   @Volatile private var assistantSpeechStopRequested = false
   @Volatile private var assistantAmbientDropUntilWallMs = 0L
   @Volatile private var lastAudioActivityElapsedMs = 0L
+  @Volatile private var lastAutoVideoCaptureElapsedMs = 0L
+  @Volatile private var autoVideoHourBucket = -1L
+  @Volatile private var autoVideoDayBucket = -1L
+  @Volatile private var autoVideoCountThisHour = 0
+  @Volatile private var autoVideoCountThisDay = 0
   @Volatile private var nextStillCaptureDueAtMs = Long.MAX_VALUE
 
   private companion object {
     const val AUDIO_SESSION_SILENCE_TIMEOUT_MS = 2_400L
+    const val AUDIO_SESSION_MIN_VOICED_MS = 256L
     const val AUDIO_SESSION_MAX_CLIP_MS = 60_000L
     const val AUDIO_SESSION_UPLOAD_COOLDOWN_MS = 400L
     const val AUDIO_SESSION_CONTINUATION_GAP_MS = 30_000L
     const val BASELINE_STILL_INTERVAL_MS = 60_000L
     const val ACTIVE_STILL_INTERVAL_MS = 10_000L
     const val ACTIVE_STILL_WINDOW_MS = 120_000L
-    const val ASSISTANT_QUERY_RECORDING_TIMEOUT_MS = 12_000L
-    const val ASSISTANT_QUERY_MAX_ACCEPTED_CLIP_MS = 14_000L
-    const val ASSISTANT_QUERY_ARM_TOLERANCE_MS = 150L
-    const val ASSISTANT_QUERY_TIMEOUT_GRACE_MS = 1_000L
+    // The dedicated query recorder caps itself at queryMaxDurationMs (8s); the
+    // watchdog only rescues the UI if the audio loop dies mid-capture.
+    const val ASSISTANT_QUERY_WATCHDOG_MS = 12_000L
+    const val ASSISTANT_QUERY_NO_SPEECH_MESSAGE =
+      "这次没有录到清晰的提问人声。请靠近一点，点“问实时助手”后直接说一句问题。"
+    const val ASSISTANT_QUERY_WATCHDOG_MESSAGE =
+      "提问录音没有正常结束，请再点一次“问实时助手”。"
     const val ASSISTANT_ECHO_DRAIN_MS = AUDIO_SESSION_SILENCE_TIMEOUT_MS + 1_200L
     const val MANUAL_VIDEO_CLIP_MS = 6_000L
+    const val AUTO_VIDEO_COOLDOWN_MS = 10 * 60 * 1000L
+    const val MAX_THROTTLED_STILL_INTERVAL_MS = 5 * 60 * 1000L
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -213,9 +223,11 @@ class SensorForegroundService : LifecycleService() {
         audioHal.start { clip ->
           val activityAt = SystemClock.elapsedRealtime()
           lastAudioActivityElapsedMs = activityAt
-          val nextActiveCapture = activityAt + ACTIVE_STILL_INTERVAL_MS
-          if (nextActiveCapture < nextStillCaptureDueAtMs) {
-            nextStillCaptureDueAtMs = nextActiveCapture
+          if (!repository.captureThrottleSnapshot().skipImmediateStillCapture) {
+            val nextActiveCapture = activityAt + ACTIVE_STILL_INTERVAL_MS
+            if (nextActiveCapture < nextStillCaptureDueAtMs) {
+              nextStillCaptureDueAtMs = nextActiveCapture
+            }
           }
           lifecycleScope.launch {
             try {
@@ -305,13 +317,17 @@ class SensorForegroundService : LifecycleService() {
       var nextHeartbeatIntervalSec = session.heartbeatIntervalSec.coerceAtLeast(30)
       while (true) {
         try {
-          nextHeartbeatIntervalSec = repository.sendHeartbeat(
+          val heartbeatResult = repository.sendHeartbeat(
             HeartbeatPayloadFactory.create(
               context = this@SensorForegroundService,
               appState = "service",
               heartbeatIntervalSec = nextHeartbeatIntervalSec,
             ),
-          ).coerceAtLeast(30)
+          )
+          nextHeartbeatIntervalSec = heartbeatResult.heartbeatIntervalSec.coerceAtLeast(30)
+          heartbeatResult.captureDirective?.let { directive ->
+            maybeTriggerAutoVideoClip(directive)
+          }
         } catch (error: Throwable) {
           if (error is CancellationException) {
             throw error
@@ -339,9 +355,22 @@ class SensorForegroundService : LifecycleService() {
             continue
           }
           val activeWindow = isWithinActiveWindow(now)
+          val throttle = repository.captureThrottleSnapshot()
+          val nextInterval = stillCaptureIntervalMs(activeWindow, throttle.stillIntervalMultiplier)
+          if (throttle.skipImmediateStillCapture) {
+            Log.d(
+              tag,
+              "Deferring still capture due to throttle level=${throttle.level} reason=${throttle.reason} nextInMs=$nextInterval",
+            )
+            nextStillCaptureDueAtMs = SystemClock.elapsedRealtime() + nextInterval
+            continue
+          }
           val captureContext = if (activeWindow) "active-window" else "baseline-snapshot"
           try {
-            Log.d(tag, "Triggering still capture context=$captureContext")
+            Log.d(
+              tag,
+              "Triggering still capture context=$captureContext throttle=${throttle.level} intervalMs=$nextInterval",
+            )
             val frame = imageHal.captureStill()
             val taggedFrame = frame.copy(note = captureContext)
             Log.d(tag, "Uploading image ${taggedFrame.fileName} bytes=${taggedFrame.bytes.size}")
@@ -359,12 +388,11 @@ class SensorForegroundService : LifecycleService() {
             }
             Log.e(tag, "Image upload failed", error)
           }
-          val interval = if (isWithinActiveWindow(SystemClock.elapsedRealtime())) {
-            ACTIVE_STILL_INTERVAL_MS
-          } else {
-            BASELINE_STILL_INTERVAL_MS
-          }
-          nextStillCaptureDueAtMs = SystemClock.elapsedRealtime() + interval
+          val refreshedThrottle = repository.captureThrottleSnapshot()
+          nextStillCaptureDueAtMs = SystemClock.elapsedRealtime() + stillCaptureIntervalMs(
+            activeWindow = isWithinActiveWindow(SystemClock.elapsedRealtime()),
+            multiplier = refreshedThrottle.stillIntervalMultiplier,
+          )
         }
       }
     }
@@ -373,6 +401,11 @@ class SensorForegroundService : LifecycleService() {
   private fun isWithinActiveWindow(nowElapsed: Long): Boolean {
     val lastActivity = lastAudioActivityElapsedMs
     return lastActivity > 0 && nowElapsed - lastActivity <= ACTIVE_STILL_WINDOW_MS
+  }
+
+  private fun stillCaptureIntervalMs(activeWindow: Boolean, multiplier: Int): Long {
+    val base = if (activeWindow) ACTIVE_STILL_INTERVAL_MS else BASELINE_STILL_INTERVAL_MS
+    return (base * multiplier.coerceAtLeast(1)).coerceAtMost(MAX_THROTTLED_STILL_INTERVAL_MS)
   }
 
   private fun beginShutdown(removeNotification: Boolean) {
@@ -404,10 +437,6 @@ class SensorForegroundService : LifecycleService() {
       videoSensorRunning = false
       assistantQueryTimeoutJob?.cancel()
       assistantQueryTimeoutJob = null
-      pendingAssistantQuery = false
-      pendingAssistantModeHint = AssistantModeHint.AUTO
-      pendingAssistantArmedAtElapsedMs = 0L
-      pendingAssistantArmedAtWallMs = 0L
       runCatching { audioHal.stop() }
         .onFailure { Log.w(tag, "Audio HAL stop failed", it) }
       runCatching { imageHal.stop() }
@@ -424,107 +453,12 @@ class SensorForegroundService : LifecycleService() {
     videoSensorRunning = false
     assistantQueryTimeoutJob?.cancel()
     assistantQueryTimeoutJob = null
-    pendingAssistantQuery = false
-    pendingAssistantModeHint = AssistantModeHint.AUTO
-    pendingAssistantArmedAtElapsedMs = 0L
-    pendingAssistantArmedAtWallMs = 0L
     assistantAmbientDropUntilWallMs = 0L
     lastAudioActivityElapsedMs = 0L
     nextStillCaptureDueAtMs = Long.MAX_VALUE
   }
 
-  private fun clearPendingAssistantQueryLocked() {
-    assistantQueryTimeoutJob?.cancel()
-    assistantQueryTimeoutJob = null
-    pendingAssistantQuery = false
-    pendingAssistantModeHint = AssistantModeHint.AUTO
-    pendingAssistantArmedAtElapsedMs = 0L
-    pendingAssistantArmedAtWallMs = 0L
-  }
-
   private suspend fun handleCapturedAudioClip(clip: CapturedAudioClip) {
-    var queryModeHint = AssistantModeHint.AUTO
-    var assistantQueryRejectionMessage: String? = null
-    val shouldUseAsAssistantQuery = assistantMutex.withLock {
-      if (pendingAssistantQuery) {
-        val nowElapsed = SystemClock.elapsedRealtime()
-        val armedAtElapsed = pendingAssistantArmedAtElapsedMs
-        val armedAtWall = pendingAssistantArmedAtWallMs
-        when {
-          armedAtElapsed <= 0L || armedAtWall <= 0L -> {
-            Log.w(tag, "Assistant query pending without arm timestamps; resetting pending query state")
-            clearPendingAssistantQueryLocked()
-            false
-          }
-          nowElapsed - armedAtElapsed > ASSISTANT_QUERY_RECORDING_TIMEOUT_MS + ASSISTANT_QUERY_TIMEOUT_GRACE_MS -> {
-            Log.d(
-              tag,
-              "Ignoring expired assistant query candidate capturedAt=${clip.capturedAt} armedAt=$armedAtWall",
-            )
-            clearPendingAssistantQueryLocked()
-            false
-          }
-          clip.capturedAt > 0L && clip.capturedAt < armedAtWall - ASSISTANT_QUERY_ARM_TOLERANCE_MS -> {
-            Log.d(
-              tag,
-              "Ignoring pre-armed ambient clip for assistant query capturedAt=${clip.capturedAt} armedAt=$armedAtWall durationMs=${clip.durationMs}",
-            )
-            false
-          }
-          isAssistantQueryCandidateTooLong(clip) -> {
-            assistantQueryRejectionMessage = "这段声音太长，像环境音或视频内容；我已按普通环境音保存，请点“问实时助手”后用一句短问题重试。"
-            Log.d(
-              tag,
-              "Rejecting long assistant query candidate durationMs=${clip.durationMs} note=${clip.note}",
-            )
-            clearPendingAssistantQueryLocked()
-            false
-          }
-          isAssistantQueryCandidateContinuedAmbient(clip, armedAtWall) -> {
-            assistantQueryRejectionMessage = "检测到这段声音属于正在持续的环境音或视频内容，没有把它当作你的提问。请等背景声音停一下，再用一句短问题重试。"
-            Log.d(
-              tag,
-              "Rejecting continued ambient assistant query candidate capturedAt=${clip.capturedAt} armedAt=$armedAtWall note=${clip.note}",
-            )
-            clearPendingAssistantQueryLocked()
-            false
-          }
-          else -> {
-            assistantQueryTimeoutJob?.cancel()
-            assistantQueryTimeoutJob = null
-            pendingAssistantQuery = false
-            queryModeHint = pendingAssistantModeHint
-            pendingAssistantModeHint = AssistantModeHint.AUTO
-            pendingAssistantArmedAtElapsedMs = 0L
-            pendingAssistantArmedAtWallMs = 0L
-            repository.updateAssistantSnapshot(
-              AssistantInteractionSnapshot(
-                phase = AssistantInteractionPhase.WAITING_ANSWER,
-                lastUpdatedAt = System.currentTimeMillis(),
-                mode = queryModeHint,
-              ),
-            )
-            Log.d(
-              tag,
-              "Assistant query clip captured mode=$queryModeHint durationMs=${clip.durationMs} bytes=${clip.bytes.size}",
-            )
-            true
-          }
-        }
-      } else {
-        false
-      }
-    }
-
-    if (shouldUseAsAssistantQuery) {
-      processAssistantQuery(clip, queryModeHint)
-      return
-    }
-
-    assistantQueryRejectionMessage?.let { message ->
-      markAssistantReady(lastError = message)
-    }
-
     if (shouldDropAssistantEchoClip(clip)) {
       Log.d(
         tag,
@@ -540,6 +474,19 @@ class SensorForegroundService : LifecycleService() {
         phase == AssistantInteractionPhase.SPEAKING_ANSWER
     ) {
       Log.d(tag, "Dropping ambient audio clip during assistant phase=$phase")
+      return
+    }
+
+    val throttle = repository.captureThrottleSnapshot()
+    if (throttle.deferLowSignalAudio && isLowSignalAmbientAudio(clip)) {
+      Log.d(
+        tag,
+        "Deferring low-signal audio clip due to throttle level=${throttle.level} reason=${throttle.reason} durationMs=${clip.durationMs} note=${clip.note}",
+      )
+      repository.deferAudioUpload(
+        clip = clip,
+        reason = "服务端分析拥堵，低信号音频已延后补传；当前会优先保留关键音频和图片。",
+      )
       return
     }
 
@@ -600,21 +547,149 @@ class SensorForegroundService : LifecycleService() {
     }
   }
 
-  private fun isAssistantQueryCandidateTooLong(clip: CapturedAudioClip): Boolean {
-    val durationMs = clip.durationMs ?: return false
-    return durationMs > ASSISTANT_QUERY_MAX_ACCEPTED_CLIP_MS
+  private suspend fun maybeTriggerAutoVideoClip(directive: CaptureVideoDirective) {
+    if (directive.type != "video_clip") {
+      Log.d(tag, "Ignoring unsupported capture directive type=${directive.type}")
+      return
+    }
+    val nowWallMs = System.currentTimeMillis()
+    val expiresAt = directive.expiresAt
+    if (expiresAt != null && expiresAt <= nowWallMs) {
+      Log.d(tag, "Ignoring expired auto-video directive id=${directive.directiveId}")
+      return
+    }
+    val preferences = repository.capturePreferences.value
+    if (!preferences.autoVideoEnabled) {
+      Log.d(tag, "Skipping auto-video directive id=${directive.directiveId}; auto video disabled")
+      return
+    }
+    if (!videoSensorRunning || repository.runtimeStatus.value.phase != ServicePhase.RUNNING) {
+      Log.d(tag, "Skipping auto-video directive id=${directive.directiveId}; video sensor not running")
+      return
+    }
+    if (videoCaptureJob?.isActive == true) {
+      Log.d(tag, "Skipping auto-video directive id=${directive.directiveId}; video capture already active")
+      return
+    }
+    val assistantPhase = repository.assistantSnapshot.value.phase
+    if (
+      assistantPhase == AssistantInteractionPhase.RECORDING_QUERY ||
+        assistantPhase == AssistantInteractionPhase.WAITING_ANSWER ||
+        assistantPhase == AssistantInteractionPhase.SPEAKING_ANSWER
+    ) {
+      Log.d(tag, "Skipping auto-video directive id=${directive.directiveId}; assistant phase=$assistantPhase")
+      return
+    }
+    val throttle = repository.captureThrottleSnapshot()
+    if (throttle.pauseAutoVideo) {
+      Log.d(
+        tag,
+        "Skipping auto-video directive id=${directive.directiveId}; capture throttle level=${throttle.level} reason=${throttle.reason}",
+      )
+      return
+    }
+    val nowElapsed = SystemClock.elapsedRealtime()
+    if (lastAutoVideoCaptureElapsedMs > 0L && nowElapsed - lastAutoVideoCaptureElapsedMs < AUTO_VIDEO_COOLDOWN_MS) {
+      Log.d(tag, "Skipping auto-video directive id=${directive.directiveId}; cooldown active")
+      return
+    }
+    resetAutoVideoCountersIfNeeded(nowWallMs)
+    if (autoVideoCountThisHour >= preferences.autoVideoMaxPerHour.coerceAtLeast(0)) {
+      Log.d(tag, "Skipping auto-video directive id=${directive.directiveId}; hourly limit reached")
+      return
+    }
+    if (autoVideoCountThisDay >= preferences.autoVideoMaxPerDay.coerceAtLeast(0)) {
+      Log.d(tag, "Skipping auto-video directive id=${directive.directiveId}; daily limit reached")
+      return
+    }
+    lastAutoVideoCaptureElapsedMs = nowElapsed
+    autoVideoCountThisHour += 1
+    autoVideoCountThisDay += 1
+    val durationMs = directive.durationMs.coerceIn(3_000L, MANUAL_VIDEO_CLIP_MS)
+    val note = listOfNotNull(
+      "auto-video-trigger",
+      "androidVideoM2=1",
+      "clipMs=$durationMs",
+      "triggerSource=heartbeat-directive",
+      "directiveId=${sanitizeNoteToken(directive.directiveId)}",
+      "triggerReason=${sanitizeNoteToken(directive.reason)}",
+      directive.sourceEventId?.let { "sourceEventId=${sanitizeNoteToken(it)}" },
+      directive.sourceText?.let { "sourceText=${sanitizeNoteToken(it, 120)}" },
+    ).joinToString(" ")
+
+    videoCaptureJob = lifecycleScope.launch {
+      try {
+        Log.d(
+          tag,
+          "Auto video clip capture requested directiveId=${directive.directiveId} reason=${directive.reason}",
+        )
+        repository.updateVideoCaptureStatus("检测到关键线索，正在自动录制 6 秒视频片段…", inProgress = true)
+        val clip = imageHal.recordVideoClip(durationMs).copy(note = note)
+        repository.updateVideoCaptureStatus(
+          "正在上传自动视频片段（${clip.bytes.size / 1024} KB，关键帧 ${clip.keyframes.size} 张）…",
+          inProgress = true,
+        )
+        repository.uploadVideo(clip)
+        repository.updateVideoCaptureStatus("自动视频片段已提交；触发原因已写入 evidence。", inProgress = false)
+        Log.d(tag, "Auto video upload succeeded directiveId=${directive.directiveId}")
+      } catch (error: Throwable) {
+        if (error is CancellationException) {
+          repository.updateVideoCaptureStatus(null, inProgress = false)
+          rollbackAutoVideoCounterReservation()
+          throw error
+        }
+        if (error is ClawSenseAuthException) {
+          Log.e(tag, "Auto video upload unauthorized; stopping service", error)
+          repository.updateVideoCaptureStatus("自动视频上传失败：设备凭证失效，请重新配对。", inProgress = false)
+          rollbackAutoVideoCounterReservation()
+          WorkScheduler.cancelHeartbeat(this@SensorForegroundService)
+          beginShutdown(removeNotification = true)
+          return@launch
+        }
+        Log.e(tag, "Auto video capture/upload failed directiveId=${directive.directiveId}", error)
+        rollbackAutoVideoCounterReservation()
+        repository.updateVideoCaptureStatus(
+          "自动视频上传失败：${error.message ?: "未知错误"}",
+          inProgress = false,
+        )
+        repository.recordError("自动视频上传失败：${error.message ?: "未知错误"}")
+      }
+    }
   }
 
-  private fun isAssistantQueryCandidateContinuedAmbient(
-    clip: CapturedAudioClip,
-    armedAtWallMs: Long,
-  ): Boolean {
-    val note = clip.note ?: return false
-    if (note.contains("continued=1")) {
+  private fun rollbackAutoVideoCounterReservation() {
+    autoVideoCountThisHour = (autoVideoCountThisHour - 1).coerceAtLeast(0)
+    autoVideoCountThisDay = (autoVideoCountThisDay - 1).coerceAtLeast(0)
+  }
+
+  private fun resetAutoVideoCountersIfNeeded(nowWallMs: Long) {
+    val hourBucket = nowWallMs / (60 * 60 * 1000L)
+    val dayBucket = nowWallMs / (24 * 60 * 60 * 1000L)
+    if (hourBucket != autoVideoHourBucket) {
+      autoVideoHourBucket = hourBucket
+      autoVideoCountThisHour = 0
+    }
+    if (dayBucket != autoVideoDayBucket) {
+      autoVideoDayBucket = dayBucket
+      autoVideoCountThisDay = 0
+    }
+  }
+
+  private fun isLowSignalAmbientAudio(clip: CapturedAudioClip): Boolean {
+    val note = clip.note ?: return (clip.durationMs ?: Long.MAX_VALUE) <= 4_500L
+    val voicedMs = noteValue(note, "voicedMs")?.toLongOrNull()
+    val clipMs = noteValue(note, "clipMs")?.toLongOrNull() ?: clip.durationMs
+    val peakRms = noteValue(note, "peakRms")?.toDoubleOrNull()
+    if (voicedMs != null && voicedMs < 1_500L) {
       return true
     }
-    val sessionStart = noteValue(note, "sessionStart")?.toLongOrNull()
-    return sessionStart != null && sessionStart < armedAtWallMs - ASSISTANT_QUERY_ARM_TOLERANCE_MS
+    if (voicedMs != null && clipMs != null && clipMs > 0L && voicedMs.toDouble() / clipMs.toDouble() < 0.18) {
+      return true
+    }
+    if (peakRms != null && peakRms < 0.035) {
+      return true
+    }
+    return false
   }
 
   private fun shouldDropAssistantEchoClip(clip: CapturedAudioClip): Boolean {
@@ -668,52 +743,91 @@ class SensorForegroundService : LifecycleService() {
           ),
         )
       } else {
-        pendingAssistantQuery = true
-        pendingAssistantModeHint = modeHint
-        pendingAssistantArmedAtElapsedMs = SystemClock.elapsedRealtime()
-        pendingAssistantArmedAtWallMs = System.currentTimeMillis()
+        repository.updateAssistantSnapshot(
+          AssistantInteractionSnapshot(
+            phase = AssistantInteractionPhase.RECORDING_QUERY,
+            lastUpdatedAt = System.currentTimeMillis(),
+            mode = modeHint,
+          ),
+        )
         shouldArmQuery = true
       }
     }
-    if (shouldArmQuery) {
-      Log.d(tag, "Assistant query armed mode=$modeHint timeoutMs=$ASSISTANT_QUERY_RECORDING_TIMEOUT_MS")
-      repository.updateAssistantSnapshot(
-        AssistantInteractionSnapshot(
-          phase = AssistantInteractionPhase.RECORDING_QUERY,
-          lastUpdatedAt = System.currentTimeMillis(),
-          mode = modeHint,
-        ),
+    if (!shouldArmQuery) {
+      return
+    }
+    val armed = audioHal.beginAssistantQueryCapture { clip ->
+      onAssistantQueryCaptured(clip, modeHint)
+    }
+    if (!armed) {
+      Log.w(tag, "Assistant query capture already in flight; ignoring trigger")
+      markAssistantReady(lastError = "上一轮提问录音还没结束，请稍候再试。")
+      return
+    }
+    Log.d(tag, "Assistant query recorder armed mode=$modeHint watchdogMs=$ASSISTANT_QUERY_WATCHDOG_MS")
+    scheduleAssistantQueryWatchdog(modeHint)
+  }
+
+  private fun onAssistantQueryCaptured(clip: CapturedAudioClip?, modeHint: AssistantModeHint) {
+    assistantQueryTimeoutJob?.cancel()
+    assistantQueryTimeoutJob = null
+    lifecycleScope.launch {
+      val phaseOk = assistantMutex.withLock {
+        if (repository.assistantSnapshot.value.phase != AssistantInteractionPhase.RECORDING_QUERY) {
+          false
+        } else {
+          if (clip != null) {
+            repository.updateAssistantSnapshot(
+              AssistantInteractionSnapshot(
+                phase = AssistantInteractionPhase.WAITING_ANSWER,
+                lastUpdatedAt = System.currentTimeMillis(),
+                mode = modeHint,
+              ),
+            )
+          }
+          true
+        }
+      }
+      if (!phaseOk) {
+        Log.w(tag, "Assistant query capture finished outside RECORDING_QUERY phase; dropping result")
+        return@launch
+      }
+      if (clip == null) {
+        Log.d(tag, "Assistant query capture delivered no speech mode=$modeHint")
+        markAssistantReady(lastError = ASSISTANT_QUERY_NO_SPEECH_MESSAGE)
+        return@launch
+      }
+      Log.d(
+        tag,
+        "Assistant query clip captured mode=$modeHint durationMs=${clip.durationMs} bytes=${clip.bytes.size} note=${clip.note}",
       )
-      scheduleAssistantQueryTimeout(modeHint)
+      processAssistantQuery(clip, modeHint)
     }
   }
 
-  private fun scheduleAssistantQueryTimeout(modeHint: AssistantModeHint) {
+  private fun scheduleAssistantQueryWatchdog(modeHint: AssistantModeHint) {
     assistantQueryTimeoutJob?.cancel()
     assistantQueryTimeoutJob = lifecycleScope.launch {
-      delay(ASSISTANT_QUERY_RECORDING_TIMEOUT_MS)
+      // The recorder guarantees a result within queryMaxDurationMs; this only
+      // recovers the UI if the audio loop dies mid-capture.
+      delay(ASSISTANT_QUERY_WATCHDOG_MS)
       var timedOut = false
-      val message = "这次没有听到可用问题。请靠近一点，再点一次“问实时助手”。"
       assistantMutex.withLock {
-        if (
-          pendingAssistantQuery &&
-            repository.assistantSnapshot.value.phase == AssistantInteractionPhase.RECORDING_QUERY
-        ) {
-          clearPendingAssistantQueryLocked()
+        if (repository.assistantSnapshot.value.phase == AssistantInteractionPhase.RECORDING_QUERY) {
           timedOut = true
           repository.updateAssistantSnapshot(
             AssistantInteractionSnapshot(
               phase = AssistantInteractionPhase.ERROR_RECOVERY,
               lastUpdatedAt = System.currentTimeMillis(),
               mode = modeHint,
-              lastError = message,
+              lastError = ASSISTANT_QUERY_WATCHDOG_MESSAGE,
             ),
           )
         }
       }
       if (timedOut) {
-        Log.d(tag, "Assistant query recording timed out mode=$modeHint")
-        markAssistantReady(lastError = message)
+        Log.w(tag, "Assistant query recorder watchdog fired mode=$modeHint")
+        markAssistantReady(lastError = ASSISTANT_QUERY_WATCHDOG_MESSAGE)
       }
     }
   }
@@ -736,7 +850,7 @@ class SensorForegroundService : LifecycleService() {
       )
       Log.d(
         tag,
-        "Assistant query answered mode=${response.modeUsed} source=${response.answerSource ?: "unknown"} action=${response.actionIntent?.type ?: "none"} queryTextLen=${response.queryText.length} answerLen=${response.answerText.length} spokenLen=${response.answerSpokenText.length} sttProvider=${response.stt?.provider ?: "none"} sttFailure=${response.stt?.failureReason ?: "none"} sttRewrite=${response.stt?.queryRewriteReason ?: "none"} rawQueryLen=${response.stt?.rawQueryText?.length ?: 0}",
+        "Assistant query answered mode=${response.modeUsed} source=${response.answerSource ?: "unknown"} action=${response.actionIntent?.type ?: "none"} queryTextLen=${response.queryText.length} answerLen=${response.answerText.length} spokenLen=${response.answerSpokenText.length} sttProvider=${response.stt?.provider ?: "none"} sttFailure=${response.stt?.failureReason ?: "none"} sttRewrite=${response.stt?.queryRewriteReason ?: "none"} rawQueryLen=${response.stt?.rawQueryText?.length ?: 0}${assistantQueryDebugPreview(response)} audioRecheckAttempted=${response.audioRecheck?.attempted ?: false} audioRecheckRefreshed=${response.audioRecheck?.refreshed ?: false} audioRecheckTranscripts=${response.audioRecheck?.transcriptCount ?: 0}/${response.audioRecheck?.resultCount ?: 0}",
       )
       speakAssistantResponse(response)
     } catch (error: Throwable) {
@@ -769,6 +883,26 @@ class SensorForegroundService : LifecycleService() {
       markAssistantReady(
         lastError = "助手回答失败：${error.message ?: "未知错误"}",
       )
+    }
+  }
+
+  private fun assistantQueryDebugPreview(response: AssistantQueryResponse): String {
+    if (!BuildConfig.DEBUG) {
+      return ""
+    }
+    val query = response.queryText.takeIf { it.isNotBlank() }?.let { previewText(it) }
+    val raw = response.stt?.rawQueryText?.takeIf { it.isNotBlank() }?.let { previewText(it) }
+    return " queryPreview=${query ?: "-"} rawQueryPreview=${raw ?: "-"}"
+  }
+
+  private fun previewText(text: String): String {
+    val normalized = text
+      .replace(Regex("\\s+"), " ")
+      .trim()
+    return if (normalized.length <= 32) {
+      normalized
+    } else {
+      normalized.take(32) + "…"
     }
   }
 
@@ -935,5 +1069,13 @@ class SensorForegroundService : LifecycleService() {
       hasCameraPermission -> getString(R.string.notification_text_camera_only)
       else -> getString(R.string.notification_text_waiting)
     }
+  }
+
+  private fun sanitizeNoteToken(value: String, maxLength: Int = 80): String {
+    return value
+      .trim()
+      .replace(Regex("\\s+"), "_")
+      .replace(Regex("[^A-Za-z0-9_.:=\\-\\u4e00-\\u9fa5]"), "")
+      .take(maxLength)
   }
 }

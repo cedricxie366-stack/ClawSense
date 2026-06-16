@@ -6,11 +6,11 @@ OPENCLAW_HOME="${OPENCLAW_HOME:-$HOME/.openclaw}"
 OPENCLAW_STATE_DIR="${OPENCLAW_STATE_DIR:-$OPENCLAW_HOME}"
 OPENCLAW_CONFIG_PATH="${OPENCLAW_CONFIG_PATH:-$OPENCLAW_STATE_DIR/openclaw.json}"
 CLAWSENSE_PLUGIN_ID="${CLAWSENSE_PLUGIN_ID:-clawsense}"
-CLAWSENSE_PLUGIN_DIR="${CLAWSENSE_PLUGIN_DIR:-$OPENCLAW_HOME/plugins/$CLAWSENSE_PLUGIN_ID}"
 CLAWSENSE_NPM_SPEC="${CLAWSENSE_NPM_SPEC:-}"
 CLAWSENSE_SOURCE_URL="${CLAWSENSE_SOURCE_URL:-}"
 CLAWSENSE_PUBLIC_BASE_URL="${CLAWSENSE_PUBLIC_BASE_URL:-}"
 CLAWSENSE_GATEWAY_PORT="${CLAWSENSE_GATEWAY_PORT:-3000}"
+CLAWSENSE_PLUGIN_DIR="${CLAWSENSE_PLUGIN_DIR:-$OPENCLAW_HOME/plugin-sources/$CLAWSENSE_PLUGIN_ID}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 log() {
@@ -71,7 +71,7 @@ const raw = JSON.parse(fs.readFileSync(file, "utf8"));
 let changed = false;
 const plugins = (raw.plugins && typeof raw.plugins === "object") ? raw.plugins : (raw.plugins = {});
 if (Array.isArray(plugins.allow)) {
-  const next = plugins.allow.filter((item) => item !== "clawsense-openclaw-plugin");
+  const next = plugins.allow.filter((item) => item !== "clawsense-openclaw-plugin" && item !== process.argv[2]);
   if (next.length !== plugins.allow.length) {
     plugins.allow = next;
     changed = true;
@@ -109,9 +109,11 @@ if (plugins.installs && typeof plugins.installs === "object") {
 if (changed) {
   fs.writeFileSync(file, JSON.stringify(raw, null, 2));
 }
-' "$OPENCLAW_CONFIG_PATH"
+' "$OPENCLAW_CONFIG_PATH" "$CLAWSENSE_PLUGIN_ID"
 
   rm -rf \
+    "$OPENCLAW_STATE_DIR/extensions/$CLAWSENSE_PLUGIN_ID" \
+    "$OPENCLAW_HOME/extensions/$CLAWSENSE_PLUGIN_ID" \
     "$OPENCLAW_HOME/extensions/clawsense-openclaw-plugin" \
     "$OPENCLAW_HOME/plugins/clawsense-openclaw-plugin"
 }

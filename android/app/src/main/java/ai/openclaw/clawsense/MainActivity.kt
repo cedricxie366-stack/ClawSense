@@ -36,7 +36,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -73,6 +72,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -241,10 +241,9 @@ private fun ClawSenseScreen(viewModel: MainViewModel) {
       topBar = {
         TopAppBar(
           title = { Text("ClawSense", color = ClawSensePalette.TextPrimary) },
-          modifier = Modifier.statusBarsPadding(),
           colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = Color.Transparent,
-            scrolledContainerColor = Color.Transparent,
+            containerColor = ClawSensePalette.BackgroundTop,
+            scrolledContainerColor = ClawSensePalette.BackgroundTop,
             navigationIconContentColor = ClawSensePalette.TextPrimary,
             titleContentColor = ClawSensePalette.TextPrimary,
             actionIconContentColor = ClawSensePalette.TextPrimary,
@@ -301,6 +300,7 @@ private fun ClawSenseScreen(viewModel: MainViewModel) {
               viewModel.setStatus("已请求录制 6 秒视频片段；如果主机未开启视频模式，会显示上传失败。")
             }
           },
+          onAutoVideoEnabledChange = viewModel::setAutoVideoEnabled,
         )
         AssistantCard(
           uiState = uiState,
@@ -410,6 +410,15 @@ private fun AssistantCard(
     AssistantInteractionPhase.SPEAKING_ANSWER -> "手机正在用本地 TTS 朗读回答，同时保留文本。"
     AssistantInteractionPhase.ERROR_RECOVERY -> snapshot.lastError ?: "上一轮问答出了点问题，但不影响继续重试。"
   }
+  val assistantButtonLabel = when (snapshot.phase) {
+    AssistantInteractionPhase.RECORDING_QUERY -> "正在听"
+    AssistantInteractionPhase.WAITING_ANSWER -> "思考中"
+    AssistantInteractionPhase.SPEAKING_ANSWER -> "回答中"
+    else -> "问实时助手"
+  }
+  val assistantButtonBusy =
+    snapshot.phase == AssistantInteractionPhase.RECORDING_QUERY ||
+      snapshot.phase == AssistantInteractionPhase.WAITING_ANSWER
 
   Card(
     colors = CardDefaults.cardColors(containerColor = ClawSensePalette.CardMuted),
@@ -445,10 +454,35 @@ private fun AssistantCard(
       }
 
       Text(
-        text = "首版先走“手动触发单轮提问”，主机返回文本，手机本地 TTS 朗读。后面再把常开唤醒词接进来。",
+        text = "首版先走“手动触发单轮提问”：不点击“问实时助手”时，说话只会进入环境记录，不会当作你的提问。",
         style = MaterialTheme.typography.bodySmall,
         color = ClawSensePalette.TextSecondary,
       )
+
+      if (snapshot.phase == AssistantInteractionPhase.RECORDING_QUERY) {
+        Surface(
+          modifier = Modifier.fillMaxWidth(),
+          color = ClawSensePalette.Accent.copy(alpha = 0.22f),
+          shape = RoundedCornerShape(18.dp),
+          border = androidx.compose.foundation.BorderStroke(1.dp, ClawSensePalette.Accent),
+        ) {
+          Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+          ) {
+            Text(
+              text = "现在正在录你的问题",
+              style = MaterialTheme.typography.titleSmall,
+              color = ClawSensePalette.TextPrimary,
+            )
+            Text(
+              text = "请在 15 秒内说一句短问题；听到末尾静音后，手机会把这段作为显式提问发给 OpenClaw。",
+              style = MaterialTheme.typography.bodySmall,
+              color = ClawSensePalette.TextPrimary,
+            )
+          }
+        }
+      }
 
       FlowRow(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -479,12 +513,25 @@ private fun AssistantCard(
           onClick = { onTrigger(selectedMode) },
           enabled = canTrigger,
           modifier = Modifier.weight(1f),
-          colors = ButtonDefaults.buttonColors(containerColor = ClawSensePalette.Accent),
+          colors = ButtonDefaults.buttonColors(
+            containerColor = ClawSensePalette.Accent,
+            contentColor = ClawSensePalette.BackgroundTop,
+            disabledContainerColor = ClawSensePalette.CardStrong,
+            disabledContentColor = ClawSensePalette.TextPrimary,
+          ),
           contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
         ) {
-          Icon(Icons.Outlined.GraphicEq, contentDescription = null)
+          if (assistantButtonBusy) {
+            CircularProgressIndicator(
+              modifier = Modifier.size(20.dp),
+              strokeWidth = 2.dp,
+              color = ClawSensePalette.TextPrimary,
+            )
+          } else {
+            Icon(Icons.Outlined.GraphicEq, contentDescription = null)
+          }
           Spacer(Modifier.width(8.dp))
-          Text("问实时助手")
+          Text(assistantButtonLabel)
         }
         if (snapshot.phase == AssistantInteractionPhase.SPEAKING_ANSWER) {
           FilledTonalButton(
@@ -665,6 +712,7 @@ private fun ServiceRuntimeCard(
   onStart: () -> Unit,
   onStop: () -> Unit,
   onCaptureVideo: () -> Unit,
+  onAutoVideoEnabledChange: (Boolean) -> Unit,
 ) {
   val visual = runtimeVisual(uiState.runtimeStatus, uiState.session != null)
   val updatedAtText = formatTimestamp(uiState.runtimeStatus.updatedAt)
@@ -672,6 +720,7 @@ private fun ServiceRuntimeCard(
   val recentImageText = formatTimestampOrPlaceholder(uiState.serviceActivity.lastImageUploadAt)
   val recentVideoText = formatTimestampOrPlaceholder(uiState.serviceActivity.lastVideoUploadAt)
   val videoStatusText = formatVideoStatus(uiState.serviceActivity)
+  val analysisQueueText = formatAnalysisQueueStatus(uiState.serviceActivity)
   val recentErrorText = formatRecentError(uiState.serviceActivity)
   val canCaptureVideo =
     uiState.session != null &&
@@ -805,6 +854,12 @@ private fun ServiceRuntimeCard(
               (uiState.serviceActivity.lastVideoStatus?.contains("失败") == true),
           )
           ActivityRow(
+            icon = Icons.Outlined.SettingsInputAntenna,
+            label = "后台分析队列",
+            value = analysisQueueText,
+            emphasize = uiState.serviceActivity.lastAnalysisQueued == false,
+          )
+          ActivityRow(
             icon = Icons.Outlined.WarningAmber,
             label = "最近错误",
             value = recentErrorText,
@@ -832,6 +887,42 @@ private fun ServiceRuntimeCard(
         Icon(Icons.Outlined.Videocam, contentDescription = null)
         Spacer(Modifier.width(8.dp))
         Text("录制 6 秒视频片段")
+      }
+
+      Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = Color(0x66172233),
+        shape = RoundedCornerShape(18.dp),
+      ) {
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(14.dp),
+          horizontalArrangement = Arrangement.spacedBy(12.dp),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+              text = "自动视频 evidence 增强",
+              style = MaterialTheme.typography.titleSmall,
+              color = ClawSensePalette.TextPrimary,
+            )
+            Text(
+              text = if (uiState.capturePreferences.autoVideoEnabled) {
+                "已开启：关键语音/文字线索会低频触发 6 秒短视频。上限 ${uiState.capturePreferences.autoVideoMaxPerHour}/小时，${uiState.capturePreferences.autoVideoMaxPerDay}/天。"
+              } else {
+                "默认关闭：只有手动点击才会录视频。开启后仍受队列、冷却和上限保护。"
+              },
+              style = MaterialTheme.typography.bodySmall,
+              color = ClawSensePalette.TextSecondary,
+            )
+          }
+          Switch(
+            checked = uiState.capturePreferences.autoVideoEnabled,
+            onCheckedChange = onAutoVideoEnabledChange,
+            enabled = permissions.camera && uiState.session != null,
+          )
+        }
       }
 
       Row(
@@ -1466,6 +1557,16 @@ private fun formatVideoStatus(activity: ServiceActivitySnapshot): String {
     status
   } else {
     "$occurredAt · $status"
+  }
+}
+
+private fun formatAnalysisQueueStatus(activity: ServiceActivitySnapshot): String {
+  val queueDepth = activity.lastServerQueueDepth
+  val queueText = queueDepth?.let { "，深度 $it" } ?: ""
+  return when (activity.lastAnalysisQueued) {
+    true -> "已进入后台分析队列$queueText"
+    false -> "媒体已保存，等待补分析$queueText"
+    null -> "暂无队列状态"
   }
 }
 

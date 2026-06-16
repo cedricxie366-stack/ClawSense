@@ -55,10 +55,22 @@ class SecureSessionStore(
     prefs.edit().putString(KEY_RUNTIME_STATUS, json.encodeToString(status)).apply()
   }
 
+  fun loadCapturePreferences(): CapturePreferences {
+    val raw = prefs.getString(KEY_CAPTURE_PREFERENCES, null)
+      ?: return CapturePreferences()
+    return runCatching { json.decodeFromString<CapturePreferences>(raw) }
+      .getOrElse { CapturePreferences() }
+  }
+
+  fun saveCapturePreferences(preferences: CapturePreferences) {
+    prefs.edit().putString(KEY_CAPTURE_PREFERENCES, json.encodeToString(preferences)).apply()
+  }
+
   companion object {
     private const val PREFS_NAME = "clawsense_secure_prefs"
     private const val KEY_SESSION = "device_session"
     private const val KEY_SERVICE_ENABLED = "service_enabled"
     private const val KEY_RUNTIME_STATUS = "service_runtime_status"
+    private const val KEY_CAPTURE_PREFERENCES = "capture_preferences"
   }
 }

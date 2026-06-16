@@ -1299,6 +1299,48 @@ describe("ClawSenseMemoryStore", () => {
     expect(event.sttProvider).toBe("runtime");
   });
 
+  it("stores captures immediately as pending and backfills analysis asynchronously", async () => {
+    const harness = await createHarness(rootDir, {
+      mediaRoot: path.join(rootDir, "audio-pending-media"),
+    });
+    const capturedAt = Date.now();
+
+    const receipt = await harness.memoryStore.ingestPending({
+      device: harness.device,
+      modality: "audio",
+      body: createWaveBuffer(5_000),
+      fileName: "capture.wav",
+      mime: "audio/wav",
+      capturedAt,
+      note: "csAudio:v2 session=conv-pending segment=1",
+    });
+
+    let event = await latestEvent(harness.stateStore);
+    expect(receipt.artifactId).toBeTruthy();
+    expect(event.artifactId).toBe(receipt.artifactId);
+    expect(event.analysisMode).toBe("metadata-only");
+    expect(event.analysisProvider).toBe("analysis-queue");
+    expect(event.analysisStatus).toBe("degraded");
+    expect(event.analysisFailureReason).toBe("analysis_pending");
+    expect(event.summary).toContain("analysis is pending");
+    await expect(fs.stat(receipt.storedAt)).resolves.toMatchObject({ size: expect.any(Number) });
+
+    const update = await harness.memoryStore.analyzeCaptureArtifact({
+      artifactId: receipt.artifactId!,
+      transcribeAudio: async () => ({ text: "刚才讨论了发布节奏和客户跟进事项。" }),
+      describeImage: async () => ({ text: "unused" }),
+    });
+
+    expect(update.updated).toBe(true);
+    event = await latestEvent(harness.stateStore);
+    expect(event.transcript).toBe("刚才讨论了发布节奏和客户跟进事项。");
+    expect(event.summary).toContain("发布节奏");
+    expect(event.analysisMode).toBe("runtime-stt");
+    expect(event.analysisProvider).toBe("runtime");
+    expect(event.analysisStatus).toBe("succeeded");
+    expect(event.analysisFailureReason).toBeUndefined();
+  });
+
   it("degrades empty runtime STT output into readable summaries instead of raw rms placeholders", async () => {
     const harness = await createHarness(rootDir, {
       mediaRoot: path.join(rootDir, "audio-failure-media"),
@@ -1838,6 +1880,36 @@ describe("ClawSenseMemoryStore", () => {
     expect(openaiClient.embeddings.create).toHaveBeenCalled();
     expect(event.embeddingModel).toBe(harness.cfg.embeddingModel);
   });
+
+  it("falls back to deterministic vectors when the embedding request fails", async () => {
+    const harness = await createHarness(rootDir);
+    stubOpenAiClient(harness.memoryStore, harness.cfg, {
+      transcript: "今天讨论了遥控器成本、价格和功能可行性。",
+      embeddingError: new Error("404 model_not_found"),
+    });
+    const openaiClient = (harness.memoryStore as unknown as { openai: any }).openai;
+
+    await harness.memoryStore.ingest({
+      device: harness.device,
+      modality: "audio",
+      body: createWaveBuffer(5_000),
+      fileName: "capture.wav",
+      mime: "audio/wav",
+      capturedAt: Date.now(),
+      transcribeAudio: async () => ({ text: "今天讨论了遥控器成本、价格和功能可行性。" }),
+      describeImage: async () => ({ text: "unused" }),
+    });
+
+    const event = await latestEvent(harness.stateStore);
+    const hits = await harness.memoryStore.searchRelevantMemories({
+      question: "遥控器成本和价格",
+      limit: 5,
+    });
+
+    expect(openaiClient.embeddings.create).toHaveBeenCalled();
+    expect(event.embeddingModel).toBe(harness.cfg.embeddingModel);
+    expect(hits.map((hit) => hit.eventId)).toContain(event.eventId);
+  });
 });
 
 async function createHarness(
@@ -1899,6 +1971,7 @@ function stubOpenAiClient(
   cfg: ClawSenseConfig,
   params: {
     transcript?: string;
+    embeddingError?: Error;
     responsesError?: Error;
     chatError?: Error;
     audioSummaryJson?: Record<string, unknown>;
@@ -1907,9 +1980,11 @@ function stubOpenAiClient(
   const dimensions = cfg.embeddingDimensions ?? 1536;
   const client = {
     embeddings: {
-      create: vi.fn().mockResolvedValue({
-        data: [{ embedding: Array.from({ length: dimensions }, () => 0) }],
-      }),
+      create: params.embeddingError
+        ? vi.fn().mockRejectedValue(params.embeddingError)
+        : vi.fn().mockResolvedValue({
+            data: [{ embedding: Array.from({ length: dimensions }, () => 0) }],
+          }),
     },
     responses: {
       create: params.responsesError

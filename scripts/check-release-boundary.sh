@@ -6,6 +6,9 @@ PACK_JSON="$(mktemp)"
 trap 'rm -f "$PACK_JSON"' EXIT
 
 cd "$ROOT_DIR"
+export NPM_CONFIG_CACHE="${NPM_CONFIG_CACHE:-$ROOT_DIR/.local/npm-cache}"
+export npm_config_cache="$NPM_CONFIG_CACHE"
+mkdir -p "$NPM_CONFIG_CACHE"
 
 echo "[check:release] build"
 npm run check
@@ -15,8 +18,28 @@ npm test
 
 echo "[check:release] shell syntax"
 bash -n install.sh
+bash -n scripts/check-android-emulator-smoke.sh
+bash -n scripts/check-android-live.sh
+bash -n scripts/check-android-live-fixtures.sh
+bash -n scripts/check-current-phase.sh
 bash -n scripts/dev-log.sh
 bash -n scripts/local-openclaw.sh
+bash -n scripts/check-stage-final.sh
+bash -n scripts/check-stage-final-fixtures.sh
+bash -n scripts/run-final-live-validation.sh
+node --check scripts/index-stage-final-reports.mjs
+node --check scripts/check-stage-final-doctor.mjs
+node --check scripts/check-phase9-fixtures.mjs
+node --check scripts/summarize-android-live-report.mjs
+
+echo "[check:release] phase9 fixture smoke"
+npm run check:phase9
+
+echo "[check:release] android-live fixture smoke"
+bash scripts/check-android-live-fixtures.sh
+
+echo "[check:release] stage-final fixture smoke"
+bash scripts/check-stage-final-fixtures.sh
 
 echo "[check:release] npm pack dry-run"
 npm pack --json --dry-run --ignore-scripts > "$PACK_JSON"

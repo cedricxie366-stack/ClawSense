@@ -42,6 +42,10 @@
 cd /Users/cedric/Documents/ClawSense
 
 npm run check:release
+npm run check:phase
+npm run check:stage-final:doctor
+npm run check:android-live -- help
+npm run check:android-live:doctor
 
 adb devices -l
 adb reverse --list
@@ -54,10 +58,88 @@ scripts/local-openclaw.sh media-today
 期望：
 
 - Android 设备在线
+- `check:phase` 成功；如果输出 `android.connectedDevices=0`，说明 host / fixture / video evidence 已过，但真机仍未接入
 - 本地验证场景下有 `tcp:18789 tcp:18789`
 - gateway running
 - `devices` 中真实 Android 设备 `lastSeenAt/lastHeartbeatAt` 最近更新
 - `media-today` 中能看到新 audio/image 事件；如验证视频，则应能看到 video 事件与 keyframe image 事件
+
+`check:android-live:doctor` 是非破坏性 preflight，只生成 `.local/android-live-reports/preflight-*.json`，不会安装 APK 或启动服务。Host/fixture 已 ready 但没有真机时，它应显示 `status=waiting-for-device`，这时不要误判为代码失败。
+
+如果 preflight 显示 `latestAndroidLive.freshAgainstPhase=false` 或 `status=stale-live-report`，说明旧 live JSON 早于当前 phase report，必须重新跑真机验收；不要用旧报告通过最终门禁。
+
+## 真机自动化辅助脚本
+
+当前真机验收不再建议手工拼接 ADB 命令，优先使用：
+
+```bash
+cd /Users/cedric/Documents/ClawSense
+
+# 1. 构建 / 安装 debug APK，同步 repo-local OpenClaw，adb reverse，debug 配对并启动服务。
+npm run check:android-live:doctor
+npm run check:android-live
+
+# 2. 触发 primary live 证据窗口。第一轮会清空 logcat，后续动作必须保留 logcat，
+#    这样同一份报告才能同时证明语音问答、TTS、停止朗读和视频上传。
+scripts/check-android-live.sh arm-query auto
+# 真人说：过去4小时我们聊了什么？
+
+# 3. 会议模式再测一轮，追加到同一个 primary report。
+PRESERVE_LOGCAT=1 scripts/check-android-live.sh arm-query meeting
+# 真人说：刚才讨论的重点是什么？
+
+# 4. TTS 控制与手动视频，也追加到同一个 primary report。
+PRESERVE_LOGCAT=1 scripts/check-android-live.sh stop-tts
+PRESERVE_LOGCAT=1 scripts/check-android-live.sh capture-video
+sleep 15
+HUMAN_TTS_OK=1 HUMAN_ANSWER_RELEVANT=1 scripts/check-android-live.sh collect
+
+# 5. 环境音不污染显式提问。这里会清空 logcat，生成单独 no-arm report。
+scripts/check-android-live.sh observe-ambient
+# 播放 30-90 秒访谈 / 视频 / 会议音频，不要点击“问实时助手”，然后：
+EXPECT_NO_ASSISTANT_QUERY=1 scripts/check-android-live.sh collect
+
+# 6. 最终阶段硬门槛：只有 current-phase 与 android-live 都通过才算当前阶段真正完成。
+npm run check:stage-final
+```
+
+如果是在可交互终端里和真人一起验，也可以直接使用最终向导：
+
+```bash
+npm run check:stage-final:live-guided
+```
+
+向导只负责串命令，不会自动伪造人工确认；只有真人输入 `YES` 后才会设置 `HUMAN_TTS_OK=1 HUMAN_ANSWER_RELEVANT=1`。非交互环境会直接退出。
+
+报告会写入：
+
+```text
+.local/android-live-reports/android-live-*.json
+```
+
+报告里的重点字段：
+
+- `verdict.hostDeviceSeen / voiceLoopObserved / ttsStatus / videoStatus / phaseReadyForRelease`
+- `verdict.physicalAndroidDevice`：最终验收默认必须为 `true`
+- `logs.assistantQueryArmed / assistantQueryCaptured / assistantQuerySubmitting / assistantQueryAnswered`
+- `logs.assistantTtsCompleted / assistantTtsFailed / assistantTtsStopRequested`
+- `logs.longAssistantQueryRejected / continuedAmbientRejected`
+- `verdict.expectsNoAssistantQuery / noArmAmbientQueryClean / noArmAmbientQueryPollution`
+- `logs.audioUploadSucceeded / imageUploadSucceeded / videoUploadSucceeded`
+- `host.mediaCounts`
+- `host.videoEvidenceGroups / videoTranscriptSpans / videoKeyframeDetails`
+- `ui.textSample`
+
+注意：
+
+- 这个脚本能证明 ADB、debug APK、配对、服务、日志和服务端 evidence；不能替代真人判断“手机是否真的读完整、是否听感正常”。
+- `HUMAN_TTS_OK=1` 只能在真人确认“手机确实完整朗读到可接受程度”后设置。
+- `HUMAN_ANSWER_RELEVANT=1` 只能在真人确认“回答确实贴合问题且引用了有效证据”后设置。
+- `npm run check:stage-final:doctor` 是只读状态汇总入口。它不安装 APK、不启动服务，只告诉你当前缺 primary live、no-arm ambient，还是可以直接跑最终 gate。
+- `npm run check:stage-final` 会要求最新 primary `android-live-*.json` 同时满足 voice loop、TTS、人工确认、停止朗读、手动视频上传和 host evidence；还会要求另一份 `EXPECT_NO_ASSISTANT_QUERY=1` no-arm report 证明环境音没有污染显式提问。没有 primary live report 时会明确失败为 `android_live_report_missing`，没有 no-arm report 时会明确失败为 `android_no_arm_report_missing`。
+- 如果没有在线设备，脚本会明确失败为 `no authorized Android device connected`，这不是代码侧失败。
+- 如果有多台设备，设置 `ANDROID_SERIAL=<serial>` 后再运行。
+- `EXPECT_NO_ASSISTANT_QUERY=1` 只用于“没有点击问实时助手”的环境音观察窗口；如果这时出现任何 `Assistant query armed/captured/submitting/answered`，报告会标记 `noArmAmbientQueryPollution=true`，应判为环境音污染失败。
 
 ## 接口快速检查
 
@@ -88,12 +170,13 @@ curl -sS \
 
 ```bash
 adb logcat -c
-adb logcat | grep -E "Assistant query|Assistant TTS|Audio upload succeeded|Image upload succeeded|Rejecting long assistant query|rawQueryLen|sttRewrite|HTTP 401|HTTP 503"
+adb logcat | grep -E "Assistant query|Assistant TTS|Audio upload succeeded|Image upload succeeded|Rejecting long assistant query|rawQueryLen|sttRewrite|audioRecheck|HTTP 401|HTTP 503"
 ```
 
 重点看：
 
 - 短问题触发时应出现 `Assistant query submitting` 和 `Assistant query answered`
+- 如果问题是 `过去4小时我们聊了什么？`、`刚才讨论的重点是什么？` 且目标时间窗里还有未转写音频，`Assistant query answered` 里应出现 `audioRecheckAttempted=true`；如果补扫成功，进一步出现 `audioRecheckRefreshed=true` 和 `audioRecheckTranscripts>0`
 - 正常播报时应出现 `Assistant TTS completed`
 - 点击停止时应出现 `Assistant TTS stop requested`
 - 长环境音被拒绝时应出现 `Rejecting long assistant query candidate`
@@ -140,15 +223,15 @@ scripts/local-openclaw.sh openclaw clawsense acceptance 7
 - `npm test -- test/assistant-tool.test.ts`：30 tests passed
 - `npm test -- test/review-engine.test.ts`：40 tests passed
 - `npm run check`：passed
-- `npm test`：190 tests passed
+- `npm test`：195 tests passed
 - `npm run check:release`：passed，确认 npm 包名为 `clawsense@0.1.0`，且不包含开发-only 目录
-- `openclaw clawsense acceptance 7`：
-  - `activeDevices=1`
-  - `staleActiveDevices=0`
-  - `instabilitySignalEvents=0`
-  - `audio-reinforcement=pass`
-  - `transcriptCoverage≈0.88`
-  - 当前剩余 blocker 是身份标注和课堂/学习样本，不是 Android 连接或上传问题。
+- `npm run check:phase`：
+  - `phaseState=ready-to-close`
+  - `passedCriteria=5/5`
+  - `videoEvidence.transcriptReadyWindows=1`
+  - `videoEvidence.transcriptSpans=3`
+  - `videoEvidence.keyframeDetails=3`
+  - 当前剩余最终缺口不是 Host evidence，而是真实物理 Android 的 primary live report + no-arm ambient report。
 - `openclaw clawsense annotate-suggestions today --question "今天办公期间有哪些人物线索需要补标注？"`：
   - 不应再把“构造 / 纸箱 / 还是”输出为人物候选
   - 当前真实数据可能只输出 speaker 建议，这是允许的
@@ -158,6 +241,32 @@ scripts/local-openclaw.sh openclaw clawsense acceptance 7
   - 长环境访谈音频：`queryText=""`，不会作为显式提问
   - `继续说 / 简短点 / 帮我整理成会议纪要`：继承上一轮 4 小时时间窗
   - `draft_document`：已确认 markdown 草稿落盘
+
+## 2026-05-31 当前代码侧复核快照
+
+验证 agent 已完成只读复核，结论如下：
+
+- `npm test`：10 个测试文件、195 tests passed。
+- `npm run check:release`：通过，覆盖 build、tests、shell syntax、`npm pack --dry-run`。
+- repo-local `acceptance`：`5/5 ready-to-close`，`blockers=[]`。
+- 视频 evidence：`hostModelVideoMode=keyframes`，`playableVideoArtifacts=1`，`videoRequestGroups=1`，`keyframeEvents=3`。
+- 视频问题 evidence：包含 `audioCoverage.transcriptReadyWindows=1`、`videoEvidenceGroups`、3 段 `transcriptSpans`、关键帧 caption、OCR hints 和 `linkedVideoUrl`。
+- Android debug build：`assembleDebug` 通过。
+- `npm run check:phase`：通过；报告摘要为 `phaseState=ready-to-close`、`passedCriteria=5/5`、`hostModelVideoMode=keyframes`、`videoEvidence.transcriptReadyWindows=1`、`keyframeDetails=3`、`android.connectedDevices=0`。
+
+当前尚未通过真人 / 真机证明的项目：
+
+- `adb devices -l` 当前无设备。
+- 显式语音提问能否在真机上稳定进入 `assistant/query`。
+- 手机本地 TTS 是否完整朗读 `answerSpokenText`。
+- `读全文` 是否比普通摘要播报更完整。
+- `停止朗读` 是否立即停止 Android 本地 TTS。
+- 播放环境视频但不点击 `问实时助手` 时，是否不会生成新的 `最近显式提问`。
+- 对应自动报告字段：`verdict.noArmAmbientQueryClean=true`、`verdict.noArmAmbientQueryPollution=false`。
+- Android 手动 6 秒视频是否能在真实设备上完成上传、入库，并在 evidence 里回链 keyframes / transcript。
+- primary live report 与 no-arm ambient report 是否都新于最新 current-phase report，并通过 `npm run check:stage-final`。
+
+因此验证 agent 下一轮只需要补真机端，不需要重复证明 host fixture / release gate。
 
 ## 报告格式
 

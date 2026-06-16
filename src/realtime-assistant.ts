@@ -114,9 +114,16 @@ export type AssistantQueryResolution = {
   reason?: "ambient_transcript_too_long" | "ambient_transcript_no_question";
 };
 
+export type AssistantAudioRecheckPlan = {
+  shouldRecheck: boolean;
+  maxWindows: number;
+  reason?: "pending_audio_summary" | "pending_audio_question" | "pending_audio_meeting";
+};
+
 export function resolveAssistantQueryText(params: {
   queryText: string;
   modeHint?: AssistantModeHint;
+  explicitQuery?: boolean;
 }): AssistantQueryResolution {
   const rawQueryText = normalizeQuestion(params.queryText);
   if (!rawQueryText) {
@@ -142,6 +149,13 @@ export function resolveAssistantQueryText(params: {
       rawQueryText,
       replaced: extracted !== rawQueryText,
       reason: extracted !== rawQueryText ? "ambient_transcript_too_long" : undefined,
+    };
+  }
+  if (params.explicitQuery && isLikelyExplicitSpokenQuery(rawQueryText)) {
+    return {
+      queryText: rawQueryText,
+      rawQueryText,
+      replaced: false,
     };
   }
   if (looksLikeAmbientQueryTranscript(rawQueryText)) {
@@ -227,7 +241,13 @@ export async function buildRecentContextPayload(params: {
   const evidenceLimit = range.kind === "recent" ? 3 : range.kind === "custom" ? 8 : 10;
   const transcriptSpans = buildTranscriptSpans(context, transcriptSpanLimit);
   const audioEvents = context.windows.reduce((sum, window) => sum + window.audioCount, 0);
-  const topEvidence = context.windows.slice(0, evidenceLimit).map((window) => ({
+  const evidenceWindows = rankRecentContextEvidenceWindows({
+    windows: context.windows,
+    question: params.question,
+    modeUsed,
+    contextKind: range.kind,
+  });
+  const topEvidence = evidenceWindows.slice(0, evidenceLimit).map((window) => ({
     windowId: window.windowId,
     timeRange: `${formatTime(window.startedAt)}-${formatTime(window.endedAt)}`,
     summary: resolveWindowEvidenceSummary(window),
@@ -408,6 +428,57 @@ export function shouldUseDeterministicAssistantAnswer(queryText: string): boolea
   return /(停止朗读|别读了|停一下|不用读了|读全文|完整读|全文读|都读出来|全部读)/.test(normalized);
 }
 
+export function resolveAssistantAudioRecheckPlan(params: {
+  queryText: string;
+  recentContext: RecentContextPayload;
+}): AssistantAudioRecheckPlan {
+  const queryText = normalizeQuestion(params.queryText);
+  const pendingAudioWindows =
+    params.recentContext.overview?.audioCoverage.pendingAudioWindows ??
+    params.recentContext.counts.pendingAudioWindows;
+  const totalAudioWindows =
+    params.recentContext.overview?.audioCoverage.totalAudioWindows ??
+    params.recentContext.counts.audioEvents;
+  const transcriptReadyWindows =
+    params.recentContext.overview?.audioCoverage.transcriptReadyWindows ??
+    params.recentContext.recentTranscriptSpans.length;
+  const hasAudioGap =
+    pendingAudioWindows > 0 ||
+    (totalAudioWindows > 0 && transcriptReadyWindows === 0 && params.recentContext.recentTranscriptSpans.length === 0);
+  if (!queryText || !hasAudioGap || shouldUseDeterministicAssistantAnswer(queryText)) {
+    return { shouldRecheck: false, maxWindows: 0 };
+  }
+  const isOverviewQuestion =
+    params.recentContext.overview?.kind === "day" ||
+    /(过去|最近).*(小时|分钟|天).*(发生|做了什么|干了什么|聊了什么|说了什么|讨论|重点|回顾|总结)/.test(
+      queryText,
+    ) ||
+    /(今天|今日|昨天|昨日).*(发生|做了什么|干了什么|聊了什么|说了什么|讨论|重点|回顾|总结)/.test(
+      queryText,
+    );
+  const isAudioQuestion =
+    /(音频|语音|对话|说了什么|聊了什么|讲了什么|讨论|沟通|重点|任务|会议|课堂|老师|同事|老板|谁说|谁讲|怎么回复|我说了什么|会议纪要|行动项)/.test(
+      queryText,
+    );
+  const isVisualOnlyQuestion =
+    /(看什么|看到什么|场景|环境|周围|画面)/.test(queryText) &&
+    !isAudioQuestion &&
+    !isOverviewQuestion;
+  if (isVisualOnlyQuestion) {
+    return { shouldRecheck: false, maxWindows: 0 };
+  }
+  if (!isOverviewQuestion && !isAudioQuestion && params.recentContext.modeUsed !== "meeting") {
+    return { shouldRecheck: false, maxWindows: 0 };
+  }
+  const reason = isOverviewQuestion
+    ? "pending_audio_summary"
+    : params.recentContext.modeUsed === "meeting"
+      ? "pending_audio_meeting"
+      : "pending_audio_question";
+  const maxWindows = Math.max(1, Math.min(reason === "pending_audio_summary" ? 3 : 2, pendingAudioWindows || 1));
+  return { shouldRecheck: true, maxWindows, reason };
+}
+
 export function withAssistantDeviceFallbackHint(params: {
   recentContext: RecentContextPayload;
   deviceName?: string;
@@ -439,7 +510,10 @@ export function buildAssistantModelPrompt(params: {
     peopleHints: params.recentContext.peopleHints.slice(0, 8),
     attentionHints: params.recentContext.attentionHints.slice(0, 8),
     taskHints: params.recentContext.taskHints.slice(0, 8),
-    topEvidence: params.recentContext.topEvidence.slice(0, 6),
+    topEvidence: params.recentContext.topEvidence.slice(
+      0,
+      params.recentContext.overview?.kind === "recent" ? 6 : 10,
+    ),
     counts: params.recentContext.counts,
     templateAnswer: {
       answerText: params.templateAnswer.answerText,
@@ -866,6 +940,25 @@ function inferAssistantMode(params: {
   return "auto";
 }
 
+// The user pressed "问实时助手", so the prior is overwhelmingly "this is a question".
+// Accept any short single-utterance transcript and let the model judge intent;
+// the cue whitelist stays in charge only of long ambient transcripts and aliases.
+function isLikelyExplicitSpokenQuery(text: string): boolean {
+  if (text.length < 2 || text.length > 40) {
+    return false;
+  }
+  const clauseMarks = (text.match(/[，,。;；]/g) ?? []).length;
+  if (clauseMarks > 2) {
+    return false;
+  }
+  // Multimodal audio understanding sometimes returns a description of the clip
+  // instead of verbatim speech; never treat description-style output as the user's words.
+  if (/^(听起来|似乎(是|在)|好像(是|在)|这段(音频|声音|录音)|环境音|音频(中|里)|背景(音|声))/.test(text)) {
+    return false;
+  }
+  return true;
+}
+
 function looksLikeAmbientQueryTranscript(text: string): boolean {
   const normalized = normalizeQuestion(text);
   if (!normalized) {
@@ -895,7 +988,7 @@ function extractSupportedShortQuestion(text: string): string | null {
 }
 
 function hasSupportedQuestionCue(text: string): boolean {
-  return /(我现在在看什么|刚才.*(重点|说了什么|聊了什么|讨论|回复)|过去.*(聊了什么|说了什么|讨论|重点|发生|干了什么|做了什么)|最近.*(聊了什么|说了什么|讨论|重点|发生|干了什么|做了什么)|[0-9０-９一二两三四五六七八九十半]+(?:个)?小时.*(聊了什么|说了什么|讨论|重点|发生)|今天.*(聊了什么|说了什么|讨论|重点|发生|干了什么|做了什么)|昨天.*(聊了什么|说了什么|讨论|重点|发生|干了什么|做了什么)|现在.*注意|有什么.*跟进|有人.*找|任务.*谁|落给谁|谁负责|我刚才.*回复|我说了什么|整理成|沉淀成|会议纪要|行动项|生成.*(文件|文档|笔记)|写.*(文件|文档|笔记)|总结(?:一下)?|归纳(?:一下)?|说重点|重点是什么|继续说|详细.*说|展开.*说|简短点|间短点|简单点|读全文|完整读|停止朗读)/.test(text);
+  return /(我现在在看什么|^(?:我们|咱们)?聊了什么[？?]?$|刚(?:才|刚).*(重点|说了什么|聊了什么|讨论|回复|发生|干了什么|做了什么|看到了什么|看到什么|听到了什么|听到什么)|过去.*(聊了什么|说了什么|讨论|重点|发生|干了什么|做了什么)|最近.*(聊了什么|说了什么|讨论|重点|发生|干了什么|做了什么)|[0-9０-９一二两三四五六七八九十半]+(?:个)?小时.*(聊了什么|说了什么|讨论|重点|发生)|今天.*(聊了什么|说了什么|讨论|重点|发生|干了什么|做了什么)|昨天.*(聊了什么|说了什么|讨论|重点|发生|干了什么|做了什么)|现在.*注意|有什么.*跟进|有人.*找|任务.*谁|落给谁|谁负责|我刚才.*回复|我说了什么|整理成|沉淀成|会议纪要|行动项|生成.*(文件|文档|笔记)|写.*(文件|文档|笔记)|总结(?:一下)?|归纳(?:一下)?|说重点|重点是什么|继续说|详细.*说|展开.*说|简短点|间短点|简单点|读全文|完整读|停止朗读|\b(?:what happened|what did (?:we|they|he|she|i) (?:say|discuss|talk about)|what (?:am i|are we) (?:looking at|watching)|what should i (?:notice|pay attention to)|summari[sz]e|key points?|action items?|who (?:came|visited)|what did (?:he|she|they) say)\b)/i.test(text);
 }
 
 function hasExplicitTimeRangeCue(text: string): boolean {
@@ -904,6 +997,12 @@ function hasExplicitTimeRangeCue(text: string): boolean {
 
 function normalizeAssistantQueryAliases(text: string): string {
   const normalized = normalizeQuestion(text);
+  if (/^(过去|最近)[0-9０-９一二两三四五六七八九十半]+(?:个)?小时$/.test(normalized)) {
+    return `${normalized}我们聊了什么？`;
+  }
+  if (/^(?:我们|咱们)?聊了什么[？?]?$/.test(normalized)) {
+    return "过去4个小时我们聊了什么？";
+  }
   if (/^(朱全文|读全问|度全文)$/.test(normalized)) {
     return "读全文";
   }
@@ -1000,6 +1099,72 @@ function buildRecentContextOverview(
     reviewItems,
     keyWindowSummaries,
   };
+}
+
+function rankRecentContextEvidenceWindows(params: {
+  windows: AssistantContextPayload["windows"];
+  question?: string;
+  modeUsed: AssistantModeHint;
+  contextKind: "recent" | "custom" | "day";
+}): AssistantContextPayload["windows"] {
+  if (!shouldPrioritizeAudioEvidence(params)) {
+    return params.windows;
+  }
+  return params.windows.slice().sort((left, right) => {
+    const leftScore = scoreRecentContextEvidenceWindow(left, params.question);
+    const rightScore = scoreRecentContextEvidenceWindow(right, params.question);
+    return rightScore - leftScore || right.endedAt - left.endedAt;
+  });
+}
+
+function shouldPrioritizeAudioEvidence(params: {
+  question?: string;
+  modeUsed: AssistantModeHint;
+  contextKind: "recent" | "custom" | "day";
+}): boolean {
+  const question = normalizeQuestion(params.question);
+  if (params.contextKind === "custom" || params.contextKind === "day") {
+    return true;
+  }
+  if (params.modeUsed === "meeting") {
+    return true;
+  }
+  return /(音频|语音|对话|说了什么|聊了什么|讲了什么|讨论|沟通|重点|任务|会议|课堂|老师|同事|老板|客户|谁说|谁讲|怎么回复|我说了什么|会议纪要|行动项)/.test(
+    question,
+  );
+}
+
+function scoreRecentContextEvidenceWindow(
+  window: AssistantContextPayload["windows"][number],
+  question: string | undefined,
+): number {
+  const questionText = normalizeQuestion(question);
+  const transcript = cleanTranscriptText(window.transcriptText);
+  let score = 0;
+  if (transcript) {
+    score += 100;
+  }
+  if (window.audioCount > 0) {
+    score += 30 + Math.min(window.audioCount, 3);
+  }
+  if (/(讨论|会议|课堂|任务|重点|报价|复盘|跟进|行动项|Scaling Law|模型|数据|算法)/i.test(transcript)) {
+    score += 10;
+  }
+  if (questionText) {
+    const questionTerms = questionText
+      .split(/[，。！？、\s]+/)
+      .map((item) => item.trim())
+      .filter((item) => item.length >= 2 && !/^(过去|最近|今天|昨天|发生|什么|刚才|重点)$/.test(item));
+    for (const term of questionTerms) {
+      if (`${window.primarySummary} ${transcript}`.includes(term)) {
+        score += 4;
+      }
+    }
+  }
+  if (!transcript && (window.imageCount > 0 || window.videoCount > 0)) {
+    score += 5;
+  }
+  return score;
 }
 
 function extractTaskHints(context: AssistantContextPayload): string[] {

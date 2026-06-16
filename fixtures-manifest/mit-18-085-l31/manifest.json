@@ -1,0 +1,28 @@
+{
+  "id": "mit-18-085-l31",
+  "scenario": "classroom-lecture",
+  "source": {
+    "name": "MIT OpenCourseWare 18.085 Lecture 31",
+    "url": "https://ocw.mit.edu/courses/18-085-computational-science-and-engineering-i-fall-2008/resources/18-085f08-l31/",
+    "licenseNote": "MIT OCW materials use a Creative Commons BY-NC-SA style license; keep media in local cache and verify terms before redistribution."
+  },
+  "localCache": ".local/test-fixtures/mit-18-085-l31",
+  "replay": {
+    "script": "node scripts/replay-mit-lecture-fixture.mjs --reset --force",
+    "inputs": [
+      "raw/transcript.pdf",
+      "raw/transcript.txt"
+    ],
+    "prepareNote": "The script can download the PDF and uses local Python PyPDF2 to extract transcript.txt when missing."
+  },
+  "expectedQuestions": [
+    "刚才老师讲了什么重点？",
+    "有哪些概念需要复习？",
+    "帮我整理成学习笔记。",
+    "这节课和信号处理有什么关系？"
+  ],
+  "releaseGate": {
+    "minimum": "Evidence must classify the fixture as classroom/learning and expose transcript-ready audio.",
+    "target": "Review/evidence should produce learning points and revision actions without inventing homework or exam facts."
+  }
+}

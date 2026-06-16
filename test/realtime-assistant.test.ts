@@ -5,6 +5,7 @@ import {
   buildAssistantModelPrompt,
   buildRecentContextPayload,
   mergeAssistantModelAnswer,
+  resolveAssistantAudioRecheckPlan,
   resolveAssistantQueryText,
   shouldFallbackAssistantContextToAllDevices,
   shouldUseDeterministicAssistantAnswer,
@@ -112,6 +113,83 @@ describe("realtime assistant helpers", () => {
     expect(result.recentContext.topEvidence[0]?.transcriptExcerpt).toContain("法律风险");
     expect(result.recentContext.topEvidence[0]?.transcriptExcerpt).not.toContain("会议模式下");
     expect(result.recentContext.topEvidence[0]?.summary).not.toContain("会议模式下");
+  });
+
+  it("prioritizes transcript evidence over recent visual-only windows for discussion questions", async () => {
+    const base = createAssistantContextPayload();
+    const audioWindow = {
+      ...base.windows[0],
+      windowId: "audio-window",
+      startedAt: new Date("2026-04-24T15:27:00+08:00").getTime(),
+      endedAt: new Date("2026-04-24T15:28:30+08:00").getTime(),
+      primarySummary: "访谈视频的声音转写，讨论模型能力来源。",
+      transcriptText: "主讲人讨论模型能力提升主要来自数据、算力和算法，并强调先把问题定义清楚。",
+      imageCount: 0,
+      audioCount: 1,
+      events: [
+        {
+          ...base.windows[0].events[0],
+          eventId: "audio-interview",
+          modality: "audio" as const,
+          capturedAt: new Date("2026-04-24T15:28:00+08:00").getTime(),
+          summary: "访谈音频转写",
+          transcript: "主讲人讨论模型能力提升主要来自数据、算力和算法，并强调先把问题定义清楚。",
+          artifact: {
+            artifactId: "artifact-audio-interview",
+            fileName: "interview.wav",
+            mime: "audio/wav",
+            available: true,
+            sizeBytes: 234,
+            url: "/api/clawsense/artifacts?id=artifact-audio-interview",
+          },
+        },
+      ],
+    };
+    const visualOnlyWindow = {
+      ...base.windows[0],
+      windowId: "visual-window",
+      startedAt: new Date("2026-04-24T15:29:00+08:00").getTime(),
+      endedAt: new Date("2026-04-24T15:30:00+08:00").getTime(),
+      primarySummary: "画面展示电脑屏幕上正在播放采访视频，一位男子对着麦克风讲话。",
+      transcriptText: "",
+      imageCount: 1,
+      audioCount: 0,
+      events: [
+        {
+          ...base.windows[0].events[1],
+          eventId: "image-interview",
+          capturedAt: new Date("2026-04-24T15:29:30+08:00").getTime(),
+          summary: "画面展示电脑屏幕上正在播放采访视频，一位男子对着麦克风讲话。",
+          transcript: undefined,
+        },
+      ],
+    };
+    const payload = createAssistantContextPayload({
+      windows: [visualOnlyWindow, audioWindow],
+      highlights: {
+        ...base.highlights,
+        audioCoverage: {
+          totalAudioWindows: 1,
+          transcriptReadyWindows: 1,
+          pendingAudioWindows: 0,
+          degradedAudioEvents: 0,
+        },
+      },
+    });
+
+    const result = await buildRecentContextPayload({
+      reviewEngine: {
+        buildAssistantContext: vi.fn(async () => payload),
+      } as any,
+      artifactUrlBase: "/api/clawsense/artifacts",
+      windowHint: "last_60s",
+      question: "刚才讨论的重点是什么？",
+      modeHint: "meeting",
+    });
+
+    expect(result.recentContext.topEvidence[0]?.windowId).toBe("audio-window");
+    expect(result.recentContext.topEvidence[0]?.transcriptExcerpt).toContain("数据、算力和算法");
+    expect(result.recentContext.recentTranscriptSpans[0]?.text).toContain("问题定义清楚");
   });
 
   it("expands recent context from natural time range questions", async () => {
@@ -311,6 +389,33 @@ describe("realtime assistant helpers", () => {
     expect(answer.answerSpokenText).not.toContain("按全天记录回顾");
     expect(answer.answerSpokenText.length).toBeLessThanOrEqual(280);
     expect(answer.answerSpokenText).toMatch(/[。？！]$/);
+  });
+
+  it("plans query-time audio recheck for broad voice questions with pending audio gaps", () => {
+    const rangePlan = resolveAssistantAudioRecheckPlan({
+      queryText: "过去4个小时我们聊了什么？",
+      recentContext: createCustomRangeRecentContext(),
+    });
+    const dayPlan = resolveAssistantAudioRecheckPlan({
+      queryText: "昨天发生了什么？",
+      recentContext: createYesterdayRecentContext(),
+    });
+    const scenePlan = resolveAssistantAudioRecheckPlan({
+      queryText: "我现在在看什么？",
+      recentContext: createCustomRangeRecentContext(),
+    });
+
+    expect(rangePlan).toEqual({
+      shouldRecheck: true,
+      maxWindows: 1,
+      reason: "pending_audio_summary",
+    });
+    expect(dayPlan).toEqual({
+      shouldRecheck: true,
+      maxWindows: 2,
+      reason: "pending_audio_summary",
+    });
+    expect(scenePlan.shouldRecheck).toBe(false);
   });
 
   it("builds model prompts from evidence and merges model answers", () => {
@@ -606,6 +711,58 @@ describe("realtime assistant helpers", () => {
     expect(resolved.reason).toBe("ambient_transcript_no_question");
   });
 
+  it("accepts short non-whitelist questions when the user explicitly asked", () => {
+    const truncated = resolveAssistantQueryText({
+      queryText: "发生了什么？",
+      modeHint: "auto",
+      explicitQuery: true,
+    });
+    const freeForm = resolveAssistantQueryText({
+      queryText: "我刚才放在桌上的钥匙去哪了",
+      modeHint: "auto",
+      explicitQuery: true,
+    });
+
+    expect(truncated.replaced).toBe(false);
+    expect(truncated.queryText).toBe("发生了什么？");
+    expect(freeForm.replaced).toBe(false);
+    expect(freeForm.queryText).toBe("我刚才放在桌上的钥匙去哪了");
+  });
+
+  it("still rejects description-style transcripts in explicit query mode", () => {
+    const resolved = resolveAssistantQueryText({
+      queryText: "听起来像在讨论报价单",
+      modeHint: "meeting",
+      explicitQuery: true,
+    });
+
+    expect(resolved.queryText).toBe("");
+    expect(resolved.reason).toBe("ambient_transcript_no_question");
+  });
+
+  it("still rejects long ambient transcripts in explicit query mode", () => {
+    const raw =
+      "我觉得这个做作为你的系统性才是才是关键你觉得模型能力还能提高但它的驱动力数据算法你觉得他的驱动力主要来于哪个呢我觉得其实都有但是从某种意义上来说数据和算力其实是很强的关联的一件事";
+    const resolved = resolveAssistantQueryText({
+      queryText: raw,
+      modeHint: "meeting",
+      explicitQuery: true,
+    });
+
+    expect(resolved.queryText).toBe("");
+    expect(resolved.rawQueryText).toBe(raw);
+  });
+
+  it("keeps rejecting non-question short summaries without explicit query mode", () => {
+    const resolved = resolveAssistantQueryText({
+      queryText: "发生了什么？",
+      modeHint: "auto",
+    });
+
+    expect(resolved.queryText).toBe("");
+    expect(resolved.reason).toBe("ambient_transcript_no_question");
+  });
+
   it("keeps short supported user questions intact", () => {
     const resolved = resolveAssistantQueryText({
       queryText: "刚才讨论的重点是什么？",
@@ -614,6 +771,22 @@ describe("realtime assistant helpers", () => {
 
     expect(resolved.replaced).toBe(false);
     expect(resolved.queryText).toBe("刚才讨论的重点是什么？");
+  });
+
+  it("keeps short recent-event questions intact", () => {
+    const happened = resolveAssistantQueryText({
+      queryText: "刚才发生了什么？",
+      modeHint: "auto",
+    });
+    const saw = resolveAssistantQueryText({
+      queryText: "刚刚看到了什么？",
+      modeHint: "auto",
+    });
+
+    expect(happened.replaced).toBe(false);
+    expect(happened.queryText).toBe("刚才发生了什么？");
+    expect(saw.replaced).toBe(false);
+    expect(saw.queryText).toBe("刚刚看到了什么？");
   });
 
   it("keeps natural longer-range user questions intact", () => {
@@ -626,6 +799,30 @@ describe("realtime assistant helpers", () => {
     expect(resolved.queryText).toBe("过去4个小时我们聊了什么？");
   });
 
+  it("expands truncated time-range voice queries instead of dropping them", () => {
+    const resolved = resolveAssistantQueryText({
+      queryText: "过去四小时",
+      modeHint: "meeting",
+    });
+
+    expect(resolved.replaced).toBe(true);
+    expect(resolved.rawQueryText).toBe("过去四小时");
+    expect(resolved.queryText).toBe("过去四小时我们聊了什么？");
+    expect(resolved.reason).toBeUndefined();
+  });
+
+  it("expands bare voice recall questions when ASR drops the time range", () => {
+    const resolved = resolveAssistantQueryText({
+      queryText: "我们聊了什么？",
+      modeHint: "meeting",
+    });
+
+    expect(resolved.replaced).toBe(true);
+    expect(resolved.rawQueryText).toBe("我们聊了什么？");
+    expect(resolved.queryText).toBe("过去4个小时我们聊了什么？");
+    expect(resolved.reason).toBeUndefined();
+  });
+
   it("keeps yesterday overview questions intact", () => {
     const resolved = resolveAssistantQueryText({
       queryText: "请问昨天发生了什么？",
@@ -634,6 +831,16 @@ describe("realtime assistant helpers", () => {
 
     expect(resolved.replaced).toBe(false);
     expect(resolved.queryText).toBe("请问昨天发生了什么？");
+  });
+
+  it("keeps concise English smoke-test questions intact", () => {
+    const resolved = resolveAssistantQueryText({
+      queryText: "what happened in the last five minutes",
+      modeHint: "auto",
+    });
+
+    expect(resolved.replaced).toBe(false);
+    expect(resolved.queryText).toBe("what happened in the last five minutes");
   });
 
   it("keeps concise summarization commands intact", () => {

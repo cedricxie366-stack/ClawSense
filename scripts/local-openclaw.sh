@@ -10,7 +10,7 @@ OPENCLAW_HOME="${OPENCLAW_HOME:-$LOCAL_RUNTIME_ROOT/home}"
 OPENCLAW_STATE_DIR="${OPENCLAW_STATE_DIR:-$LOCAL_RUNTIME_ROOT/state}"
 OPENCLAW_CONFIG_PATH="${OPENCLAW_CONFIG_PATH:-$OPENCLAW_STATE_DIR/openclaw.json}"
 CLAWSENSE_PLUGIN_ID="${CLAWSENSE_PLUGIN_ID:-clawsense}"
-CLAWSENSE_PLUGIN_DIR="${CLAWSENSE_PLUGIN_DIR:-$OPENCLAW_HOME/plugins/$CLAWSENSE_PLUGIN_ID}"
+CLAWSENSE_PLUGIN_DIR="${CLAWSENSE_PLUGIN_DIR:-$OPENCLAW_HOME/plugin-sources/$CLAWSENSE_PLUGIN_ID}"
 OPENCLAW_VERSION="${OPENCLAW_VERSION:-2026.3.2}"
 
 export OPENCLAW_HOME
@@ -99,7 +99,7 @@ Commands:
   video-config       Show ClawSense video ingest mode and enable commands
   library-url [date] Print media library URL(s) and token status (default: today)
   review-today       Show today's review summary
-  evidence-video     Show today's video-focused evidence bundle
+  evidence-video [d] Show recent video-focused evidence bundle (default: 7 days)
   followups          Show today's structured follow-up targets (audio/video/history)
   acceptance         Show 7-day phase acceptance snapshot
   acceptance-plan    Show 7-day actionable acceptance plan
@@ -204,7 +204,9 @@ case "$cmd" in
     run_passthrough clawsense review today
     ;;
   evidence-video)
-    run_passthrough clawsense evidence today --modality video --focus what_happened
+    shift || true
+    evidence_video_lookback_days="${1:-7}"
+    run_passthrough clawsense evidence --lookbackDays "$evidence_video_lookback_days" --modality video --focus what_happened
     ;;
   followups)
     run_passthrough clawsense followups today --focus what_happened

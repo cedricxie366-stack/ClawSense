@@ -21,8 +21,8 @@
 id: clawsense-realtime-voice-agent
 owner: Cedric + Codex
 status: active
-phase: Phase 8 delivery closure + Android Video M2 manual clip rollout
-updatedAt: 2026-05-31
+phase: Phase 8 delivery closure + Android Video M2 baseline + Phase 9 reliability/active-video fusion
+updatedAt: 2026-06-02
 
 longTermGoal:
   title: 全天候多模态 OpenClaw 记忆层
@@ -52,13 +52,17 @@ freezeLine:
     - draft_document 草稿文件
     - 视频 M1 evidence：上传后视频、关键帧 caption/OCR、offset/videoRequestId 回链
     - Android Video M2：手动 6 秒 video-only MP4、起止关键帧、上传状态可见
+    - Phase 9 数据面可靠性：fast ingest、async analysis、queue-status、Android 背压节流
+    - 默认关闭、用户显式开启、低频、可解释、受队列和上限保护的 6 秒自动短视频 evidence 增强
     - npm package boundary / install.sh / runtime skills
     - 真实办公/课堂验收
   outOfScopeUntilNextPhase:
     - 真正 speaker diarization
     - 整天 100% transcript 覆盖
     - 聚会主动洞察
-    - 自动 / 连续 / 唤醒词触发的视频录制
+    - 全天连续录像 / 长视频自动切片
+    - 端侧环形视频 pre-buffer
+    - 唤醒词触发视频录制
     - 全天向量化记忆增强
     - 所有 provider 的完美配置矩阵
 
@@ -102,6 +106,8 @@ successCriteria:
       - npm run check 通过
       - npm test 通过
       - npm run check:release 通过
+      - npm run check:phase 通过
+      - npm run check:phase9 通过
       - Android assembleDebug 通过
       - repo-local OpenClaw 命令面可运行
 
@@ -128,9 +134,12 @@ currentState:
     - Phase 8 验收稳定性口径已拆分数据面与语义分析失败
     - 标注建议过滤伪人物噪声，并且 speaker/person 任一实名注释都可满足当前身份闭环验收
     - 视频 M1 已完成结构化 keyframe marker、caption/OCR、videoOffset、videoRequestId 聚合与 evidence/followups 回链
+    - `modality=video` context/evidence 会自动带同一 `videoRequestId` 的音频 transcript，避免视频问题只看画面
     - Android Video M2 手动 6 秒视频片段已落地：CameraX video-only MP4、起止关键帧、上传链路、端侧状态反馈
     - 服务端新增 `clawsense video-config` 与 `status.videoIngest`，用于确认 `hostModelVideoMode` 和推荐开启命令
     - 发布边界门禁 `npm run check:release` 已落地并通过
+    - 当前阶段门禁 `npm run check:phase` 已落地并通过：release gate、Android debug build、AMI/MIT/MIT video replay、AMI speaker annotation smoke、acceptance 5/5、keyframes video evidence 断言
+    - Phase 9 融合门禁 `npm run check:phase9` 已落地并接入 release / phase：覆盖自动视频触发规则、Host fast-ingest/queue-status/directive、Android 自动视频安全阀/节流、live report 汇总字段
     - 当前分批提交计划和交付收口清单已建立
     - repo-local OpenClaw 命令面已复测：status / acceptance / evidence-video / followups / acceptance-plan 可运行
     - Android debug 构建已复测通过
@@ -144,6 +153,7 @@ currentState:
     - 人物注释后是否能在聊天回答里自然复用实名 / 角色
     - 课堂 / 学习场景是否能沉淀待确认知识点和 speaker/person 线索
     - 真机视频上传是否在可访问 Host + `hostModelVideoMode=keyframes` 下成功入库
+    - 真机 Phase 9：自动视频默认关闭、开启后触发、拥堵时节流、note metadata 与 Host evidence 回答是否符合预期
   knownRisks:
     - ASR 覆盖不足会让模型看不到真实会议内容
     - 手机连接旧 gateway 会误判代码无效
@@ -164,6 +174,7 @@ currentState:
 - `npm run check`
 - `npm test`
 - `npm run check:release`
+- `npm run check:phase`
 - `JAVA_HOME='/Applications/Android Studio.app/Contents/jbr/Contents/Home' ./gradlew assembleDebug`
 - repo-local `clawsense status / acceptance / evidence-video / followups / acceptance-plan`
 
@@ -202,7 +213,8 @@ currentState:
 
 不在本阶段扩展：
 
-- 自动 / 连续 / 唤醒词触发的视频录制
+- 全天连续录像 / 长视频自动切片 / 端侧环形 pre-buffer
+- 唤醒词触发视频录制
 - speaker diarization
 - 全天向量化
 
@@ -244,6 +256,7 @@ currentState:
 npm run check
 npm test
 npm run check:release
+npm run check:phase
 cd android && JAVA_HOME='/Applications/Android Studio.app/Contents/jbr/Contents/Home' ./gradlew assembleDebug
 ```
 
@@ -256,11 +269,11 @@ cd android && JAVA_HOME='/Applications/Android Studio.app/Contents/jbr/Contents/
 3. 如果验收失败，按失败类型回到 Step C，只修当前 goal 阻塞项。
 4. 若代码、文档、包边界、Android 构建和 repo-local 命令面都稳定，则进入用户决策点：是否分批提交 / 发布 / 进入自动视频或全天记忆增强。
 
-Android Video M2 当前只收口“手动短视频片段 + 关键帧证据链”，不进入自动录像、连续录像或唤醒词触发录像。
+Phase 9 已经并入主线：Android Video M2 的手动短视频仍是稳定基线；`ingest_queue_full` 治理、fast ingest / async analysis、queue-status 背压和默认关闭的主动短视频 evidence 增强，是让实时语音入口和未来全天记忆可用的同一层地基。当前允许做低频、可解释、受队列和上限保护的 6 秒自动短视频；连续录像、端侧环形 pre-buffer、长视频自动切片仍需单独产品决策。
 
-2026-05-30 最新进展：
+2026-05-30 历史进展：
 
-- `npm run check:release` 已新增并通过：build、190 tests、shell syntax、npm pack dry-run 包边界。
+- `npm run check:release` 已新增并通过：build、shell syntax、npm pack dry-run 包边界。
 - npm dry-run 确认包名 `clawsense@0.1.0`，21 个文件，不包含 `.codex` / `docs` / `android` / `.local` / `test` / `scripts`。
 - Android `assembleDebug` 通过。
 - repo-local OpenClaw 命令面复测通过：`status`、`acceptance`、`evidence-video`、`followups`、`acceptance-plan`。
@@ -272,3 +285,17 @@ Android Video M2 当前只收口“手动短视频片段 + 关键帧证据链”
 - Android 手动 6 秒视频片段已从实验块进入 M2 收口：UI 按钮、状态反馈、CameraX video-only MP4、起止关键帧和上传队列链路已落地。
 - Android 端会识别 `127.0.0.1` / `localhost` / `lan` 等手机不可达 Host，并阻止继续启动感知或录制视频，避免用户误以为采集失败是模型问题。
 - 服务端 `status.videoIngest` / `clawsense video-config` 已用于暴露视频模式、ingest endpoint 和推荐开启命令。
+- 公开素材 Host replay 已补齐 MIT OCW 课堂视频：`hostModelVideoMode=keyframes` 下可回放 1 个真实 MP4、3 张关键帧、3 条同 `videoRequestId` 字幕 transcript；repo-local acceptance 仍为 `5/5`、`100%`、`ready-to-close`。
+- `npm run check:phase` 已把上述 host / fixture / video evidence 收口固化为一键门禁；2026-06-02 最新结果 `ok=true`、`phaseState=ready-to-close`、`passedCriteria=5/5`、`connectedDevices=0`，因此真机端到端仍需接机补跑。
+- `npm run check:release` 在最新 phase 内通过：203 tests passed，phase9 fixture smoke、android-live fixture smoke、stage-final fixture smoke、npm pack dry-run 均通过。
+- `npm run check:phase` 最新报告为 `.local/current-phase-reports/current-phase-20260602-233556.json`，`ok=true`，并包含 Phase 9 汇总：`autoVideoTriggerChecks=4`、`hostChecks=7`、`androidChecks=11`、`liveReportChecks=5`。
+- Phase 9 自动视频 live report 已独立化：`EXPECT_AUTO_VIDEO=1` 生成的报告进入 `latestAndroidAutoVideo`，不能覆盖 primary live；若当前发布要求主动视频也硬通过，则使用 `REQUIRE_AUTO_VIDEO_LIVE=1 npm run check:stage-final`。
+- `npm run check:stage-final:doctor` 最新状态仍预期为 `primary-live-stale`；2026-05-31 的 primary live / no-arm ambient 报告均早于当前 phase，不能用于当前代码最终 sign-off。
+- 当前已有授权物理 Android 自动证据：语音提问、TTS completed、停止朗读、手动视频上传、no-arm ambient 均已被日志证明；最终仍缺真人确认 `HUMAN_TTS_OK=1` 和 `HUMAN_ANSWER_RELEVANT=1`，`npm run check:stage-final` 在这两个字段缺失时必须失败。
+
+2026-06-02 最新进展：
+
+- Phase 9 融合层已落地最小闭环：上传请求先保存 artifact / pending evidence 并返回 `202`，后台 `analysisQueue` 异步回填 transcript、caption、OCR 和 summary。
+- 服务端新增 `queue-status` / `analysis-retry`，Android 首页可显示后台分析队列状态，并根据 backpressure / analysis depth 进入图片降频、低信号音频延后、自动视频跳过。
+- 主动视频触发从“是否要做自动录像”收窄为“关键时刻短视频 evidence 增强”：默认关闭，用户显式开启后，Host 根据 transcript / summary 生成一次性 `video_clip` directive，Android 通过 heartbeat 接收并在冷却、上限和队列状态允许时录制 6 秒短片段。
+- 当前阶段不能因为历史设备 7 天内有素材但现在离线而误判 `staleActiveDevices`；只有最近仍在产出事件的设备才要求 heartbeat fresh。最新 `check:phase` 已恢复为 `5/5 ready-to-close`。

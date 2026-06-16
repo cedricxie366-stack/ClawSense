@@ -16,15 +16,19 @@ class DeviceSessionRepository(
   private val _session = MutableStateFlow(store.loadSession())
   private val _serviceEnabled = MutableStateFlow(store.loadServiceEnabled())
   private val _runtimeStatus = MutableStateFlow(store.loadRuntimeStatus())
+  private val _capturePreferences = MutableStateFlow(store.loadCapturePreferences())
   private val _activitySnapshot = MutableStateFlow(ServiceActivitySnapshot())
   private val _assistantSnapshot = MutableStateFlow(AssistantInteractionSnapshot())
   private val uploadMutex = Mutex()
   private val pendingUploads = ArrayDeque<PendingUpload>()
   private var backpressureUntilMs: Long = 0L
+  private var debugThrottleUntilMs: Long = 0L
+  private var debugThrottleDepth: Int? = null
 
   val session: StateFlow<DeviceSession?> = _session.asStateFlow()
   val serviceEnabled: StateFlow<Boolean> = _serviceEnabled.asStateFlow()
   val runtimeStatus: StateFlow<ServiceRuntimeStatus> = _runtimeStatus.asStateFlow()
+  val capturePreferences: StateFlow<CapturePreferences> = _capturePreferences.asStateFlow()
   val activitySnapshot: StateFlow<ServiceActivitySnapshot> = _activitySnapshot.asStateFlow()
   val assistantSnapshot: StateFlow<AssistantInteractionSnapshot> = _assistantSnapshot.asStateFlow()
 
@@ -68,6 +72,7 @@ class DeviceSessionRepository(
     _session.value = store.loadSession()
     _serviceEnabled.value = store.loadServiceEnabled()
     _runtimeStatus.value = store.loadRuntimeStatus()
+    _capturePreferences.value = store.loadCapturePreferences()
   }
 
   fun requireSession(): DeviceSession {
@@ -80,6 +85,8 @@ class DeviceSessionRepository(
     updateRuntimeStatus(ServiceRuntimeStatus())
     pendingUploads.clear()
     backpressureUntilMs = 0L
+    debugThrottleUntilMs = 0L
+    debugThrottleDepth = null
     _activitySnapshot.value = ServiceActivitySnapshot()
     _assistantSnapshot.value = AssistantInteractionSnapshot()
     _session.value = null
@@ -94,6 +101,12 @@ class DeviceSessionRepository(
   fun updateRuntimeStatus(status: ServiceRuntimeStatus) {
     store.saveRuntimeStatus(status)
     _runtimeStatus.value = status
+  }
+
+  fun setAutoVideoEnabled(enabled: Boolean) {
+    val next = _capturePreferences.value.copy(autoVideoEnabled = enabled)
+    store.saveCapturePreferences(next)
+    _capturePreferences.value = next
   }
 
   fun recordError(message: String, occurredAt: Long = System.currentTimeMillis()) {
@@ -119,6 +132,80 @@ class DeviceSessionRepository(
 
   fun updateAssistantSnapshot(snapshot: AssistantInteractionSnapshot) {
     _assistantSnapshot.value = snapshot
+  }
+
+  fun captureThrottleSnapshot(nowMs: Long = System.currentTimeMillis()): CaptureThrottleSnapshot {
+    val activity = _activitySnapshot.value
+    val backpressureRemainingMs = (backpressureUntilMs - nowMs).coerceAtLeast(0L)
+    val debugThrottleRemainingMs = (debugThrottleUntilMs - nowMs).coerceAtLeast(0L)
+    val lastUploadAt = listOfNotNull(
+      activity.lastAudioUploadAt,
+      activity.lastImageUploadAt,
+      activity.lastVideoUploadAt,
+    ).maxOrNull()
+    val queueSignalFresh = lastUploadAt != null && nowMs - lastUploadAt <= QUEUE_SIGNAL_TTL_MS
+    val analysisQueueDepth = if (debugThrottleRemainingMs > 0L) {
+      debugThrottleDepth ?: ANALYSIS_SEVERE_DEPTH
+    } else {
+      activity.lastServerQueueDepth
+    }
+    val analysisRejected = debugThrottleRemainingMs > 0L || (queueSignalFresh && activity.lastAnalysisQueued == false)
+    val pendingUploadCount = pendingUploads.size
+    val severeQueueDepth = queueSignalFresh && analysisQueueDepth != null && analysisQueueDepth >= ANALYSIS_SEVERE_DEPTH
+    val elevatedQueueDepth = queueSignalFresh && analysisQueueDepth != null && analysisQueueDepth >= ANALYSIS_ELEVATED_DEPTH
+    val pendingUploadPressure = pendingUploadCount >= PENDING_UPLOAD_PRESSURE_THRESHOLD
+
+    val level = when {
+      debugThrottleRemainingMs > 0L || backpressureRemainingMs > 0L || analysisRejected || severeQueueDepth ->
+        CaptureThrottleLevel.SEVERE
+      elevatedQueueDepth || pendingUploadPressure -> CaptureThrottleLevel.ELEVATED
+      else -> CaptureThrottleLevel.NORMAL
+    }
+    val reason = when {
+      debugThrottleRemainingMs > 0L -> "debug_validation_throttle"
+      backpressureRemainingMs > 0L -> "server_backpressure"
+      analysisRejected -> "analysis_not_queued"
+      severeQueueDepth -> "analysis_queue_severe"
+      elevatedQueueDepth -> "analysis_queue_elevated"
+      pendingUploadPressure -> "pending_upload_pressure"
+      else -> null
+    }
+
+    return CaptureThrottleSnapshot(
+      level = level,
+      reason = reason,
+      backpressureUntilMs = backpressureUntilMs.takeIf { backpressureRemainingMs > 0L },
+      pendingUploads = pendingUploadCount,
+      analysisQueueDepth = analysisQueueDepth,
+      deferLowSignalAudio = level == CaptureThrottleLevel.SEVERE,
+      pauseAutoVideo = level != CaptureThrottleLevel.NORMAL,
+      stillIntervalMultiplier = when (level) {
+        CaptureThrottleLevel.NORMAL -> 1
+        CaptureThrottleLevel.ELEVATED -> 3
+        CaptureThrottleLevel.SEVERE -> 6
+      },
+      skipImmediateStillCapture = level == CaptureThrottleLevel.SEVERE,
+    )
+  }
+
+  suspend fun deferAudioUpload(clip: CapturedAudioClip, reason: String) {
+    uploadMutex.withLock {
+      enqueueLocked(PendingUpload.Audio(clip))
+      recordError(reason)
+    }
+  }
+
+  fun injectDebugCaptureThrottle(durationMs: Long, queueDepth: Int = ANALYSIS_SEVERE_DEPTH) {
+    val now = System.currentTimeMillis()
+    debugThrottleUntilMs = now + durationMs.coerceIn(1_000L, DEBUG_THROTTLE_MAX_MS)
+    debugThrottleDepth = queueDepth.coerceAtLeast(0)
+    _activitySnapshot.value = _activitySnapshot.value.copy(
+      lastUploadStored = true,
+      lastAnalysisQueued = false,
+      lastServerQueueDepth = debugThrottleDepth,
+      lastError = "Debug throttle injected for validation (${durationMs}ms).",
+      lastErrorAt = now,
+    )
   }
 
   suspend fun uploadAudio(clip: CapturedAudioClip) {
@@ -163,10 +250,10 @@ class DeviceSessionRepository(
     }
   }
 
-  suspend fun sendHeartbeat(heartbeat: HeartbeatRequest): Int {
+  suspend fun sendHeartbeat(heartbeat: HeartbeatRequest): HeartbeatResult {
     val session = requireSession()
     return try {
-      val nextInterval = api.sendHeartbeat(session, heartbeat)
+      val result = api.sendHeartbeat(session, heartbeat)
       runCatching { retryPendingUploads(session) }
         .onFailure { error ->
           if (error is CancellationException) {
@@ -174,7 +261,7 @@ class DeviceSessionRepository(
           }
           recordError("网络已恢复，但补传仍失败：${error.message ?: "未知错误"}")
         }
-      nextInterval
+      result
     } catch (error: Throwable) {
       if (error is CancellationException) {
         throw error
@@ -195,8 +282,8 @@ class DeviceSessionRepository(
     uploadMutex.withLock {
       failure = runCatching {
         flushPendingUploadsLocked(session)
-        performUpload(session, upload)
-        markUploadSuccess(upload)
+        val result = performUpload(session, upload)
+        markUploadSuccess(upload, result)
       }.exceptionOrNull()
 
       val error = failure
@@ -237,7 +324,9 @@ class DeviceSessionRepository(
     while (pendingUploads.isNotEmpty()) {
       val pending = pendingUploads.first()
       try {
-        performUpload(session, pending)
+        val result = performUpload(session, pending)
+        pendingUploads.removeFirst()
+        markUploadSuccess(pending, result)
       } catch (error: Throwable) {
         if (error is CancellationException) {
           throw error
@@ -251,13 +340,11 @@ class DeviceSessionRepository(
         recordError("重试${pending.label}失败：${error.message ?: "未知错误"}")
         throw error
       }
-      pendingUploads.removeFirst()
-      markUploadSuccess(pending)
     }
   }
 
-  private suspend fun performUpload(session: DeviceSession, upload: PendingUpload) {
-    when (upload) {
+  private suspend fun performUpload(session: DeviceSession, upload: PendingUpload): IngestUploadResult {
+    return when (upload) {
       is PendingUpload.Audio -> api.uploadAudio(session, upload.clip)
       is PendingUpload.Image -> api.uploadImage(session, upload.image)
       is PendingUpload.Video -> api.uploadVideo(session, upload.clip)
@@ -273,15 +360,25 @@ class DeviceSessionRepository(
     _activitySnapshot.value = _activitySnapshot.value.copy(pendingUploads = pendingUploads.size)
   }
 
-  private fun markUploadSuccess(upload: PendingUpload, uploadedAt: Long = System.currentTimeMillis()) {
+  private fun markUploadSuccess(
+    upload: PendingUpload,
+    result: IngestUploadResult,
+    uploadedAt: Long = System.currentTimeMillis(),
+  ) {
     _activitySnapshot.value = when (upload) {
       is PendingUpload.Audio -> _activitySnapshot.value.copy(
         lastAudioUploadAt = uploadedAt,
         pendingUploads = pendingUploads.size,
+        lastUploadStored = result.stored,
+        lastAnalysisQueued = result.analysisQueued,
+        lastServerQueueDepth = result.analysisQueueDepth ?: result.queueDepth,
       )
       is PendingUpload.Image -> _activitySnapshot.value.copy(
         lastImageUploadAt = uploadedAt,
         pendingUploads = pendingUploads.size,
+        lastUploadStored = result.stored,
+        lastAnalysisQueued = result.analysisQueued,
+        lastServerQueueDepth = result.analysisQueueDepth ?: result.queueDepth,
       )
       is PendingUpload.Video -> _activitySnapshot.value.copy(
         lastVideoUploadAt = uploadedAt,
@@ -289,6 +386,9 @@ class DeviceSessionRepository(
         lastVideoStatus = "视频片段已上传。",
         lastVideoStatusAt = uploadedAt,
         pendingUploads = pendingUploads.size,
+        lastUploadStored = result.stored,
+        lastAnalysisQueued = result.analysisQueued,
+        lastServerQueueDepth = result.analysisQueueDepth ?: result.queueDepth,
       )
     }
   }
@@ -301,6 +401,8 @@ class DeviceSessionRepository(
         } else {
           pendingUploads.clear()
           backpressureUntilMs = 0L
+          debugThrottleUntilMs = 0L
+          debugThrottleDepth = null
           _activitySnapshot.value = _activitySnapshot.value.copy(
             pendingUploads = 0,
             lastError = message,
@@ -339,6 +441,8 @@ class DeviceSessionRepository(
   private fun invalidateSessionLocked(message: String, occurredAt: Long = System.currentTimeMillis()) {
     pendingUploads.clear()
     backpressureUntilMs = 0L
+    debugThrottleUntilMs = 0L
+    debugThrottleDepth = null
     _activitySnapshot.value = _activitySnapshot.value.copy(
       pendingUploads = 0,
       lastError = message,
@@ -393,13 +497,39 @@ class DeviceSessionRepository(
   private companion object {
     const val MAX_PENDING_UPLOADS = 6
     const val DEFAULT_BACKPRESSURE_RETRY_SEC = 3
+    const val ANALYSIS_ELEVATED_DEPTH = 12
+    const val ANALYSIS_SEVERE_DEPTH = 18
+    const val PENDING_UPLOAD_PRESSURE_THRESHOLD = 3
+    const val QUEUE_SIGNAL_TTL_MS = 2 * 60 * 1000L
+    const val DEBUG_THROTTLE_MAX_MS = 2 * 60 * 1000L
   }
 }
+
+enum class CaptureThrottleLevel {
+  NORMAL,
+  ELEVATED,
+  SEVERE,
+}
+
+data class CaptureThrottleSnapshot(
+  val level: CaptureThrottleLevel = CaptureThrottleLevel.NORMAL,
+  val reason: String? = null,
+  val backpressureUntilMs: Long? = null,
+  val pendingUploads: Int = 0,
+  val analysisQueueDepth: Int? = null,
+  val deferLowSignalAudio: Boolean = false,
+  val pauseAutoVideo: Boolean = false,
+  val stillIntervalMultiplier: Int = 1,
+  val skipImmediateStillCapture: Boolean = false,
+)
 
 data class ServiceActivitySnapshot(
   val lastAudioUploadAt: Long? = null,
   val lastImageUploadAt: Long? = null,
   val lastVideoUploadAt: Long? = null,
+  val lastUploadStored: Boolean? = null,
+  val lastAnalysisQueued: Boolean? = null,
+  val lastServerQueueDepth: Int? = null,
   val videoCaptureInProgress: Boolean = false,
   val lastVideoStatus: String? = null,
   val lastVideoStatusAt: Long? = null,

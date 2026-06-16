@@ -3,6 +3,7 @@ package ai.openclaw.clawsense
 import ai.openclaw.clawsense.data.DeviceSession
 import ai.openclaw.clawsense.data.DeviceSessionRepository
 import ai.openclaw.clawsense.data.AssistantInteractionSnapshot
+import ai.openclaw.clawsense.data.CapturePreferences
 import ai.openclaw.clawsense.data.ServiceActivitySnapshot
 import ai.openclaw.clawsense.data.ServiceRuntimeStatus
 import androidx.lifecycle.ViewModel
@@ -28,22 +29,36 @@ class MainViewModel(
     repository.session,
     repository.serviceEnabled,
     repository.runtimeStatus,
-    repository.activitySnapshot,
-    repository.assistantSnapshot,
-  ) { session, serviceEnabled, runtimeStatus, activitySnapshot, assistantSnapshot ->
-    RuntimeComposite(
+    repository.capturePreferences,
+  ) { session, serviceEnabled, runtimeStatus, capturePreferences ->
+    RuntimeBase(
       session = session,
       serviceEnabled = serviceEnabled,
       runtimeStatus = runtimeStatus,
+      capturePreferences = capturePreferences,
+    )
+  }.let { runtimeBase ->
+    combine(
+      runtimeBase,
+      repository.activitySnapshot,
+      repository.assistantSnapshot,
+    ) { base, activitySnapshot, assistantSnapshot ->
+    RuntimeComposite(
+      session = base.session,
+      serviceEnabled = base.serviceEnabled,
+      runtimeStatus = base.runtimeStatus,
+      capturePreferences = base.capturePreferences,
       activitySnapshot = activitySnapshot,
       assistantSnapshot = assistantSnapshot,
     )
+    }
   }.let { runtimeState ->
     combine(runtimeState, formState) { runtime, form ->
       MainUiState(
         session = runtime.session,
         serviceEnabled = runtime.serviceEnabled,
         runtimeStatus = runtime.runtimeStatus,
+        capturePreferences = runtime.capturePreferences,
         serviceActivity = runtime.activitySnapshot,
         assistant = runtime.assistantSnapshot,
         isBusy = form.isBusy,
@@ -119,6 +134,19 @@ class MainViewModel(
     repository.updateRuntimeStatus(status)
   }
 
+  fun setAutoVideoEnabled(enabled: Boolean) {
+    repository.setAutoVideoEnabled(enabled)
+    formState.update {
+      it.copy(
+        statusMessage = if (enabled) {
+          "自动视频已开启：检测到关键线索时会低频录制 6 秒片段。"
+        } else {
+          "自动视频已关闭，只保留手动录制。"
+        },
+      )
+    }
+  }
+
   fun clearSession() {
     repository.clearSession()
     formState.update {
@@ -170,6 +198,7 @@ data class MainUiState(
   val session: DeviceSession? = null,
   val serviceEnabled: Boolean = false,
   val runtimeStatus: ServiceRuntimeStatus = ServiceRuntimeStatus(),
+  val capturePreferences: CapturePreferences = CapturePreferences(),
   val serviceActivity: ServiceActivitySnapshot = ServiceActivitySnapshot(),
   val assistant: AssistantInteractionSnapshot = AssistantInteractionSnapshot(),
   val isBusy: Boolean = false,
@@ -189,10 +218,18 @@ private data class FormState(
   val deviceName: String = "ClawSense Android",
 )
 
+private data class RuntimeBase(
+  val session: DeviceSession?,
+  val serviceEnabled: Boolean,
+  val runtimeStatus: ServiceRuntimeStatus,
+  val capturePreferences: CapturePreferences,
+)
+
 private data class RuntimeComposite(
   val session: DeviceSession?,
   val serviceEnabled: Boolean,
   val runtimeStatus: ServiceRuntimeStatus,
+  val capturePreferences: CapturePreferences,
   val activitySnapshot: ServiceActivitySnapshot,
   val assistantSnapshot: AssistantInteractionSnapshot,
 )

@@ -56,6 +56,7 @@ import {
   buildAssistantModelPrompt,
   buildRecentContextPayload,
   mergeAssistantModelAnswer,
+  resolveAssistantAudioRecheckPlan,
   resolveAssistantQueryText,
   shouldFallbackAssistantContextToAllDevices,
   shouldUseDeterministicAssistantAnswer,
@@ -65,6 +66,7 @@ import {
   type RecentContextWindowHint,
   withAssistantDeviceFallbackHint,
 } from "./src/realtime-assistant.js";
+import { resolveAutoVideoTriggerReason } from "./src/auto-video-trigger.js";
 
 const plugin = {
   id: "clawsense",
@@ -94,23 +96,43 @@ const plugin = {
     const ONE_DAY_MS = 24 * 60 * 60 * 1000;
     const DEVICE_HEARTBEAT_STALE_FACTOR = 3;
     let maintenanceTimer: NodeJS.Timeout | null = null;
-    const ingestQueue: Array<{
+    let analysisRecoveryTimer: NodeJS.Timeout | null = null;
+    const analysisQueue: Array<{
       requestId: string;
       device: ClawSenseDeviceRecord;
       deviceId: string;
+      artifactId: string;
       modality: "audio" | "image" | "video";
-      body: Buffer;
-      fileName: string;
-      mime: string | undefined;
       capturedAt?: number;
       note?: string;
       queuedAt: number;
     }> = [];
-    let ingestPumpActive = false;
-    const MAX_PENDING_INGEST_JOBS = 24;
+    let analysisPumpActive = false;
+    let analysisCurrent:
+      | {
+          requestId: string;
+          artifactId: string;
+          modality: "audio" | "image" | "video";
+          startedAt: number;
+        }
+      | null = null;
+    const MAX_PENDING_ANALYSIS_JOBS = 96;
     const MAX_VIDEO_KEYFRAMES_PER_INGEST = 6;
     const MAX_VIDEO_INGEST_JSON_BYTES = 96 * 1024 * 1024;
+    const AUTO_VIDEO_DIRECTIVE_DURATION_MS = 6_000;
+    const AUTO_VIDEO_DIRECTIVE_TTL_MS = 2 * 60 * 1000;
+    const AUTO_VIDEO_DIRECTIVE_COOLDOWN_MS = 10 * 60 * 1000;
     const assistantConversationTurns = new Map<string, AssistantConversationTurn>();
+    const autoVideoDirectives = new Map<string, {
+      directiveId: string;
+      deviceId: string;
+      durationMs: number;
+      reason: string;
+      sourceEventId: string;
+      sourceText: string;
+      issuedAt: number;
+      expiresAt: number;
+    }>();
 
     const publicBaseUrl = (): string =>
       inferPublicBaseUrl({
@@ -198,13 +220,37 @@ const plugin = {
       };
     };
 
+    const pruneAssistantQueryAudioDir = async (dir: string, keepCount: number): Promise<void> => {
+      const entries = await fs.readdir(dir).catch(() => [] as string[]);
+      const files = (
+        await Promise.all(
+          entries.map(async (name) => {
+            const filePath = path.join(dir, name);
+            const stat = await fs.stat(filePath).catch(() => null);
+            return stat?.isFile() ? { filePath, mtimeMs: stat.mtimeMs } : null;
+          }),
+        )
+      )
+        .filter((entry): entry is { filePath: string; mtimeMs: number } => entry !== null)
+        .sort((left, right) => right.mtimeMs - left.mtimeMs);
+      await Promise.all(
+        files.slice(keepCount).map((file) => fs.rm(file.filePath, { force: true }).catch(() => undefined)),
+      );
+    };
+
     const transcribeAssistantQuery = async (params: {
       body: Buffer;
       fileName: string;
       mime?: string;
+      modeHint?: AssistantModeHint;
     }): Promise<{ queryText: string; provider?: string; failureReason?: string }> => {
       const providers: string[] = [];
       const failureReasons: string[] = [];
+      let rejectedTranscript = "";
+      const shouldAcceptQueryTranscript = (text: string): boolean =>
+        Boolean(
+          resolveAssistantQueryText({ queryText: text, modeHint: params.modeHint, explicitQuery: true }).queryText,
+        );
       const tempDir = path.join(api.runtime.state.resolveStateDir(), "plugins", "clawsense", "assistant-queries");
       const tempFilePath = path.join(tempDir, `${randomUUID()}-${params.fileName}`);
       try {
@@ -223,13 +269,19 @@ const plugin = {
               : runtimeResponse?.text ?? runtimeResponse?.transcript ?? ""
           ).trim();
           if (runtimeText) {
-            return {
-              queryText: runtimeText,
-              provider: "runtime-stt",
-            };
+            if (shouldAcceptQueryTranscript(runtimeText)) {
+              return {
+                queryText: runtimeText,
+                provider: "runtime-stt",
+              };
+            }
+            providers.push("runtime-stt");
+            failureReasons.push("runtime_stt_unusable_query");
+            rejectedTranscript ||= runtimeText;
+          } else {
+            providers.push("runtime-stt");
+            failureReasons.push("runtime_stt_empty");
           }
-          providers.push("runtime-stt");
-          failureReasons.push("runtime_stt_empty");
         } catch (error) {
           const reason = classifyRuntimeSttError(error);
           providers.push("runtime-stt");
@@ -245,17 +297,27 @@ const plugin = {
         });
         providers.push(localAsr.analysisProvider);
         if (localAsr.transcript?.trim()) {
-          return {
-            queryText: localAsr.transcript.trim(),
-            provider: combineAssistantDiagnostics(providers),
-            failureReason: combineAssistantDiagnostics(failureReasons),
-          };
-        }
-        if (localAsr.analysisFailureReason !== "query_time_local_asr_disabled") {
+          const localTranscript = localAsr.transcript.trim();
+          if (shouldAcceptQueryTranscript(localTranscript)) {
+            return {
+              queryText: localTranscript,
+              provider: combineAssistantDiagnostics(providers),
+              failureReason: combineAssistantDiagnostics(failureReasons),
+            };
+          }
+          failureReasons.push("query_time_local_asr_unusable_query");
+          rejectedTranscript ||= localTranscript;
+        } else if (localAsr.analysisFailureReason !== "query_time_local_asr_disabled") {
           failureReasons.push(localAsr.analysisFailureReason ?? "query_time_local_asr_empty");
         }
       } finally {
-        await fs.rm(tempFilePath, { force: true }).catch(() => undefined);
+        // Keep the most recent query clips on disk so a failing live query can be
+        // replayed against each ASR provider instead of guessing from rawQueryLen.
+        if (cfg.assistantQueryAudioKeepCount > 0) {
+          await pruneAssistantQueryAudioDir(tempDir, cfg.assistantQueryAudioKeepCount).catch(() => undefined);
+        } else {
+          await fs.rm(tempFilePath, { force: true }).catch(() => undefined);
+        }
       }
 
       const fallback = await transcribeAudioWithFallbackModel({
@@ -267,13 +329,19 @@ const plugin = {
       });
       providers.push(fallback.analysisProvider);
       if (fallback.transcript?.trim()) {
-        return {
-          queryText: fallback.transcript.trim(),
-          provider: combineAssistantDiagnostics(providers),
-          failureReason: combineAssistantDiagnostics(failureReasons),
-        };
+        const fallbackTranscript = fallback.transcript.trim();
+        if (shouldAcceptQueryTranscript(fallbackTranscript)) {
+          return {
+            queryText: fallbackTranscript,
+            provider: combineAssistantDiagnostics(providers),
+            failureReason: combineAssistantDiagnostics(failureReasons),
+          };
+        }
+        failureReasons.push("query_time_asr_unusable_query");
+        rejectedTranscript ||= fallbackTranscript;
+      } else {
+        failureReasons.push(fallback.analysisFailureReason ?? "query_time_asr_empty");
       }
-      failureReasons.push(fallback.analysisFailureReason ?? "query_time_asr_empty");
 
       const multimodal = await understandAudioWithPrimaryModel({
         cfg,
@@ -285,11 +353,18 @@ const plugin = {
       providers.push(multimodal.analysisProvider);
       const multimodalText = normalizeSemanticText(multimodal.transcript ?? "");
       if (multimodalText) {
-        return {
-          queryText: multimodalText,
-          provider: combineAssistantDiagnostics(providers),
-          failureReason: combineAssistantDiagnostics(failureReasons),
-        };
+        const multimodalTextAccepted = shouldAcceptQueryTranscript(multimodalText);
+        if (!multimodalTextAccepted) {
+          failureReasons.push("primary_multimodal_unusable_query");
+          rejectedTranscript ||= multimodalText;
+        }
+        if (multimodalTextAccepted) {
+          return {
+            queryText: multimodalText,
+            provider: combineAssistantDiagnostics(providers),
+            failureReason: combineAssistantDiagnostics(failureReasons),
+          };
+        }
       }
       failureReasons.push(
         multimodal.summary?.trim()
@@ -298,7 +373,7 @@ const plugin = {
       );
 
       return {
-        queryText: "",
+        queryText: rejectedTranscript,
         provider: combineAssistantDiagnostics(providers),
         failureReason: combineAssistantDiagnostics(failureReasons),
       };
@@ -349,9 +424,9 @@ const plugin = {
       const now = Date.now();
       const devices = await stateStore.listDevices();
       const events = await stateStore.listEvents();
-      const queueDepth = ingestQueue.length;
-      const queueOldest = ingestQueue[0];
-      const queueOldestWaitMs = queueOldest ? Math.max(0, now - queueOldest.queuedAt) : 0;
+      const analysisQueueDepth = analysisQueue.length;
+      const analysisQueueOldest = analysisQueue[0];
+      const analysisQueueOldestWaitMs = analysisQueueOldest ? Math.max(0, now - analysisQueueOldest.queuedAt) : 0;
       const heartbeatFreshMs = Math.max(
         90_000,
         cfg.heartbeatIntervalSeconds * 1000 * DEVICE_HEARTBEAT_STALE_FACTOR,
@@ -396,11 +471,16 @@ const plugin = {
         },
         videoIngest: buildVideoConfigStatus(),
         queue: {
-          depth: queueDepth,
-          maxPending: MAX_PENDING_INGEST_JOBS,
-          pumpActive: ingestPumpActive,
-          oldestQueuedAt: queueOldest?.queuedAt ?? null,
-          oldestWaitMs: queueOldest ? queueOldestWaitMs : null,
+          depth: analysisQueueDepth,
+          maxPending: MAX_PENDING_ANALYSIS_JOBS,
+          pumpActive: analysisPumpActive,
+          oldestQueuedAt: analysisQueueOldest?.queuedAt ?? null,
+          oldestWaitMs: analysisQueueOldest ? analysisQueueOldestWaitMs : null,
+          kind: "analysis",
+          ingestDepth: 0,
+          analysisDepth: analysisQueueDepth,
+          analysisMaxPending: MAX_PENDING_ANALYSIS_JOBS,
+          current: analysisCurrent,
         },
         devices: {
           total: devices.length,
@@ -436,9 +516,9 @@ const plugin = {
         warnings.push("当前没有活跃设备心跳。");
         nextActions.push("检查手机端是否仍在前台运行感知服务，并重新配对后再观察 1-2 分钟。");
       }
-      if (status.queue.depth >= Math.max(3, Math.floor(status.queue.maxPending * 0.5))) {
-        warnings.push(`上传队列积压较高：${status.queue.depth}/${status.queue.maxPending}`);
-        nextActions.push("先保持客户端在线并等待队列回落，再做高频录音压测。");
+      if (status.queue.analysisDepth >= Math.max(6, Math.floor(status.queue.analysisMaxPending * 0.5))) {
+        warnings.push(`后台分析队列积压较高：${status.queue.analysisDepth}/${status.queue.analysisMaxPending}`);
+        nextActions.push("证据已优先落库；先保持客户端在线并等待后台分析回落，再做高频录音/视频压测。");
       }
       if (status.ingest24h.totalEvents === 0) {
         warnings.push("最近 24 小时没有任何采集事件。");
@@ -500,7 +580,7 @@ const plugin = {
       };
     };
 
-    const recordIngest = async (params: {
+    const recordPendingIngest = async (params: {
       device: ClawSenseDeviceRecord;
       modality: "audio" | "image" | "video";
       body: Buffer;
@@ -509,8 +589,23 @@ const plugin = {
       capturedAt?: number;
       note?: string;
     }): Promise<ClawSenseIngestReceipt> => {
-      const receipt = await memoryStore.ingest({
+      const receipt = await memoryStore.ingestPending({
         ...params,
+      });
+
+      try {
+        await api.runtime.system.requestHeartbeatNow();
+      } catch (error) {
+        api.logger.warn(`[clawsense] requestHeartbeatNow failed: ${String(error)}`);
+      }
+      return receipt;
+    };
+
+    const analyzeIngestArtifact = async (params: {
+      artifactId: string;
+    }): Promise<void> => {
+      const result = await memoryStore.analyzeCaptureArtifact({
+        artifactId: params.artifactId,
         describeImage: async ({ buffer, fileName, mime }) => {
           return await analyzeImageWithPrimaryModel({
             cfg,
@@ -539,86 +634,220 @@ const plugin = {
           return typeof response === "string" ? { text: response } : { text: response.text ?? response.transcript };
         },
       });
+      if (result.event) {
+        maybeIssueAutoVideoDirective(result.event);
+      }
 
       try {
         await api.runtime.system.requestHeartbeatNow();
       } catch (error) {
         api.logger.warn(`[clawsense] requestHeartbeatNow failed: ${String(error)}`);
       }
-      return receipt;
     };
 
-    const pumpIngestQueue = (): void => {
-      if (ingestPumpActive) {
+    const maybeIssueAutoVideoDirective = (event: {
+      eventId: string;
+      deviceId: string;
+      modality: "audio" | "image" | "video";
+      summary?: string;
+      transcript?: string;
+      analysisStatus?: "succeeded" | "degraded";
+    }): void => {
+      if (event.modality === "video" || event.analysisStatus !== "succeeded") {
         return;
       }
-      ingestPumpActive = true;
+      if (analysisQueue.length >= Math.floor(MAX_PENDING_ANALYSIS_JOBS * 0.75)) {
+        return;
+      }
+      const now = Date.now();
+      for (const [deviceId, directive] of autoVideoDirectives) {
+        if (directive.expiresAt <= now) {
+          autoVideoDirectives.delete(deviceId);
+        }
+      }
+      const existing = autoVideoDirectives.get(event.deviceId);
+      if (existing && existing.expiresAt > now) {
+        return;
+      }
+      const recentDirective = Array.from(autoVideoDirectives.values()).find(
+        (item) => item.deviceId === event.deviceId && now - item.issuedAt < AUTO_VIDEO_DIRECTIVE_COOLDOWN_MS,
+      );
+      if (recentDirective) {
+        return;
+      }
+
+      const sourceText = normalizeSemanticText([event.transcript, event.summary].filter(Boolean).join("\n"));
+      const reason = resolveAutoVideoTriggerReason(sourceText);
+      if (!reason) {
+        return;
+      }
+
+      const directive = {
+        directiveId: randomUUID(),
+        deviceId: event.deviceId,
+        durationMs: AUTO_VIDEO_DIRECTIVE_DURATION_MS,
+        reason,
+        sourceEventId: event.eventId,
+        sourceText: sourceText.slice(0, 240),
+        issuedAt: now,
+        expiresAt: now + AUTO_VIDEO_DIRECTIVE_TTL_MS,
+      };
+      autoVideoDirectives.set(event.deviceId, directive);
+      api.logger.info(
+        `[clawsense] issued auto-video directive device=${event.deviceId} sourceEventId=${event.eventId} reason=${reason}`,
+      );
+    };
+
+    const pumpAnalysisQueue = (): void => {
+      if (analysisPumpActive) {
+        return;
+      }
+      analysisPumpActive = true;
       void (async () => {
         try {
-          while (ingestQueue.length > 0) {
-            const job = ingestQueue.shift();
+          while (analysisQueue.length > 0) {
+            const job = analysisQueue.shift();
             if (!job) {
               continue;
             }
             const startedAt = Date.now();
+            analysisCurrent = {
+              requestId: job.requestId,
+              artifactId: job.artifactId,
+              modality: job.modality,
+              startedAt,
+            };
             api.logger.info(
-              `[clawsense] processing queued ${job.modality} ingest requestId=${job.requestId} queueWaitMs=${startedAt - job.queuedAt} queueDepth=${ingestQueue.length}`,
+              `[clawsense] processing queued ${job.modality} analysis requestId=${job.requestId} artifactId=${job.artifactId} queueWaitMs=${startedAt - job.queuedAt} queueDepth=${analysisQueue.length}`,
             );
             try {
-              await recordIngest(job);
+              await analyzeIngestArtifact({ artifactId: job.artifactId });
               await stateStore.touchDevice(job.device.deviceId);
               api.logger.info(
-                `[clawsense] completed queued ${job.modality} ingest requestId=${job.requestId} durationMs=${Date.now() - startedAt}`,
+                `[clawsense] completed queued ${job.modality} analysis requestId=${job.requestId} artifactId=${job.artifactId} durationMs=${Date.now() - startedAt}`,
               );
             } catch (error) {
               api.logger.error(
-                `[clawsense] queued ${job.modality} ingest failed requestId=${job.requestId}: ${String(error)}`,
+                `[clawsense] queued ${job.modality} analysis failed requestId=${job.requestId} artifactId=${job.artifactId}: ${String(error)}`,
               );
+            } finally {
+              analysisCurrent = null;
             }
           }
         } finally {
-          ingestPumpActive = false;
-          if (ingestQueue.length > 0) {
-            pumpIngestQueue();
+          analysisPumpActive = false;
+          if (analysisQueue.length > 0) {
+            pumpAnalysisQueue();
           }
         }
       })();
     };
 
-    const enqueueIngest = (params: {
+    const enqueueAnalysis = (params: {
       device: ClawSenseDeviceRecord;
+      artifactId: string;
       modality: "audio" | "image" | "video";
-      body: Buffer;
-      fileName: string;
-      mime: string | undefined;
       capturedAt?: number;
       note?: string;
       requestId?: string;
     }): { accepted: true; requestId: string; queueDepth: number } | { accepted: false; queueDepth: number } => {
       const requestId = params.requestId?.trim() || randomUUID();
       const { requestId: _ignoredRequestId, ...jobParams } = params;
-      const result = enqueueIngestJob(ingestQueue, {
+      const result = enqueueIngestJob(analysisQueue, {
         requestId,
         queuedAt: Date.now(),
         deviceId: params.device.deviceId,
         ...jobParams,
       }, {
-        maxPendingJobs: MAX_PENDING_INGEST_JOBS,
+        maxPendingJobs: MAX_PENDING_ANALYSIS_JOBS,
       });
       if (!result.accepted) {
         return result;
       }
       if (result.action === "replaced") {
         api.logger.info(
-          `[clawsense] coalesced queued ${params.modality} ingest requestId=${result.requestId} replaced=${result.affectedRequestId ?? "unknown"} queueDepth=${result.queueDepth}`,
+          `[clawsense] coalesced queued ${params.modality} analysis requestId=${result.requestId} replaced=${result.affectedRequestId ?? "unknown"} queueDepth=${result.queueDepth}`,
         );
       } else if (result.action === "evicted-visual") {
         api.logger.warn(
-          `[clawsense] evicted older queued visual ingest to admit ${params.modality} requestId=${result.requestId} evicted=${result.affectedRequestId ?? "unknown"} queueDepth=${result.queueDepth}`,
+          `[clawsense] evicted older queued visual analysis to admit ${params.modality} requestId=${result.requestId} evicted=${result.affectedRequestId ?? "unknown"} queueDepth=${result.queueDepth}`,
         );
       }
-      pumpIngestQueue();
+      pumpAnalysisQueue();
       return result;
+    };
+
+    const requeuePendingAnalysis = async (maxArtifacts = 12): Promise<{
+      scanned: number;
+      queued: number;
+      skippedQueued: number;
+      missingArtifacts: number;
+      missingDevices: number;
+    }> => {
+      const queuedArtifactIds = new Set<string>();
+      for (const job of analysisQueue) {
+        queuedArtifactIds.add(job.artifactId);
+      }
+      if (analysisCurrent?.artifactId) {
+        queuedArtifactIds.add(analysisCurrent.artifactId);
+      }
+
+      const devices = await stateStore.listDevices();
+      const devicesById = new Map(devices.map((device) => [device.deviceId, device]));
+      const pendingEvents = (await stateStore.listEvents())
+        .filter((event) => event.artifactId && event.analysisFailureReason === "analysis_pending")
+        .sort((a, b) => a.capturedAt - b.capturedAt)
+        .slice(0, Math.max(1, maxArtifacts));
+
+      let queued = 0;
+      let skippedQueued = 0;
+      let missingArtifacts = 0;
+      let missingDevices = 0;
+
+      for (const event of pendingEvents) {
+        const artifactId = event.artifactId;
+        if (!artifactId) {
+          continue;
+        }
+        if (queuedArtifactIds.has(artifactId)) {
+          skippedQueued += 1;
+          continue;
+        }
+        const artifact = await stateStore.getArtifact(artifactId);
+        if (!artifact || artifact.deletedAt) {
+          missingArtifacts += 1;
+          continue;
+        }
+        const device = devicesById.get(event.deviceId);
+        if (!device) {
+          missingDevices += 1;
+          continue;
+        }
+        const accepted = enqueueAnalysis({
+          device,
+          artifactId,
+          modality: event.modality,
+          capturedAt: event.capturedAt,
+          note: event.note,
+        });
+        if (!accepted.accepted) {
+          break;
+        }
+        queued += 1;
+        queuedArtifactIds.add(artifactId);
+      }
+
+      if (queued > 0) {
+        api.logger.info(`[clawsense] requeued ${queued} pending analysis artifact(s)`);
+      }
+
+      return {
+        scanned: pendingEvents.length,
+        queued,
+        skippedQueued,
+        missingArtifacts,
+        missingDevices,
+      };
     };
 
     api.registerTool(
@@ -737,7 +966,7 @@ const plugin = {
           return true;
         }
 
-        const accepted = enqueueIngest({
+        const receipt = await recordPendingIngest({
           device,
           modality: "audio",
           body,
@@ -749,23 +978,29 @@ const plugin = {
           capturedAt: typeof payload.capturedAt === "number" ? payload.capturedAt : undefined,
           note: typeof payload.note === "string" ? payload.note : undefined,
         });
+        const accepted = enqueueAnalysis({
+          device,
+          artifactId: receipt.artifactId ?? receipt.memoryId,
+          modality: "audio",
+          capturedAt: typeof payload.capturedAt === "number" ? payload.capturedAt : undefined,
+          note: typeof payload.note === "string" ? payload.note : undefined,
+        });
         if (!accepted.accepted) {
-          const retryAfterSec = Math.max(2, Math.min(8, Math.ceil(accepted.queueDepth / 2)));
-          res.setHeader("retry-after", String(retryAfterSec));
-          json(res, 503, {
-            ok: false,
-            error: "ingest_queue_full",
-            queueDepth: accepted.queueDepth,
-            retryAfterSec,
-          });
-          return true;
+          api.logger.warn(
+            `[clawsense] analysis queue full after fast audio ingest artifactId=${receipt.artifactId ?? "unknown"} queueDepth=${accepted.queueDepth}; keeping pending event for late recheck`,
+          );
         }
         await stateStore.touchDevice(device.deviceId);
         json(res, 202, {
           ok: true,
-          queued: true,
-          requestId: accepted.requestId,
+          queued: accepted.accepted,
+          stored: true,
+          analysisQueued: accepted.accepted,
+          requestId: accepted.accepted ? accepted.requestId : undefined,
+          artifactId: receipt.artifactId,
+          eventId: receipt.memoryId,
           queueDepth: accepted.queueDepth,
+          analysisQueueDepth: accepted.queueDepth,
         });
         return true;
       }),
@@ -804,7 +1039,7 @@ const plugin = {
           return true;
         }
 
-        const accepted = enqueueIngest({
+        const receipt = await recordPendingIngest({
           device,
           modality: "image",
           body,
@@ -816,23 +1051,29 @@ const plugin = {
           capturedAt: typeof payload.capturedAt === "number" ? payload.capturedAt : undefined,
           note: typeof payload.note === "string" ? payload.note : undefined,
         });
+        const accepted = enqueueAnalysis({
+          device,
+          artifactId: receipt.artifactId ?? receipt.memoryId,
+          modality: "image",
+          capturedAt: typeof payload.capturedAt === "number" ? payload.capturedAt : undefined,
+          note: typeof payload.note === "string" ? payload.note : undefined,
+        });
         if (!accepted.accepted) {
-          const retryAfterSec = Math.max(2, Math.min(8, Math.ceil(accepted.queueDepth / 2)));
-          res.setHeader("retry-after", String(retryAfterSec));
-          json(res, 503, {
-            ok: false,
-            error: "ingest_queue_full",
-            queueDepth: accepted.queueDepth,
-            retryAfterSec,
-          });
-          return true;
+          api.logger.warn(
+            `[clawsense] analysis queue full after fast image ingest artifactId=${receipt.artifactId ?? "unknown"} queueDepth=${accepted.queueDepth}; keeping pending event for late recheck`,
+          );
         }
         await stateStore.touchDevice(device.deviceId);
         json(res, 202, {
           ok: true,
-          queued: true,
-          requestId: accepted.requestId,
+          queued: accepted.accepted,
+          stored: true,
+          analysisQueued: accepted.accepted,
+          requestId: accepted.accepted ? accepted.requestId : undefined,
+          artifactId: receipt.artifactId,
+          eventId: receipt.memoryId,
           queueDepth: accepted.queueDepth,
+          analysisQueueDepth: accepted.queueDepth,
         });
         return true;
       }),
@@ -885,11 +1126,10 @@ const plugin = {
           `videoRequestId=${videoRequestId}`,
           typeof payload.note === "string" ? payload.note.trim() : "",
         ].filter(Boolean);
-        const accepted = enqueueIngest({
+        const receipt = await recordPendingIngest({
           device,
           modality: "video",
           body,
-          requestId: videoRequestId,
           fileName:
             typeof payload.fileName === "string" && payload.fileName.trim()
               ? payload.fileName.trim()
@@ -898,19 +1138,22 @@ const plugin = {
           capturedAt: typeof payload.capturedAt === "number" ? payload.capturedAt : undefined,
           note: videoNoteParts.join(" "),
         });
+        const accepted = enqueueAnalysis({
+          device,
+          artifactId: receipt.artifactId ?? receipt.memoryId,
+          modality: "video",
+          requestId: videoRequestId,
+          capturedAt: typeof payload.capturedAt === "number" ? payload.capturedAt : undefined,
+          note: videoNoteParts.join(" "),
+        });
         if (!accepted.accepted) {
-          const retryAfterSec = Math.max(2, Math.min(8, Math.ceil(accepted.queueDepth / 2)));
-          res.setHeader("retry-after", String(retryAfterSec));
-          json(res, 503, {
-            ok: false,
-            error: "ingest_queue_full",
-            queueDepth: accepted.queueDepth,
-            retryAfterSec,
-          });
-          return true;
+          api.logger.warn(
+            `[clawsense] analysis queue full after fast video ingest artifactId=${receipt.artifactId ?? "unknown"} queueDepth=${accepted.queueDepth}; keeping pending event for late recheck`,
+          );
         }
         const keyframes = Array.isArray(payload.keyframes) ? payload.keyframes.slice(0, MAX_VIDEO_KEYFRAMES_PER_INGEST) : [];
         let keyframesAccepted = 0;
+        let keyframesAnalysisQueued = 0;
         let keyframesDropped = 0;
         for (let index = 0; index < keyframes.length; index += 1) {
           const keyframe = keyframes[index];
@@ -949,7 +1192,7 @@ const plugin = {
               ? String(keyframeRecord.note).trim()
               : "",
           ].filter(Boolean);
-          const keyframeAccepted = enqueueIngest({
+          const keyframeReceipt = await recordPendingIngest({
             device,
             modality: "image",
             body: keyframeBody,
@@ -966,21 +1209,37 @@ const plugin = {
             capturedAt: keyframeCapturedAt,
             note: keyframeNoteParts.join(" "),
           });
+          keyframesAccepted += 1;
+          const keyframeAccepted = enqueueAnalysis({
+            device,
+            artifactId: keyframeReceipt.artifactId ?? keyframeReceipt.memoryId,
+            modality: "image",
+            capturedAt: keyframeCapturedAt,
+            note: keyframeNoteParts.join(" "),
+          });
           if (keyframeAccepted.accepted) {
-            keyframesAccepted += 1;
+            keyframesAnalysisQueued += 1;
           } else {
-            keyframesDropped += 1;
+            api.logger.warn(
+              `[clawsense] analysis queue full after fast video keyframe ingest artifactId=${keyframeReceipt.artifactId ?? "unknown"} queueDepth=${keyframeAccepted.queueDepth}; keeping pending event for late recheck`,
+            );
           }
         }
         await stateStore.touchDevice(device.deviceId);
         json(res, 202, {
           ok: true,
-          queued: true,
-          requestId: accepted.requestId,
+          queued: accepted.accepted,
+          stored: true,
+          analysisQueued: accepted.accepted,
+          requestId: accepted.accepted ? accepted.requestId : videoRequestId,
+          artifactId: receipt.artifactId,
+          eventId: receipt.memoryId,
           videoRequestId,
           queueDepth: accepted.queueDepth,
+          analysisQueueDepth: accepted.queueDepth,
           analysisMode: cfg.hostModelVideoMode === "direct" ? "multimodal-pending" : "metadata-only",
           keyframesAccepted,
+          keyframesAnalysisQueued,
           keyframesDropped,
         });
         return true;
@@ -1010,15 +1269,40 @@ const plugin = {
         if (!payload) {
           return true;
         }
+        const appState =
+          typeof payload.appState === "string" && payload.appState.trim() ? payload.appState.trim() : undefined;
         await stateStore.updateHeartbeat(device.deviceId, {
           batteryPct: typeof payload.batteryPct === "number" ? payload.batteryPct : undefined,
           network:
             typeof payload.network === "string" && payload.network.trim() ? payload.network.trim() : undefined,
-          appState:
-            typeof payload.appState === "string" && payload.appState.trim() ? payload.appState.trim() : undefined,
+          appState,
           raw: payload,
         });
-        json(res, 200, { ok: true, heartbeatIntervalSec: cfg.heartbeatIntervalSeconds });
+        const now = Date.now();
+        const directive = autoVideoDirectives.get(device.deviceId);
+        const canReceiveCaptureDirective = appState?.startsWith("service") === true;
+        const captureDirective = canReceiveCaptureDirective && directive && directive.expiresAt > now
+          ? {
+              type: "video_clip",
+              directiveId: directive.directiveId,
+              durationMs: directive.durationMs,
+              reason: directive.reason,
+              sourceEventId: directive.sourceEventId,
+              sourceText: directive.sourceText,
+              issuedAt: directive.issuedAt,
+              expiresAt: directive.expiresAt,
+            }
+          : null;
+        if (directive && directive.expiresAt <= now) {
+          autoVideoDirectives.delete(device.deviceId);
+        } else if (canReceiveCaptureDirective && captureDirective) {
+          autoVideoDirectives.delete(device.deviceId);
+        }
+        json(res, 200, {
+          ok: true,
+          heartbeatIntervalSec: cfg.heartbeatIntervalSeconds,
+          captureDirective,
+        });
         return true;
       }),
     );
@@ -1103,11 +1387,20 @@ const plugin = {
           body,
           fileName,
           mime,
+          modeHint,
         });
         const resolvedQuery = resolveAssistantQueryText({
           queryText: transcribed.queryText,
           modeHint,
+          explicitQuery: true,
         });
+        api.logger.info(
+          `[clawsense] assistant query stt accepted=${Boolean(resolvedQuery.queryText)} provider=${
+            transcribed.provider ?? "none"
+          } failure=${transcribed.failureReason ?? "none"} rewrite=${resolvedQuery.reason ?? "none"} rawLen=${
+            resolvedQuery.rawQueryText.length
+          } rawPreview="${resolvedQuery.rawQueryText.slice(0, 32)}"`,
+        );
         const previousTurn = assistantConversationTurns.get(auth.device.deviceId);
         const shouldUsePreviousRange = shouldUsePreviousTurnEvidenceRange({
           queryText: resolvedQuery.queryText,
@@ -1124,6 +1417,7 @@ const plugin = {
           now: capturedAt,
         });
         let recentContext = scopedContextPayload.recentContext;
+        let contextDeviceId: string | undefined = auth.device.deviceId;
         if (shouldFallbackAssistantContextToAllDevices(recentContext)) {
           const fallbackContextPayload = await buildRecentContextPayload({
             reviewEngine,
@@ -1139,7 +1433,19 @@ const plugin = {
               recentContext: fallbackContextPayload.recentContext,
               deviceName: auth.device.name,
             });
+            contextDeviceId = undefined;
           }
+        }
+        const audioRecheck = await maybeRecheckAssistantQueryAudio({
+          recentContext,
+          queryText: resolvedQuery.queryText,
+          deviceId: contextDeviceId,
+          windowHint,
+          modeHint,
+          now: capturedAt,
+        });
+        if (audioRecheck.recentContext) {
+          recentContext = audioRecheck.recentContext;
         }
         const answered = answerAssistantQuery({
           queryText: resolvedQuery.queryText,
@@ -1197,17 +1503,120 @@ const plugin = {
           stt: {
             provider: transcribed.provider ?? null,
             failureReason: transcribed.failureReason ?? null,
-            rawQueryText: resolvedQuery.replaced ? resolvedQuery.rawQueryText : null,
+            rawQueryText: resolvedQuery.rawQueryText || null,
             queryRewriteReason: resolvedQuery.reason ?? null,
             queryDurationMs:
               typeof payload.queryDurationMs === "number" && Number.isFinite(payload.queryDurationMs)
                 ? payload.queryDurationMs
                 : null,
           },
+          audioRecheck: audioRecheck.diagnostics,
         });
         return true;
       }),
     );
+
+    async function maybeRecheckAssistantQueryAudio(params: {
+      recentContext: Awaited<ReturnType<typeof buildRecentContextPayload>>["recentContext"];
+      queryText: string;
+      deviceId?: string;
+      windowHint: RecentContextWindowHint;
+      modeHint?: AssistantModeHint;
+      now: number;
+    }): Promise<{
+      recentContext?: Awaited<ReturnType<typeof buildRecentContextPayload>>["recentContext"];
+      diagnostics: {
+        attempted: boolean;
+        refreshed: boolean;
+        reason: string | null;
+        maxWindows: number;
+        resultCount: number;
+        transcriptCount: number;
+        summaryCount: number;
+        failureReasons: string[];
+      };
+    }> {
+      const plan = resolveAssistantAudioRecheckPlan({
+        queryText: params.queryText,
+        recentContext: params.recentContext,
+      });
+      const baseDiagnostics = {
+        attempted: false,
+        refreshed: false,
+        reason: plan.reason ?? null,
+        maxWindows: plan.maxWindows,
+        resultCount: 0,
+        transcriptCount: 0,
+        summaryCount: 0,
+        failureReasons: [] as string[],
+      };
+      if (!plan.shouldRecheck) {
+        return { diagnostics: baseDiagnostics };
+      }
+      try {
+        const scope = params.recentContext.overview?.kind === "day" ? "today" : "custom-range";
+        const rechecks = await reviewEngine.recheckAudioEvidence({
+          scope,
+          date: scope === "today" ? params.recentContext.overview?.date : undefined,
+          startAt: scope === "custom-range" ? params.recentContext.timeRange.startAt : undefined,
+          endAt: scope === "custom-range" ? params.recentContext.timeRange.endAt : undefined,
+          deviceId: params.deviceId,
+          artifactUrlBase: "/api/clawsense/artifacts",
+          question: params.queryText,
+          maxWindows: plan.maxWindows,
+        });
+        const transcriptCount = rechecks.filter((item) => normalizeSemanticText(item.transcript)).length;
+        const summaryCount = rechecks.filter((item) => normalizeSemanticText(item.summary)).length;
+        const diagnostics = {
+          attempted: true,
+          refreshed: transcriptCount > 0 || summaryCount > 0,
+          reason: plan.reason ?? null,
+          maxWindows: plan.maxWindows,
+          resultCount: rechecks.length,
+          transcriptCount,
+          summaryCount,
+          failureReasons: Array.from(
+            new Set(
+              rechecks
+                .map((item) => item.analysisFailureReason?.trim())
+                .filter((value): value is string => Boolean(value)),
+            ),
+          ).slice(0, 6),
+        };
+        if (!diagnostics.refreshed) {
+          return { diagnostics };
+        }
+        const refreshedContextPayload = await buildRecentContextPayload({
+          reviewEngine,
+          artifactUrlBase: "/api/clawsense/artifacts",
+          windowHint: params.windowHint,
+          question: params.queryText,
+          deviceId: params.deviceId,
+          modeHint: params.modeHint,
+          timeRangeOverride:
+            scope === "custom-range"
+              ? {
+                  startAt: params.recentContext.timeRange.startAt,
+                  endAt: params.recentContext.timeRange.endAt,
+                }
+              : undefined,
+          now: params.now,
+        });
+        return {
+          recentContext: refreshedContextPayload.recentContext,
+          diagnostics,
+        };
+      } catch (error) {
+        return {
+          diagnostics: {
+            ...baseDiagnostics,
+            attempted: true,
+            reason: plan.reason ?? null,
+            failureReasons: [`assistant_audio_recheck_error:${String(error)}`],
+          },
+        };
+      }
+    }
 
     async function tryAnswerAssistantQueryWithModel(params: {
       queryText: string;
@@ -1307,6 +1716,23 @@ const plugin = {
         }
         const payload = await buildOperationalStatus();
         json(res, 200, payload);
+        return true;
+      }, { auth: "gateway" }),
+    );
+
+    api.registerHttpRoute(
+      createJsonRoute("/api/clawsense/queue/status", async (req, res) => {
+        if (req.method !== "GET") {
+          methodNotAllowed(res, ["GET"]);
+          return true;
+        }
+        const payload = await buildOperationalStatus();
+        json(res, 200, {
+          ok: true,
+          generatedAt: payload.generatedAt,
+          queue: payload.queue,
+          ingest24h: payload.ingest24h,
+        });
         return true;
       }, { auth: "gateway" }),
     );
@@ -1637,6 +2063,28 @@ const plugin = {
           const payload = await buildOperationalStatus();
           process.stdout.write(`${safeJsonStringify(payload)}\n`);
         });
+
+        clawsense.command("queue-status").description("查看 ClawSense 采集落库与后台分析队列").action(async () => {
+          const payload = await buildOperationalStatus();
+          process.stdout.write(
+            `${safeJsonStringify({
+              ok: true,
+              generatedAt: payload.generatedAt,
+              queue: payload.queue,
+              ingest24h: payload.ingest24h,
+            })}\n`,
+          );
+        });
+
+        clawsense
+          .command("analysis-retry")
+          .description("扫描 analysis_pending 媒体并补排后台分析")
+          .option("--max <count>", "最多补排多少个 artifact", "12")
+          .action(async (options?: { max?: string }) => {
+            const maxArtifacts = Number.parseInt(options?.max ?? "12", 10);
+            const result = await requeuePendingAnalysis(Number.isFinite(maxArtifacts) ? maxArtifacts : 12);
+            process.stdout.write(`${safeJsonStringify({ ok: true, ...result })}\n`);
+          });
 
         clawsense.command("doctor").description("输出 ClawSense 运行诊断和下一步建议").action(async () => {
           const payload = await buildOperationalDoctor();
@@ -2216,17 +2664,27 @@ const plugin = {
         await stateStore.pruneExpiredSetupTokens(DEFAULT_PAIRING_TTL_SECONDS);
         await memoryStore.pruneExpiredArtifacts();
         await ensureBootstrapQr();
+        await requeuePendingAnalysis(12);
         maintenanceTimer = setInterval(() => {
           void reviewEngine.runMaintenanceTick().catch((error) => {
             api.logger.warn(`[clawsense] maintenance tick failed: ${String(error)}`);
           });
         }, 5 * 60 * 1000);
+        analysisRecoveryTimer = setInterval(() => {
+          void requeuePendingAnalysis(12).catch((error) => {
+            api.logger.warn(`[clawsense] pending analysis recovery tick failed: ${String(error)}`);
+          });
+        }, 60 * 1000);
         api.logger.info("[clawsense] service started");
       },
       stop: async () => {
         if (maintenanceTimer) {
           clearInterval(maintenanceTimer);
           maintenanceTimer = null;
+        }
+        if (analysisRecoveryTimer) {
+          clearInterval(analysisRecoveryTimer);
+          analysisRecoveryTimer = null;
         }
         api.logger.info("[clawsense] service stopped");
       },

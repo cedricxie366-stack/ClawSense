@@ -325,6 +325,50 @@ describe("ClawSenseReviewEngine", () => {
     expect(withQuestion.windows.some((window) => window.transcriptText.includes("Amy"))).toBe(true);
   });
 
+  it("keeps broad custom-range conversation context wider than six recent windows", async () => {
+    vi.setSystemTime(new Date(2026, 2, 10, 22, 0, 0));
+
+    const store = createStore(rootDir);
+    const engine = createEngine(rootDir, store);
+    const device = await store.registerDevice({
+      name: "Pixel",
+      platform: "android",
+    });
+    const now = Date.now();
+    const startAt = now - 4 * 60 * 60_000;
+
+    for (let index = 0; index < 18; index += 1) {
+      await recordAudioEvent(store, {
+        memoryId: `audio-four-hour-${index + 1}`,
+        deviceId: device.deviceId,
+        summary: `第 ${index + 1} 段会议语音`,
+        transcript:
+          index === 0
+            ? "第1段讨论数据口径和看板指标。"
+            : index === 17
+              ? "第18段讨论收尾行动项和明天谁来跟进。"
+              : `第${index + 1}段讨论项目排期、风险和验证结果。`,
+        capturedAt: startAt + index * 12 * 60_000,
+      });
+    }
+
+    const context = await engine.buildAssistantContext({
+      scope: "custom-range",
+      startAt,
+      endAt: now,
+      question: "过去4个小时我们聊了什么？",
+      artifactUrlBase: "/api/clawsense/artifacts",
+      now,
+    });
+    const transcriptText = context.windows.map((window) => window.transcriptText).join("\n");
+
+    expect(context.windows.length).toBeGreaterThan(6);
+    expect(context.windows.length).toBeLessThanOrEqual(14);
+    expect(transcriptText).toContain("第1段讨论数据口径");
+    expect(transcriptText).toContain("第18段讨论收尾行动项");
+    expect(context.highlights.audioCoverage.transcriptReadyWindows).toBe(18);
+  });
+
   it("removes assistant spoken answers from review-engine windows", async () => {
     vi.setSystemTime(new Date(2026, 2, 10, 23, 30, 0));
 
@@ -1846,6 +1890,83 @@ describe("ClawSenseReviewEngine", () => {
     expect(plan.tracks).toEqual([]);
   });
 
+  it("accepts transcript-ready office and school fixtures with explicit follow-up and knowledge-gap signals", async () => {
+    vi.setSystemTime(new Date(2026, 2, 28, 20, 0, 0));
+
+    const store = createStore(rootDir);
+    const engine = createEngine(rootDir, store);
+    const device = await store.registerDevice({
+      name: "Fixture phone",
+      platform: "fixture",
+      fingerprint: "fixture:acceptance-gap-signals",
+    });
+    const now = Date.now();
+
+    await store.updateHeartbeat(device.deviceId, {
+      batteryPct: 100,
+      network: "fixture",
+      appState: "host-replay",
+      raw: {
+        fixture: true,
+      },
+    });
+
+    const officeEvent = await recordAudioEvent(store, {
+      memoryId: "fixture-office-ready",
+      deviceId: device.deviceId,
+      summary: "办公会议讨论 remote-control project，涉及角色、需求、成本、价格和下一步功能可行性。",
+      transcript:
+        "会议讨论 remote-control project，Laura 提到需要确认角色分工、成本预算、价格限制、竞品市场和后续功能可行性。",
+      capturedAt: now - 5 * 60 * 60 * 1000,
+      projectRefs: ["project:remote-control"],
+      tags: ["fixture", "office", "meeting", "remote-control"],
+    });
+    const schoolEvent = await recordAudioEvent(store, {
+      memoryId: "fixture-school-ready",
+      deviceId: device.deviceId,
+      summary: "课堂 lecture 里 Professor Strang 讲 convolution、Fourier coefficients、filtering 和 FFT 复习重点。",
+      transcript:
+        "Professor Strang 在 lecture 里讲 convolution 和 Fourier coefficients，解释 filtering、signal processing、cyclic convolution 和 FFT，需要复习公式和例题。",
+      capturedAt: now - 3 * 60 * 60 * 1000,
+      projectRefs: ["course:18.085"],
+      tags: ["fixture", "school", "classroom", "lecture", "learning"],
+    });
+
+    await engine.annotateSpeaker({
+      speakerRef: `speaker:${officeEvent.event.windowId}:1`,
+      displayName: "Laura",
+      relationship: "project manager",
+      eventIds: [officeEvent.event.eventId],
+      windowId: officeEvent.event.windowId,
+      deviceId: device.deviceId,
+    });
+    await engine.annotateSpeaker({
+      speakerRef: `speaker:${schoolEvent.event.windowId}:1`,
+      displayName: "Professor Strang",
+      relationship: "teacher",
+      eventIds: [schoolEvent.event.eventId],
+      windowId: schoolEvent.event.windowId,
+      deviceId: device.deviceId,
+    });
+
+    const report = await engine.buildPhaseAcceptance({
+      lookbackDays: 1,
+      now,
+    });
+    const office = report.criteria.find((item) => item.id === "office-recap");
+    const school = report.criteria.find((item) => item.id === "school-recap");
+
+    expect(report.completion.isPhaseReady).toBe(true);
+    expect(report.completion.phaseState).toBe("ready-to-close");
+    expect(office?.status).toBe("pass");
+    expect(office?.evidence.followUpSignalWindows).toBe(1);
+    expect(office?.evidence.pendingSignals).toBe(1);
+    expect(school?.status).toBe("pass");
+    expect(school?.evidence.knowledgeGapWindows).toBe(1);
+    expect(school?.evidence.pendingKnowledgeSignals).toBe(1);
+    expect(school?.evidence.speakerClues).toBeGreaterThanOrEqual(1);
+  });
+
   it("does not count semantic STT timeouts as device stability failures", async () => {
     vi.setSystemTime(new Date(2026, 2, 28, 20, 0, 0));
 
@@ -2060,6 +2181,67 @@ describe("ClawSenseReviewEngine", () => {
     expect(target?.pass).toBe(false);
   });
 
+  it("does not fail stability for historical devices that are no longer expected online", async () => {
+    vi.setSystemTime(new Date(2026, 2, 28, 20, 0, 0));
+
+    const store = createStore(rootDir);
+    const engine = createEngine(rootDir, store);
+    const historicalDevice = await store.registerDevice({
+      name: "Old phone",
+      platform: "android",
+    });
+    const freshDevice = await store.registerDevice({
+      name: "Fixture phone",
+      platform: "android",
+    });
+    const now = Date.now();
+
+    await store.updateHeartbeat(freshDevice.deviceId, {
+      batteryPct: 80,
+      network: "wifi",
+      appState: "running:60",
+      raw: {
+        batteryPct: 80,
+        network: "wifi",
+        appState: "running:60",
+      },
+    });
+    await recordAudioEvent(store, {
+      memoryId: "historical-office-context",
+      deviceId: historicalDevice.deviceId,
+      summary: "上午有一段历史办公讨论，需要保留在跨天回顾里。",
+      transcript: "上午讨论了报价和任务安排。",
+      capturedAt: now - 6 * 60 * 60 * 1000,
+      tags: ["meeting", "office"],
+    });
+    const freshEvent = await recordAudioEvent(store, {
+      memoryId: "fresh-office-context",
+      deviceId: freshDevice.deviceId,
+      summary: "Amy 刚确认报价任务和下一步跟进。",
+      transcript: "Amy 让我们今晚补完报价。",
+      capturedAt: now - 10 * 60 * 1000,
+      peopleRefs: ["person_amy"],
+      tags: ["meeting", "office"],
+    });
+    await engine.annotatePerson({
+      personRef: "person_amy",
+      displayName: "Amy",
+      relationship: "老板",
+      eventIds: [freshEvent.event.eventId],
+    });
+
+    const report = await engine.buildPhaseAcceptance({
+      lookbackDays: 1,
+      now,
+    });
+    const criterion = report.criteria.find((item) => item.id === "annotation-and-stability");
+
+    expect(criterion?.status).toBe("pass");
+    expect(criterion?.evidence.activeDevices).toBe(2);
+    expect(criterion?.evidence.recentlyProducingDevices).toBe(1);
+    expect(criterion?.evidence.staleActiveDevices).toBe(0);
+  });
+
   it("marks video criterion as missing-data when video mode is enabled but no video evidence exists", async () => {
     vi.setSystemTime(new Date(2026, 2, 28, 10, 0, 0));
 
@@ -2199,6 +2381,25 @@ describe("ClawSenseReviewEngine", () => {
       analysisMode: "multimodal-preview",
       analysisStatus: "succeeded",
     });
+    await store.recordCapture({
+      memoryId: "video-filter-audio",
+      namespace: "clawsense",
+      deviceId: device.deviceId,
+      modality: "audio",
+      summary: "访谈音频转写：主讲人讨论 Scaling Law、模型能力边界和收购动态。",
+      transcript: "主讲人讨论 Scaling Law、模型能力边界和收购动态，强调不要只看画面，要结合视频音频理解。",
+      note: "csAudio:v2 session=req-video-filter segment=1 sessionStart=100 boundary=fixture clipMs=60000 continued=0 videoRequestId=req-video-filter",
+      createdAt: capturedAt + 2_000,
+      capturedAt: capturedAt + 2_000,
+      sourcePath: path.join(rootDir, "video-filter-audio.wav"),
+      fileName: "video-filter-audio.wav",
+      mime: "audio/wav",
+      sizeBytes: 4096,
+      storageRelPath: "2026/03/28/device/video-filter-audio.wav",
+      retentionExpiresAt: capturedAt + 7 * 24 * 60 * 60 * 1000,
+      analysisMode: "runtime-stt",
+      analysisStatus: "succeeded",
+    });
 
     const context = await engine.buildAssistantContext({
       scope: "today",
@@ -2211,6 +2412,10 @@ describe("ClawSenseReviewEngine", () => {
     expect(events.length).toBeGreaterThanOrEqual(2);
     expect(events.some((event) => event.modality === "video")).toBe(true);
     expect(events.some((event) => event.modality === "image" && event.summary.includes("Scaling Law"))).toBe(true);
+    expect(events.some((event) => event.modality === "audio" && event.transcript?.includes("不要只看画面"))).toBe(
+      true,
+    );
+    expect(context.highlights.audioCoverage.transcriptReadyWindows).toBeGreaterThanOrEqual(1);
   });
 });
 

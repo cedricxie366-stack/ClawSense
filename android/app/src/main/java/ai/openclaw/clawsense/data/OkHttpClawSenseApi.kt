@@ -59,8 +59,8 @@ class OkHttpClawSenseApi(
     )
   }
 
-  override suspend fun uploadAudio(session: DeviceSession, clip: CapturedAudioClip) {
-    request<AudioUploadRequest, UnitResponse>(
+  override suspend fun uploadAudio(session: DeviceSession, clip: CapturedAudioClip): IngestUploadResult {
+    val response = request<AudioUploadRequest, IngestUploadResponse>(
       url = "${session.uploadBaseUrl}/ingest/audio",
       body = AudioUploadRequest(
         audioBase64 = Base64.encodeToString(clip.bytes, Base64.NO_WRAP),
@@ -72,10 +72,11 @@ class OkHttpClawSenseApi(
       bearer = session.deviceSecret,
       deviceId = session.deviceId,
     )
+    return response.toResult()
   }
 
-  override suspend fun uploadImage(session: DeviceSession, image: CapturedImageFrame) {
-    request<ImageUploadRequest, UnitResponse>(
+  override suspend fun uploadImage(session: DeviceSession, image: CapturedImageFrame): IngestUploadResult {
+    val response = request<ImageUploadRequest, IngestUploadResponse>(
       url = "${session.uploadBaseUrl}/ingest/image",
       body = ImageUploadRequest(
         imageBase64 = Base64.encodeToString(image.bytes, Base64.NO_WRAP),
@@ -87,10 +88,11 @@ class OkHttpClawSenseApi(
       bearer = session.deviceSecret,
       deviceId = session.deviceId,
     )
+    return response.toResult()
   }
 
-  override suspend fun uploadVideo(session: DeviceSession, clip: CapturedVideoClip) {
-    request<VideoUploadRequest, UnitResponse>(
+  override suspend fun uploadVideo(session: DeviceSession, clip: CapturedVideoClip): IngestUploadResult {
+    val response = request<VideoUploadRequest, IngestUploadResponse>(
       url = "${session.uploadBaseUrl}/ingest/video",
       body = VideoUploadRequest(
         videoBase64 = Base64.encodeToString(clip.bytes, Base64.NO_WRAP),
@@ -112,6 +114,7 @@ class OkHttpClawSenseApi(
       bearer = session.deviceSecret,
       deviceId = session.deviceId,
     )
+    return response.toResult()
   }
 
   override suspend fun queryAssistant(
@@ -126,14 +129,17 @@ class OkHttpClawSenseApi(
     )
   }
 
-  override suspend fun sendHeartbeat(session: DeviceSession, heartbeat: HeartbeatRequest): Int {
+  override suspend fun sendHeartbeat(session: DeviceSession, heartbeat: HeartbeatRequest): HeartbeatResult {
     val response = request<HeartbeatRequest, HeartbeatResponse>(
       url = "${session.uploadBaseUrl}/heartbeat",
       body = heartbeat,
       bearer = session.deviceSecret,
       deviceId = session.deviceId,
     )
-    return response.heartbeatIntervalSec
+    return HeartbeatResult(
+      heartbeatIntervalSec = response.heartbeatIntervalSec,
+      captureDirective = response.captureDirective,
+    )
   }
 
   private suspend inline fun <reified B : Any, reified T> request(
@@ -246,9 +252,28 @@ class OkHttpClawSenseApi(
   private data class UnitResponse(val ok: Boolean = true)
 
   @kotlinx.serialization.Serializable
+  private data class IngestUploadResponse(
+    val ok: Boolean = true,
+    val stored: Boolean = true,
+    val analysisQueued: Boolean? = null,
+    val queueDepth: Int? = null,
+    val analysisQueueDepth: Int? = null,
+  ) {
+    fun toResult(): IngestUploadResult {
+      return IngestUploadResult(
+        stored = stored,
+        analysisQueued = analysisQueued,
+        queueDepth = queueDepth,
+        analysisQueueDepth = analysisQueueDepth,
+      )
+    }
+  }
+
+  @kotlinx.serialization.Serializable
   private data class HeartbeatResponse(
     val ok: Boolean,
     val heartbeatIntervalSec: Int = 60,
+    val captureDirective: CaptureVideoDirective? = null,
   )
 
   @kotlinx.serialization.Serializable

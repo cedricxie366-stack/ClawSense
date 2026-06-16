@@ -36,6 +36,11 @@
 如果本轮重点是实时语音助手，再额外重点看：
 
 - [docs/agents/realtime-voice-validation-agent-prompt.md](/Users/cedric/Documents/ClawSense/docs/agents/realtime-voice-validation-agent-prompt.md)
+- [docs/agents/final-stage-live-validation-agent-prompt.md](/Users/cedric/Documents/ClawSense/docs/agents/final-stage-live-validation-agent-prompt.md)
+
+如果本轮重点是 Phase 9 自动视频触发，再额外重点看：
+
+- [docs/agents/auto-video-trigger-validation-agent-prompt.md](/Users/cedric/Documents/ClawSense/docs/agents/auto-video-trigger-validation-agent-prompt.md)
 
 ## 工作边界
 
@@ -65,7 +70,9 @@
 5. 音频 ingest、转写 / fallback、聊天问答引用
 6. 视频 M2 / keyframe evidence：Android 短视频 + keyframe 聚合、追问、语义层增益
 7. 聊天页 / context / followups 对统一证据入口的消费
-8. 验收 CLI（`acceptance` / `acceptance-plan` / `doctor`）
+8. 最终阶段门禁：primary Android live report + no-arm ambient report + `check:stage-final`
+9. 验收 CLI（`acceptance` / `acceptance-plan` / `doctor`）
+10. Phase 9 自动视频触发：默认关闭、显式开启、heartbeat directive、`auto-video-trigger` note 回链、冷却 / 上限保护
 
 ## 推荐验收顺序
 
@@ -78,6 +85,8 @@ cd /Users/cedric/Documents/ClawSense
 npm run check
 npm test
 npm run check:release
+npm run check:phase
+npm run check:stage-final:doctor
 ```
 
 通过标准：
@@ -85,6 +94,9 @@ npm run check:release
 - `check` 成功
 - `test` 全绿
 - `check:release` 成功，npm 包边界不包含 `.codex` / `docs` / `android` / `.local` / `test` / `scripts`
+- `check:phase` 成功，说明 release gate、Android debug build、公开素材 replay、AMI speaker 标注 smoke、`acceptance 5/5`、`hostModelVideoMode=keyframes` 视频 evidence transcript/keyframes 断言全部通过
+- `check:phase` 默认不要求真机在线；若要把真机也作为硬门槛，用 `REQUIRE_ANDROID_DEVICE=1 npm run check:phase`
+- `check:stage-final:doctor` 用于判断最终缺口。Host/fixture 已 ready 但缺真实设备时，预期状态是 `waiting-for-primary-live`，不能把它当作 host 代码失败。
 
 如果失败：
 
@@ -185,13 +197,59 @@ scripts/local-openclaw.sh acceptance
 scripts/local-openclaw.sh acceptance-plan
 ```
 
+`evidence-video` 默认查看近 7 天 custom-range 视频证据链，用于快速检查视频片段、关键帧、caption/OCR 和 transcript 回链；不要把它替换成 `evidence today`，否则可能触发日级 review / consolidation 生成，导致验收线程卡住在非视频链路上。
+
 如果 `video-config` 显示 `hostModelVideoMode=none`，先记录为“视频 ingest 未开启”；不要把它判成 Android 视频通过。
+
+Host replay 公开视频素材可以用来区分“代码证据链成立”和“真机视频上传成立”。需要先确认 Host 代码链路时，运行：
+
+```bash
+cd /Users/cedric/Documents/ClawSense
+npm run check:phase
+```
+
+Host replay 通过标准：
+
+- `acceptance.criteria.video-evidence.evidence.hostModelVideoMode = keyframes`
+- `playableVideoArtifacts >= 1`
+- `videoRequestGroups >= 1`
+- `evidenceBundle.audioCoverage.transcriptReadyWindows >= 1`
+- `evidenceBundle.transcriptSpans.length >= 1`
+- `evidenceBundle.videoEvidenceGroups[0].transcriptSpans.length >= 1`
+- `evidenceBundle.videoEvidenceGroups[0].keyframeDetails.length >= 1`
+
+注意：Host replay 通过不等于 Android 真机视频通过；真机仍必须看 Android 手动 6 秒 MP4 上传、补传队列、媒体库可见性和关键帧回链。
+
+### 6. 最终阶段真机门禁
+
+当 Host replay 通过后，最终验收必须继续补两份 Android live 证据。优先按专门 prompt 执行：
+
+```bash
+cd /Users/cedric/Documents/ClawSense
+npm run check:stage-final:doctor
+npm run check:android-live:doctor
+npm run check:android-live
+scripts/check-android-live.sh arm-query auto
+PRESERVE_LOGCAT=1 scripts/check-android-live.sh arm-query meeting
+PRESERVE_LOGCAT=1 scripts/check-android-live.sh stop-tts
+PRESERVE_LOGCAT=1 scripts/check-android-live.sh capture-video
+HUMAN_TTS_OK=1 HUMAN_ANSWER_RELEVANT=1 scripts/check-android-live.sh collect
+scripts/check-android-live.sh observe-ambient
+EXPECT_NO_ASSISTANT_QUERY=1 scripts/check-android-live.sh collect
+npm run check:stage-final
+```
+
+通过标准：
+
+- primary live report：真实物理 Android、voice loop、TTS completed、真人确认、停止朗读、Android 视频上传、Host video evidence 全成立。
+- no-arm ambient report：`EXPECT_NO_ASSISTANT_QUERY=1`，且播放环境访谈 / 会议音频时没有任何 assistant query armed/captured/submitting/answered 日志。
+- `npm run check:stage-final` 必须通过；否则验收结论不能写 pass。
 
 必要时补充：
 
 ```bash
 cd /Users/cedric/Documents/ClawSense
-scripts/local-openclaw.sh openclaw clawsense evidence today --modality video --focus what_happened --question "今天有哪些视频片段和关键帧值得回看"
+scripts/local-openclaw.sh openclaw clawsense evidence --lookbackDays 7 --modality video --focus what_happened --question "今天有哪些视频片段和关键帧值得回看"
 ```
 
 视频必查字段：

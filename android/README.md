@@ -90,16 +90,19 @@
   - 只有相机权限：只上传图片和心跳
 - WorkManager 每 15 分钟发送一次后台补偿心跳
 
-### 视频片段 M2
+### 视频片段 M2 / Phase 9 主动短视频
 
-当前视频能力是一个可控的 M2 验证块，不是全天候自动录像：
+当前视频能力是一个可控的 evidence 增强块，不是全天候自动录像：
 
-- Android 端只提供手动按钮：“录制 6 秒视频片段”
-- 录制为 video-only MP4，不额外开启第二路麦克风，避免和现有 VAD 抢占音频链路
-- 上传时会同时带上起始 / 结束关键帧，方便服务端先做 OCR、caption 和视频片段关联
-- 如果服务端 `hostModelVideoMode` 仍为 `none`，`/api/clawsense/ingest/video` 会返回 `409 video_ingest_disabled`，App 会把它显示为最近错误
-- App 会在“最近活动”里显示视频录制中、上传中、成功或失败状态，避免用户只能从 logcat 判断视频链路是否工作
-- 这一步只验证“短视频采集、上传、入库、关键帧关联”成立；自动视频、唤醒词触发视频、长视频切片都还没进入 Android MVP
+- Android 端保留手动按钮：“录制 6 秒视频片段”，作为最稳定的基线。
+- 录制为 video-only MP4，不额外开启第二路麦克风，避免和现有 VAD 抢占音频链路。
+- 上传时会同时带上起始 / 结束关键帧，方便服务端先做 OCR、caption 和视频片段关联。
+- 如果服务端 `hostModelVideoMode` 仍为 `none`，`/api/clawsense/ingest/video` 会返回 `409 video_ingest_disabled`，App 会把它显示为最近错误。
+- App 会在“最近活动”里显示视频录制中、上传中、成功或失败状态，避免用户只能从 logcat 判断视频链路是否工作。
+- Phase 9 已加入“自动视频 evidence 增强”实验能力：默认关闭，只有用户在首页显式打开后，才会响应 Host 通过 heartbeat 下发的一次性 `video_clip` directive。
+- 自动视频只做低频 6 秒短片段，并受服务端队列状态、10 分钟冷却、每小时 2 段、每天 8 段、相机运行状态和助手/TTS 空闲状态保护。
+- 自动视频 note 会写入 `auto-video-trigger`、`triggerReason`、`triggerSource=heartbeat-directive`、`sourceEventId`、`sourceText`，让 OpenClaw 后续能解释“为什么录了这段”。
+- 连续录像、端侧环形 pre-buffer、长视频自动切片仍未进入 Android MVP，需要单独产品决策。
 
 ### 实时语音助手
 
@@ -128,7 +131,7 @@ Android 客户端本身不依赖多模态模型才能“上传成功”，但 Cl
 当前这版 Android 客户端的职责很明确：
 
 1. 负责持续采集音频、图片和心跳
-2. 必要时手动采集短视频片段，补充动态场景证据
+2. 必要时手动采集短视频片段；用户明确开启后，也可由关键语音 / 文字 / OCR 线索低频触发自动短视频，补充动态场景证据
 3. 把原始感知送回 ClawSense 数据面
 4. 作为语音入口，把用户的显式问题转发给 OpenClaw / ClawSense evidence 层
 5. 让你之后能在服务端打开媒体库，或生成 Daily Review
@@ -187,6 +190,6 @@ Android 客户端本身不依赖多模态模型才能“上传成功”，但 Cl
 - 更强的 VAD/降噪策略
 - 设备管理页（撤销设备、查看最近上传）
 - 用非废弃方案替换 `EncryptedSharedPreferences`
-- 自动 / 持续视频采集
-- 语音开启视频
+- 连续视频采集、端侧环形 pre-buffer 或长视频自动切片
+- 不受队列背压 / 冷却 / 用户开关保护的语音开启视频
 - 基于面部画面的微表情、情绪或内在意图自动结论

@@ -1,0 +1,29 @@
+{
+  "id": "ami-es2002a",
+  "scenario": "office-meeting",
+  "source": {
+    "name": "AMI Meeting Corpus",
+    "url": "https://groups.inf.ed.ac.uk/ami/corpus/",
+    "licenseNote": "AMI corpus materials are published for research use; verify redistribution terms before packaging media."
+  },
+  "localCache": ".local/test-fixtures/ami-es2002a",
+  "replay": {
+    "script": "node scripts/replay-ami-fixture.mjs --reset --force",
+    "inputs": [
+      "raw/ES2002a.Mix-Headset.wav",
+      "raw/instrumented_meeting_room_300.jpg",
+      "annotations/words/ES2002a.*.words.xml",
+      "annotations/abstractive/ES2002a.abssumm.xml"
+    ]
+  },
+  "expectedQuestions": [
+    "刚才讨论的重点是什么？",
+    "过去四个小时我们聊了什么？",
+    "最后任务落给谁？",
+    "有哪些待确认事项？"
+  ],
+  "releaseGate": {
+    "minimum": "Evidence must use transcript-ready audio, not only the meeting room image.",
+    "target": "Review/evidence mentions meeting topic, roles, price/cost constraints, action items, and gaps."
+  }
+}

@@ -424,6 +424,7 @@ export async function transcribeAudioWithFallbackModel(params: {
                 type: "input_audio",
                 input_audio: {
                   data: buildAudioDataUrl(params.body, params.fileName, params.mime),
+                  format,
                 },
               },
             ],

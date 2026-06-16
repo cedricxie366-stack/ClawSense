@@ -22,6 +22,7 @@
   - 普通聊天页稳定接入 ClawSense evidence / context / followups
   - 现实世界语音对话入口：过去 4 小时 / 昨天 / 刚才重点 / 继续追问 / TTS 控制
   - 视频 M2 手动短片段：Android 6 秒 video-only MP4、起止关键帧、媒体库/evidence 回链
+  - Phase 9 融合层：fast ingest / async analysis / queue-status 背压，以及默认关闭、用户显式开启、受冷却和上限保护的主动短视频 evidence 增强
   - 人物 / speaker 最小标注闭环
   - 开源部署和 npm 发布边界标准化
 - 后续会考虑官方控制面兼容，但当前仍保留 ClawSense 自己的数据面
@@ -29,7 +30,7 @@
 - 不要求用户配置域名或反向代理
 - 不依赖 ClawSense 官方公网域名
 - 最终目标是同 host、同 origin 的独立轻量页，不耦合 Control UI
-- 当前不启动自动/连续视频、语音开启视频、自动微表情结论；Android 视频只收口手动 6 秒短片段和关键帧 evidence
+- 当前允许推进“关键时刻 6 秒短视频 evidence 增强”，但必须默认关闭、可解释、受队列背压 / 冷却 / 上限保护；不启动全天连续录像、端侧环形 pre-buffer、长视频自动切片或自动微表情结论
 
 ## 你必须守住的共享契约文件
 

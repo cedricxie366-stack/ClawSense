@@ -1,0 +1,32 @@
+{
+  "id": "mit-18-085-l31-video",
+  "scenario": "classroom-video-lecture",
+  "source": {
+    "name": "MIT OpenCourseWare 18.085 Lecture 31 video",
+    "url": "https://ocw.mit.edu/courses/18-085-computational-science-and-engineering-i-fall-2008/resources/lecture-videos/",
+    "archiveUrl": "https://archive.org/details/MIT18.085F08",
+    "licenseNote": "MIT OCW materials use a Creative Commons BY-NC-SA style license; keep media in local cache and verify terms before redistribution."
+  },
+  "localCache": ".local/test-fixtures/mit-18-085-l31-video",
+  "replay": {
+    "script": "node scripts/replay-mit-lecture-video-fixture.mjs --reset --force",
+    "inputs": [
+      "raw/ocw-18.085-f08-lec31_300k.mp4",
+      "raw/ocw-18.085-f08-lec31_300k.srt",
+      "raw/ocw-18.085-f08-lec31_300k_000001.jpg",
+      "raw/ocw-18.085-f08-lec31_300k_001550.jpg",
+      "raw/ocw-18.085-f08-lec31_300k_002584.jpg"
+    ],
+    "prepareNote": "The script downloads the Internet Archive MP4, SRT subtitle, and derivative thumbnails when missing. Large media stays under .local and is not committed."
+  },
+  "expectedQuestions": [
+    "这段视频里老师讲了什么重点？",
+    "刚才视频和音频合起来说明了什么？",
+    "有哪些概念需要复习？",
+    "能不能给我看一下对应的视频证据？"
+  ],
+  "releaseGate": {
+    "minimum": "Evidence must expose at least one video artifact, linked keyframe, and transcript-ready audio window under hostModelVideoMode=keyframes.",
+    "target": "Review/evidence should answer from transcript plus keyframe/OCR, not only from the still image summary."
+  }
+}

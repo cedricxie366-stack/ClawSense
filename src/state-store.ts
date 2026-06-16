@@ -528,6 +528,7 @@ export class ClawSenseStateStore {
     artifactId: string;
     summary?: string;
     transcript?: string;
+    analysisMode?: ClawSenseCaptureEvent["analysisMode"];
     analysisProvider?: ClawSenseCaptureEvent["analysisProvider"];
     analysisStatus?: ClawSenseCaptureEvent["analysisStatus"];
     analysisFailureReason?: ClawSenseCaptureEvent["analysisFailureReason"];
@@ -567,6 +568,10 @@ export class ClawSenseStateStore {
 
         if (params.analysisProvider && params.analysisProvider !== next.analysisProvider) {
           next = { ...next, analysisProvider: params.analysisProvider };
+          updated = true;
+        }
+        if (params.analysisMode && params.analysisMode !== next.analysisMode) {
+          next = { ...next, analysisMode: params.analysisMode };
           updated = true;
         }
         if (params.analysisStatus && params.analysisStatus !== next.analysisStatus) {
@@ -640,6 +645,9 @@ export class ClawSenseStateStore {
         }
         if (params.analysisProvider && params.analysisProvider !== next.analysisProvider) {
           next = { ...next, analysisProvider: params.analysisProvider };
+        }
+        if (params.analysisMode && params.analysisMode !== next.analysisMode) {
+          next = { ...next, analysisMode: params.analysisMode };
         }
         if (params.analysisStatus && params.analysisStatus !== next.analysisStatus) {
           next = { ...next, analysisStatus: params.analysisStatus };

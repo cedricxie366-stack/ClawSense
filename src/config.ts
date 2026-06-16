@@ -18,8 +18,9 @@ const DEFAULT_MAX_ARTIFACT_BYTES = 2 * 1024 * 1024 * 1024;
 const DEFAULT_ANALYSIS_MODE = "multimodal-preferred";
 const DEFAULT_STT_FALLBACK_MODEL = "whisper-1";
 const DEFAULT_LOCAL_ASR_BACKEND = "none";
-const DEFAULT_LOCAL_ASR_LANGUAGE = "auto";
+const DEFAULT_LOCAL_ASR_LANGUAGE = "zh";
 const DEFAULT_LOCAL_ASR_NUM_THREADS = 2;
+const DEFAULT_ASSISTANT_QUERY_AUDIO_KEEP_COUNT = 10;
 
 export const clawsenseConfigSchema = Type.Object(
   {
@@ -52,6 +53,7 @@ export const clawsenseConfigSchema = Type.Object(
     localAsrTokensFile: Type.Optional(Type.String()),
     localAsrLanguage: Type.Optional(Type.String()),
     localAsrNumThreads: Type.Optional(Type.Integer({ minimum: 1 })),
+    assistantQueryAudioKeepCount: Type.Optional(Type.Integer({ minimum: 0 })),
   },
   { additionalProperties: false },
 );
@@ -86,6 +88,7 @@ export type ClawSenseConfig = {
   localAsrTokensFile?: string;
   localAsrLanguage: string;
   localAsrNumThreads: number;
+  assistantQueryAudioKeepCount: number;
 };
 
 export function resolveClawSenseConfig(raw: Record<string, unknown> | undefined): ClawSenseConfig {
@@ -125,6 +128,9 @@ export function resolveClawSenseConfig(raw: Record<string, unknown> | undefined)
     localAsrLanguage: readOptionalString(cfg.localAsrLanguage) ?? DEFAULT_LOCAL_ASR_LANGUAGE,
     localAsrNumThreads:
       readOptionalInteger(cfg.localAsrNumThreads, { min: 1 }) ?? DEFAULT_LOCAL_ASR_NUM_THREADS,
+    assistantQueryAudioKeepCount:
+      readOptionalInteger(cfg.assistantQueryAudioKeepCount, { min: 0 }) ??
+      DEFAULT_ASSISTANT_QUERY_AUDIO_KEEP_COUNT,
   };
 }
 

@@ -428,7 +428,11 @@ export class ClawSenseReviewEngine {
     const contextWindows = selectAssistantContextWindows({
       windows,
       question: params.question,
-      maxWindows: 6,
+      maxWindows: resolveAssistantContextWindowLimit({
+        scope,
+        question: params.question,
+        modality: params.modality,
+      }),
       semanticWindowIds,
     });
     const keyWindows = windows.slice().sort((left, right) => right.score - left.score).slice(0, 3);
@@ -1128,9 +1132,14 @@ export class ClawSenseReviewEngine {
         .flatMap((window) => window.events.flatMap((event) => event.peopleRefs))
         .filter((personRef) => !officePeople.some((person) => person.personRef === personRef)),
     );
+    const officeFollowUpSignalWindows = officeWindows.filter((window) =>
+      hasOfficeFollowUpSignal(window),
+    );
     const officePendingSignals =
       officeWindows.filter((window) => window.audioCount > 0 && !isUsableTranscriptText(window.transcriptText))
-        .length + officeUnknownPersonRefs.length;
+        .length +
+      officeUnknownPersonRefs.length +
+      officeFollowUpSignalWindows.length;
     const officeRoleHintCount =
       officeUnknownPersonRefs.length +
       collectSpeakerRefsFromWindows(officeWindows).length +
@@ -1175,13 +1184,19 @@ export class ClawSenseReviewEngine {
         isUsableTranscriptText(window.transcriptText) &&
         countWindowKeywordHits(window, SCHOOL_LEARNING_KEYWORDS) > 0,
     );
-    const schoolPendingKnowledgeCount = schoolWindows.filter(
-      (window) => window.audioCount > 0 && !isUsableTranscriptText(window.transcriptText),
-    ).length;
+    const schoolKnowledgeGapWindows = schoolWindows.filter((window) =>
+      hasSchoolKnowledgeGapSignal(window),
+    );
+    const schoolPendingKnowledgeCount =
+      schoolWindows.filter((window) => window.audioCount > 0 && !isUsableTranscriptText(window.transcriptText))
+        .length + schoolKnowledgeGapWindows.length;
     const schoolSpeakerClues = dedupeStrings([
       ...collectSpeakerRefsFromWindows(schoolWindows),
       ...selectRelevantSpeakers(schoolWindows, speakers).map((speaker) => normalizeSpeakerRef(speaker.speakerRef)),
       ...selectRelevantPeople(schoolWindows, people).map((person) => person.personRef),
+      ...schoolWindows
+        .filter((window) => hasSchoolSpeakerCue(window))
+        .map((window) => `teacher:${window.windowId}`),
     ]).filter(Boolean);
     const schoolStatus: PhaseAcceptanceStatus =
       schoolWindows.length === 0
@@ -1240,15 +1255,24 @@ export class ClawSenseReviewEngine {
     const relevantPeople = selectRelevantPeople(windows, people);
     const relevantSpeakers = selectRelevantSpeakers(windows, speakers);
     const relevantIdentityAnnotations = relevantPeople.length + relevantSpeakers.length;
-    const activeDeviceIds = new Set(events.map((event) => event.deviceId));
-    const activeDevices = devices.filter((device) => activeDeviceIds.has(device.deviceId));
     const heartbeatFreshWindowMs = Math.max(
       this.cfg.heartbeatIntervalSeconds * 1000 * 6,
       45 * 60 * 1000,
     );
+    const activeDeviceIds = new Set(events.map((event) => event.deviceId));
+    const recentlyProducingDeviceIds = new Set(
+      events
+        .filter((event) => now - event.capturedAt <= heartbeatFreshWindowMs)
+        .map((event) => event.deviceId),
+    );
+    const activeDevices = devices.filter((device) => activeDeviceIds.has(device.deviceId));
+    const recentlyProducingDevices = activeDevices.filter((device) =>
+      recentlyProducingDeviceIds.has(device.deviceId),
+    );
     const staleActiveDevices = activeDevices.filter(
       (device) =>
-        typeof device.lastHeartbeatAt !== "number" || now - device.lastHeartbeatAt > heartbeatFreshWindowMs,
+        recentlyProducingDeviceIds.has(device.deviceId) &&
+        (typeof device.lastHeartbeatAt !== "number" || now - device.lastHeartbeatAt > heartbeatFreshWindowMs),
     );
     const instabilitySignalEvents = events.filter((event) =>
       hasDataPlaneInstabilitySignal(event.analysisFailureReason),
@@ -1368,6 +1392,7 @@ export class ClawSenseReviewEngine {
           confirmedIdentities: officeConfirmedIdentityCount,
           roleHints: officeRoleHintCount,
           pendingSignals: officePendingSignals,
+          followUpSignalWindows: officeFollowUpSignalWindows.length,
           weakIdentityGuessMentions: officeWeakIdentityGuessMentions,
         },
         targets: [
@@ -1418,6 +1443,7 @@ export class ClawSenseReviewEngine {
           schoolWindows: schoolWindows.length,
           learningPointWindows: schoolLearningWindows.length,
           pendingKnowledgeSignals: schoolPendingKnowledgeCount,
+          knowledgeGapWindows: schoolKnowledgeGapWindows.length,
           speakerClues: schoolSpeakerClues.length,
         },
         targets: [
@@ -1555,6 +1581,7 @@ export class ClawSenseReviewEngine {
               : "标注复用或设备稳定性仍有缺口，需再收一轮。",
         evidence: {
           activeDevices: activeDevices.length,
+          recentlyProducingDevices: recentlyProducingDevices.length,
           staleActiveDevices: staleActiveDevices.length,
           observedSpeakerRefs: observedSpeakerRefs.length,
           mappedSpeakerRefs: mappedSpeakerRefs.length,
@@ -3427,22 +3454,22 @@ export class ClawSenseReviewEngine {
     modality?: "audio" | "image" | "video";
     includeVideo?: boolean;
   }): Promise<ClawSenseCaptureEvent[]> {
-    const events =
+    const allEvents =
       typeof params.startAt === "number" || typeof params.endAt === "number"
         ? await this.stateStore.listEvents()
         : await this.stateStore.listEventsByDate(params.date ?? toLocalDateKey(Date.now()));
-    return events
+    const scopedEvents = allEvents
       .filter((event) => (params.deviceId ? event.deviceId === params.deviceId : true))
-      .filter((event) => (params.includeVideo === false ? event.modality !== "video" : true))
-      .filter((event) => {
-        if (!params.modality) {
-          return true;
-        }
-        if (params.modality === "video") {
-          return event.modality === "video" || isVideoKeyframeCaptureEvent(event);
-        }
-        return event.modality === params.modality;
-      })
+      .filter((event) => (params.includeVideo === false ? event.modality !== "video" : true));
+    const modalityEvents = params.modality === "video"
+      ? filterVideoEventsWithLinkedAudio(scopedEvents)
+      : scopedEvents.filter((event) => {
+          if (!params.modality) {
+            return true;
+          }
+          return event.modality === params.modality;
+        });
+    return modalityEvents
       .filter((event) => (typeof params.startAt === "number" ? event.capturedAt >= params.startAt : true))
       .filter((event) => (typeof params.endAt === "number" ? event.capturedAt <= params.endAt : true))
       .sort((left, right) => left.capturedAt - right.capturedAt);
@@ -4107,6 +4134,9 @@ function selectAssistantContextWindows(params: {
     return params.windows.slice().sort((left, right) => left.startedAt - right.startedAt);
   }
 
+  const broadQuestion = isBroadAssistantContextQuestion(params.question);
+  const speechQuestion = isSpeechFocusedAssistantContextQuestion(params.question);
+  const shouldPrioritizeAudio = broadQuestion || speechQuestion;
   const semanticCandidates = params.semanticWindowIds?.length
     ? params.semanticWindowIds
         .map((windowId) => params.windows.find((window) => window.windowId === windowId))
@@ -4126,6 +4156,24 @@ function selectAssistantContextWindows(params: {
         .map((item) => item.window)
         .slice(0, Math.min(params.maxWindows, 4))
     : [];
+  const audioCandidates = shouldPrioritizeAudio
+    ? params.windows
+        .slice()
+        .filter((window) => window.audioCount > 0 || isUsableTranscriptText(window.transcriptText))
+        .sort((left, right) => {
+          const leftScore = scoreAudioWindowForAssistantContext(left, params.question);
+          const rightScore = scoreAudioWindowForAssistantContext(right, params.question);
+          return rightScore - leftScore || right.endedAt - left.endedAt;
+        })
+        .slice(0, Math.min(params.maxWindows, broadQuestion ? 8 : 4))
+    : [];
+  const timelineCandidates =
+    shouldPrioritizeAudio && broadQuestion
+      ? selectTimelineRepresentativeWindows(
+          params.windows.filter((window) => window.audioCount > 0 || isUsableTranscriptText(window.transcriptText)),
+          Math.min(params.maxWindows, 8),
+        )
+      : [];
   const keyCandidates = params.windows
     .slice()
     .sort((left, right) => right.score - left.score || right.endedAt - left.endedAt)
@@ -4136,7 +4184,17 @@ function selectAssistantContextWindows(params: {
     .slice(0, Math.min(params.maxWindows, 4));
 
   const merged = new Map<string, ReviewWindow>();
-  for (const candidate of [...semanticCandidates, ...questionCandidates, ...keyCandidates, ...recentCandidates]) {
+  const candidates = shouldPrioritizeAudio
+    ? [
+        ...semanticCandidates,
+        ...questionCandidates,
+        ...timelineCandidates,
+        ...audioCandidates,
+        ...keyCandidates,
+        ...recentCandidates,
+      ]
+    : [...semanticCandidates, ...questionCandidates, ...keyCandidates, ...recentCandidates];
+  for (const candidate of candidates) {
     if (!merged.has(candidate.windowId)) {
       merged.set(candidate.windowId, candidate);
     }
@@ -4148,6 +4206,82 @@ function selectAssistantContextWindows(params: {
   return Array.from(merged.values())
     .sort((left, right) => left.startedAt - right.startedAt)
     .slice(0, params.maxWindows);
+}
+
+function resolveAssistantContextWindowLimit(params: {
+  scope: "last-hour" | "today" | "custom-range";
+  question?: string;
+  modality?: "audio" | "image" | "video";
+}): number {
+  if (isBroadAssistantContextQuestion(params.question)) {
+    return params.scope === "today" ? 16 : 14;
+  }
+  if (isSpeechFocusedAssistantContextQuestion(params.question)) {
+    return 6;
+  }
+  if (params.modality === "video") {
+    return 10;
+  }
+  return 6;
+}
+
+function isBroadAssistantContextQuestion(question: string | undefined): boolean {
+  const normalizedQuestion = normalizeSemanticText(question).toLowerCase();
+  if (!normalizedQuestion) {
+    return false;
+  }
+  return (
+    /(过去|最近).*(小时|分钟|天).*(发生|做了什么|干了什么|聊了什么|说了什么|讨论|重点|回顾|总结)/.test(
+      normalizedQuestion,
+    ) ||
+    /(今天|今日|昨天|昨日).*(发生|做了什么|干了什么|聊了什么|说了什么|重点|回顾|总结|讨论了什么|讨论.*重点)/.test(
+      normalizedQuestion,
+    ) ||
+    /(全天|整天).*(发生|回顾|总结|聊了什么|说了什么|讨论|重点)/.test(normalizedQuestion)
+  );
+}
+
+function isSpeechFocusedAssistantContextQuestion(question: string | undefined): boolean {
+  const normalizedQuestion = normalizeSemanticText(question).toLowerCase();
+  if (!normalizedQuestion) {
+    return false;
+  }
+  return /(音频|语音|对话|说了什么|聊了什么|讲了什么|讨论|沟通|重点|任务|会议|课堂|老师|同事|老板|客户|谁说|谁讲|怎么回复|我说了什么|会议纪要|行动项)/.test(
+    normalizedQuestion,
+  );
+}
+
+function scoreAudioWindowForAssistantContext(window: ReviewWindow, question: string | undefined): number {
+  let score = scoreWindowAgainstQuestion(window, question ?? "");
+  if (isUsableTranscriptText(window.transcriptText)) {
+    score += 8;
+  }
+  if (window.audioCount > 0) {
+    score += 3 + Math.min(window.audioCount, 3);
+  }
+  if (/(会议|课堂|讨论|对话|任务|重点)/.test(`${window.primarySummary} ${window.transcriptText}`)) {
+    score += 2;
+  }
+  return score;
+}
+
+function selectTimelineRepresentativeWindows(windows: ReviewWindow[], limit: number): ReviewWindow[] {
+  const sorted = windows.slice().sort((left, right) => left.startedAt - right.startedAt);
+  if (sorted.length <= limit) {
+    return sorted;
+  }
+  if (limit <= 1) {
+    return sorted.slice(0, 1);
+  }
+  const selected = new Map<string, ReviewWindow>();
+  const step = (sorted.length - 1) / (limit - 1);
+  for (let index = 0; index < limit; index += 1) {
+    const candidate = sorted[Math.round(index * step)];
+    if (candidate) {
+      selected.set(candidate.windowId, candidate);
+    }
+  }
+  return Array.from(selected.values());
 }
 
 function scoreWindowAgainstQuestion(window: ReviewWindow, question: string): number {
@@ -4301,6 +4435,38 @@ const OFFICE_TASK_KEYWORDS = [
   "todo",
 ];
 
+const OFFICE_FOLLOW_UP_KEYWORDS = [
+  "待确认",
+  "缺口",
+  "下一步",
+  "后续",
+  "需要",
+  "角色",
+  "需求",
+  "成本",
+  "预算",
+  "价格",
+  "报价",
+  "功能",
+  "竞品",
+  "市场",
+  "可行性",
+  "follow up",
+  "next",
+  "need",
+  "needs",
+  "requirement",
+  "cost",
+  "budget",
+  "price",
+  "feature",
+  "competitor",
+  "market",
+  "feasibility",
+  "decision",
+  "role",
+];
+
 const SCHOOL_SCENARIO_KEYWORDS = [
   "课堂",
   "教室",
@@ -4332,6 +4498,37 @@ const SCHOOL_LEARNING_KEYWORDS = [
   "topic",
   "exercise",
   "quiz",
+];
+
+const SCHOOL_KNOWLEDGE_GAP_KEYWORDS = [
+  "待确认",
+  "复习",
+  "练习",
+  "公式",
+  "概念",
+  "推导",
+  "例题",
+  "convolution",
+  "fourier",
+  "fft",
+  "filtering",
+  "signal processing",
+  "cyclic",
+  "z-transform",
+  "polynomial",
+  "coefficient",
+  "coefficients",
+];
+
+const SCHOOL_SPEAKER_CUE_KEYWORDS = [
+  "老师",
+  "教授",
+  "讲师",
+  "主讲",
+  "professor",
+  "lecturer",
+  "teacher",
+  "speaker",
 ];
 
 const STABILITY_FAILURE_KEYWORDS = [
@@ -4709,6 +4906,29 @@ function parseVideoRequestId(note: string | undefined): string | undefined {
   return requestId || undefined;
 }
 
+function filterVideoEventsWithLinkedAudio(events: ClawSenseCaptureEvent[]): ClawSenseCaptureEvent[] {
+  const primaryEvents = events.filter(
+    (event) => event.modality === "video" || isVideoKeyframeCaptureEvent(event),
+  );
+  const requestIds = new Set(
+    primaryEvents.map((event) => parseVideoRequestId(event.note)).filter((value): value is string => Boolean(value)),
+  );
+  if (requestIds.size === 0) {
+    return primaryEvents;
+  }
+  const byEventId = new Map(primaryEvents.map((event) => [event.eventId, event]));
+  for (const event of events) {
+    if (event.modality !== "audio") {
+      continue;
+    }
+    const requestId = parseVideoRequestId(event.note);
+    if (requestId && requestIds.has(requestId)) {
+      byEventId.set(event.eventId, event);
+    }
+  }
+  return Array.from(byEventId.values());
+}
+
 function isVideoKeyframeCaptureEvent(event: ClawSenseCaptureEvent): boolean {
   if (event.modality !== "image") {
     return false;
@@ -4871,6 +5091,27 @@ function windowMatchesKeywords(window: ReviewWindow, keywords: string[]): boolea
 
 function countWindowKeywordHits(window: ReviewWindow, keywords: string[]): number {
   return countKeywordHits(buildWindowSearchText(window), keywords);
+}
+
+function hasOfficeFollowUpSignal(window: ReviewWindow): boolean {
+  if (!isUsableTranscriptText(window.transcriptText)) {
+    return false;
+  }
+  if (countWindowKeywordHits(window, OFFICE_FOLLOW_UP_KEYWORDS) > 0) {
+    return true;
+  }
+  return window.events.some((event) => event.projectRefs.length > 0 && event.tags.some((tag) => isUserFacingTag(tag)));
+}
+
+function hasSchoolKnowledgeGapSignal(window: ReviewWindow): boolean {
+  if (!isUsableTranscriptText(window.transcriptText)) {
+    return false;
+  }
+  return countWindowKeywordHits(window, SCHOOL_KNOWLEDGE_GAP_KEYWORDS) > 0;
+}
+
+function hasSchoolSpeakerCue(window: ReviewWindow): boolean {
+  return countWindowKeywordHits(window, SCHOOL_SPEAKER_CUE_KEYWORDS) > 0;
 }
 
 function buildWindowSearchText(window: ReviewWindow): string {
