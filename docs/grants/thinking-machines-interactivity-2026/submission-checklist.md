@@ -26,6 +26,7 @@ Official application email should include the items below.
 - [ ] "Evidence of existing prototype" summary
 - [ ] Privacy and data-handling note
 - [ ] 6-month work plan matched to budget
+- [ ] Short note clarifying that this is an individual application and that any employer/retail context is domain inspiration or potential future validation, not formal organizational sponsorship unless separately authorized
 
 ## Missing User-Specific Information
 
@@ -39,6 +40,8 @@ Fill these before submission:
 - whether collaborators are named or TBD
 - weekly availability over the six-month period
 - whether the application is individual or organization-backed
+- whether company/employer name can be included in the private submission packet
+- whether the public demo uses retail, desk, classroom, or mixed scripted scenes
 
 ## Do Not Submit
 

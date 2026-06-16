@@ -23,6 +23,12 @@ Preferred framing:
 
 > ClawSense-Interact evaluates real-time multimodal agents grounded in the user's immediate physical world. It tests whether an agent can answer questions about what the user just saw or heard, cite inspectable evidence, reject ambient false triggers, accept user corrections, and improve over long sessions.
 
+Important domain angle:
+
+> The strongest near-term validation setting is high-density human interaction in physical work environments, especially retail sales consultation scenes where audio, visual product context, customer intent, staff response, safety boundaries, and business value are all present at once.
+
+Keep this as a personal research proposal unless there is formal organizational authorization. Do not imply that any employer or retail group is legally sponsoring the work.
+
 ## Files
 
 - `proposal.md`: main 1-3 page proposal draft.
@@ -31,6 +37,8 @@ Preferred framing:
 - `demo-plan.md`: scripted public demo plan with no private recordings.
 - `submission-checklist.md`: materials still needed before submission.
 - `cv-template.md`: PI/contributor CV template.
+
+Private, submission-ready materials with personal email/CV details should live under an ignored `private/` directory and should not be committed.
 
 ## Submission Notes
 

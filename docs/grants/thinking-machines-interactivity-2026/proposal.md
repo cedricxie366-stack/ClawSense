@@ -7,9 +7,11 @@ Organization: `[Individual applicant / organization name]`
 
 ## Summary
 
-Most AI agent benchmarks focus on text, web tasks, desktop control, or short video understanding. We propose a complementary setting: agents that understand the physical world immediately around a human user. These agents are not only operating in a browser, and they are not yet manipulating objects with a robot arm. They are continuously exposed to everyday environments such as desks, classrooms, meetings, whiteboards, screens, conversations, visitors, and physical context changes, and they must interact with the user in real time.
+Most AI agent benchmarks focus on text, web tasks, desktop control, or short video understanding. We propose a complementary setting: agents that understand the physical world immediately around a human user. These agents are not only operating in a browser, and they are not yet manipulating objects with a robot arm. They are continuously exposed to everyday environments such as desks, classrooms, meetings, whiteboards, screens, conversations, retail product displays, sales consultations, visitors, and physical context changes, and they must interact with the user in real time.
 
 We propose **ClawSense-Interact**, a research platform and evaluation suite for real-time multimodal agents grounded in a user's immediate physical world. The system uses a low-cost Android device as an always-on sensory node, collecting consented audio, periodic images, short video clips, timestamps, and device heartbeat signals. These signals are converted into auditable evidence bundles that can be consumed by multimodal models during live user interaction.
+
+The initial benchmark scenarios will cover office, classroom, desk, and scripted retail consultation settings. Retail is a particularly strong testbed for physical-world interactive agents: the environment is noisy, visual product context matters, conversations involve multiple people, customer needs are ambiguous, staff responses have measurable business value, and privacy/safety boundaries are non-negotiable.
 
 The user can ask natural questions such as:
 
@@ -19,12 +21,16 @@ The user can ask natural questions such as:
 - "What am I looking at now?"
 - "What evidence supports your answer?"
 - "You got that person wrong; remember this correction."
+- "What did the customer ask about, and how did the salesperson respond?"
+- "Which products, objections, or follow-up opportunities were mentioned?"
 
 The central research question is:
 
 > How should we evaluate whether a real-time multimodal agent understands the user's immediate physical world, remains safely steerable by the human, and grounds its answers in inspectable evidence rather than hallucination?
 
 This proposal focuses on evaluation, interaction, safety, and system design rather than training a new foundation model. ClawSense is already a working OpenClaw plugin plus Android client with pairing, audio/image/video ingest, evidence indexing, media review, real-time assistant query, TTS output, follow-up controls, and backpressure-aware upload handling. The grant would let us turn this working prototype into a reproducible research harness and benchmark.
+
+The project is led as an individual research effort. Domain inspiration comes from practical AI product work in large-scale retail environments, but the grant work will begin with consented scripted sessions, anonymized evidence bundles, and privacy-preserving evaluation. Any future real-store pilot would require explicit consent and organizational approval.
 
 ## Research Agenda
 
@@ -36,6 +42,7 @@ The agent must answer questions over the user's actual surroundings, not generic
 - recent-event grounding: "What just happened?"
 - temporal-range grounding: "What did we discuss in the past hour / four hours / yesterday?"
 - person/task grounding: "Who gave me a task?" or "Who came by?"
+- retail interaction grounding: "What did the customer ask for?", "Which product was discussed?", or "What follow-up should the staff remember?"
 - evidence-grounded explanation: "Which audio/image/video evidence supports this answer?"
 
 Metrics:
@@ -80,6 +87,7 @@ We will build a safety evaluation suite for:
 - automatic short-video trigger safety
 - trigger reason auditing
 - queue/backpressure-aware capture limits
+- privacy-preserving retail or customer-service scenarios where the system must not over-record, over-infer, or expose sensitive conversation details
 
 Metrics:
 
@@ -123,6 +131,7 @@ ClawSense-Interact will consist of:
 - safety harness: ambient audio, echo, no-arm, and auto-video backpressure tests
 - evaluation dashboard: task success, latency, grounding, safety, correction, memory, and steering metrics
 - reproducible public benchmark scenarios: scripted, consented scenes that can be replayed without exposing private personal data
+- optional domain scenario packs for retail sales consultation and frontline service training
 
 We will not submit or publish private personal recordings. Public releases will use consented scripted data, anonymized evidence bundles, and reproducible scene protocols. Private longitudinal traces may be used only for internal validation with consent.
 
@@ -142,7 +151,7 @@ Deliverables:
 
 ### Month 2: Physical-World Interaction Task Set
 
-- Build scripted office/classroom/desk scenarios.
+- Build scripted office/classroom/desk and retail sales consultation scenarios.
 - Collect consented multimodal traces.
 - Implement graders for evidence selection, temporal grounding, and unsupported claims.
 
@@ -150,6 +159,7 @@ Deliverables:
 
 - ClawSense-Interact task set v1
 - public scripted scenario templates
+- retail consultation scenario templates
 - baseline evaluation scripts
 
 ### Month 3: Real-Time Interaction and Safety Suite
@@ -214,3 +224,5 @@ By the end of the project, we expect to deliver:
 ## Broader Impact
 
 Physical-world interactive agents could become useful assistants for offices, classrooms, accessibility, field work, and personal knowledge work. They also create privacy and safety risks. This project is designed around consent, inspectable evidence, local-first data handling, trigger auditing, and explicit user control. We aim to make this research useful not only for building more capable systems, but for making them safer and more understandable.
+
+Retail and frontline service are especially important long-term contexts. A safe, evidence-grounded physical-world agent could help staff review customer needs, improve training, identify missed follow-up opportunities, and connect real customer interactions to business value without relying on unsupported inference or hidden surveillance. This grant will focus on scripted and consented research settings first, establishing evaluation and safety foundations before any real-world deployment.

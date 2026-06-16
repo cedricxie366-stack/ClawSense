@@ -7,13 +7,12 @@ Additional requested Tinker credits: **$25,000**
 
 | Category | Amount | Purpose |
 |---|---:|---|
-| Personnel / research engineering | $45,000 | Prototype hardening, benchmark implementation, evaluation scripts, dashboard, documentation |
-| Participant studies and annotation | $14,000 | Consent-based scripted sessions, participant compensation, human ratings, evidence annotation |
+| Research engineering and contractor support | $60,000 | Prototype hardening, benchmark implementation, Android/host reliability, evaluation scripts, dashboard, documentation |
+| Compute and multimodal model/API evaluation | $18,000 | Multimodal scene understanding, transcription, evidence grading, cross-model baselines, ablations |
 | Hardware and deployment | $8,000 | Android devices, microphones, storage, local servers, networking, test environments |
-| Compute and model/API evaluation | $12,000 | Baseline multimodal/realtime model evaluations, transcription, grading, ablations |
-| Privacy, security, and data handling | $7,000 | Data minimization, consent materials, anonymization workflows, secure storage, deletion tooling |
-| Open-source release and reporting | $6,000 | Technical report, benchmark packaging, public documentation, demo assets |
-| Contingency | $8,000 | Additional model runs, device failures, expanded annotation, or external review |
+| Privacy, security, and data handling | $5,000 | Consent materials, anonymization workflows, secure storage, deletion tooling, privacy review |
+| Open-source release, demo, and reporting | $5,000 | Technical report, benchmark packaging, public documentation, scripted demo assets |
+| Contingency | $4,000 | Additional model runs, device failures, expanded evaluation, or external review |
 | Total | **$100,000** |  |
 
 ## Tinker Credits
@@ -30,3 +29,5 @@ The $25,000 in Tinker credits will be used for:
 If applying as an individual applicant: **$0 institutional overhead**.
 
 If applying through an institution: keep indirect costs within the program's stated maximum and reduce direct costs accordingly.
+
+This budget assumes the PI contributes substantial personal time and uses the grant mainly for engineering execution, research contractor support where needed, devices, and multimodal model/API costs. Scripted participant sessions are planned without participant compensation.
