@@ -35,6 +35,7 @@ Keep this as a personal research proposal unless there is formal organizational 
 - `budget.md`: 1 page budget draft.
 - `prototype-evidence.md`: concise evidence of existing implementation.
 - `demo-plan.md`: scripted public demo plan with no private recordings.
+- `scripted-demo-narrative.md`: submission-friendly demo narrative that can replace a polished video.
 - `submission-checklist.md`: materials still needed before submission.
 - `cv-template.md`: PI/contributor CV template.
 

@@ -24,6 +24,7 @@ Official application email should include the items below.
   - assistant query answer
   - validation report or test output
 - [ ] "Evidence of existing prototype" summary
+- [ ] Scripted demo narrative, if no video demo is submitted
 - [ ] Privacy and data-handling note
 - [ ] 6-month work plan matched to budget
 - [ ] Short note clarifying that this is an individual application and that any employer/retail context is domain inspiration or potential future validation, not formal organizational sponsorship unless separately authorized
