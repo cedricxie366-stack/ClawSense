@@ -3,45 +3,114 @@
 [![license](https://img.shields.io/github/license/cedricxie366-stack/ClawSense)](./LICENSE)
 [![release](https://img.shields.io/github/v/tag/cedricxie366-stack/ClawSense?label=release)](https://github.com/cedricxie366-stack/ClawSense/releases)
 
-Turn an old Android phone into an always-on sensory node for OpenClaw.
+ClawSense is a working OpenClaw plugin and Android client for physical-world interactive agents. It uses an Android phone as a real-time multimodal sensing node, then turns consented audio, images, short video, timestamps, and heartbeat signals into inspectable evidence that an agent can use during live interaction.
 
-ClawSense is an OpenClaw plugin plus an Android client. It pairs once, keeps a long-lived `deviceSecret`, and continuously sends:
+The research question behind the project is simple:
 
-- VAD-triggered audio clips
-- periodic image snapshots
-- heartbeat / liveness signals
-- memory-ready ingest events for OpenClaw
+> Can an agent understand what is happening in the user's immediate physical world, answer in real time, cite the evidence it used, reject ambient false triggers, and accept human corrections?
 
-## Project Status
+Most agent benchmarks still happen in text, browsers, desktop apps, or isolated video clips. ClawSense explores a different setting: the room around the user. It is meant for questions like "What just happened?", "What am I looking at now?", "What did we discuss in the last four hours?", and "What evidence supports your answer?"
 
-The project is now at a clear transition point:
+## What This Repository Contains
 
-- `Phase 1` is already real and usable:
-  - Android pairing works
-  - foreground sensing works
-  - audio upload works
-  - image upload works
-  - OpenClaw host-side ingest works
-  - the repo is prepared for GitHub/npm release
-  - the npm package target is `clawsense`, but it is not published yet as of 2026-05-30 (`npm view clawsense` returns 404)
-- the active next stage is:
-  - multimodal OpenClaw-driven daily sensing and review
-  - event indexing
-  - lightweight media library
-  - Daily Review skill
-- an additional compatibility direction is already acknowledged:
-  - **align with the official OpenClaw control plane later**
-  - **keep the ClawSense ingest data plane**
+This repository is both a runnable prototype and the start of a research harness.
 
-In other words:
+- **Android sensory node**: QR/setup-code pairing, persistent `deviceSecret`, foreground sensing, VAD-triggered audio upload, periodic image upload, manual short-video upload, explicit voice query, local TTS, read-full and stop-speaking controls, TTS echo-drain logic, and heartbeat.
+- **Host-side evidence layer**: OpenClaw plugin loading, pairing and ingest endpoints, fast artifact persistence, asynchronous analysis, media/event indexing, same-origin media library, custom-range evidence API, evidence bundles, daily review, follow-up targets, and person/speaker annotation suggestions.
+- **Real-time assistant layer**: `/api/clawsense/assistant/query`, evidence-first answer construction, model answer plus deterministic fallback, time-range routing for last seconds/minutes/hours/day, previous-turn follow-up support, and assistant diagnostics.
+- **Safety and validation**: no-arm ambient validation, TTS echo-drain validation, Android live validation scripts, staged release gates, auto-video trigger guardrails, and backpressure-aware capture throttling.
 
-- today, ClawSense already ships its own pairing and ingest path
-- next, we improve the multimodal review product
-- later, we can add official OpenClaw node/control-plane compatibility without throwing away the current data layer
+## ClawSense-Interact
+
+The research track is called **ClawSense-Interact**. It evaluates real-time multimodal agents grounded in a user's physical world, with four pillars:
+
+1. **Physical-world grounding**: can the agent answer questions about the user's actual surroundings rather than generic memory?
+2. **Real-time multimodal interaction**: can audio, images, and short video support an ongoing conversation with interruptions, follow-ups, and spoken responses?
+3. **Ambient safety and intent boundaries**: can the system distinguish explicit user queries from background speech, nearby media, meetings, and its own TTS output?
+4. **Human steering and long-session memory**: can users correct person labels, tasks, projects, and preferences without creating stale or opaque memory?
+
+Retail and frontline service are the first high-density validation domain. A short sales consultation combines noisy speech, multiple participants, visual product context, ambiguous customer needs, staff response quality, follow-up opportunities, and strict privacy boundaries. That makes it a useful test case for physical-world agents before moving into higher-stakes deployment.
+
+## Start Here For Reviewers
+
+If you are reviewing the project from the GitHub link, these files are the shortest path through the work:
+
+- [Thinking Machines grant packet](./docs/grants/thinking-machines-interactivity-2026/README.md): positioning, proposal, budget, demo narrative, and prototype evidence.
+- [Project proposal draft](./docs/grants/thinking-machines-interactivity-2026/proposal.md): research plan for ClawSense-Interact.
+- [Scripted demo narrative](./docs/grants/thinking-machines-interactivity-2026/scripted-demo-narrative.md): a consented retail consultation scenario that can be run without exposing real customer data.
+- [Prototype evidence summary](./docs/grants/thinking-machines-interactivity-2026/prototype-evidence.md): current implemented capabilities and validation commands.
+- [Android client guide](./android/README.md): phone-side pairing, sensing, and service behavior.
+- [Daily Review skill](./skills/clawsense-daily-review/SKILL.md): user-facing review workflow over captured evidence.
+
+The most relevant code paths are:
+
+- [src/realtime-assistant.ts](./src/realtime-assistant.ts): evidence-first answer construction and time-range query handling.
+- [src/http.ts](./src/http.ts): pairing, ingest, media, evidence, and assistant endpoints.
+- [src/review-engine.ts](./src/review-engine.ts): daily review generation over indexed evidence windows.
+- [src/auto-video-trigger.ts](./src/auto-video-trigger.ts): guarded short-video trigger logic.
+- [android/app/src/main/java/ai/openclaw/clawsense/service/SensorForegroundService.kt](./android/app/src/main/java/ai/openclaw/clawsense/service/SensorForegroundService.kt): Android foreground sensing, heartbeat, TTS, echo drain, and capture directives.
+
+## Current Status
+
+ClawSense is a real working MVP, not a mockup. The following paths have been implemented and validated on host-side fixtures and, for core flows, a real Android device:
+
+- OpenClaw server plugin loading
+- QR/setup-code pairing
+- persistent device credentials
+- Android foreground service start/stop
+- audio, image, heartbeat, and short-video ingest
+- durable raw media persistence
+- media/event indexing
+- lightweight host-side media library
+- evidence bundle export
+- daily review generation over indexed event windows
+- realtime voice query with local TTS response controls
+- ambient no-arm and TTS echo-drain validation
+- staged release and Android live validation scripts
+
+The npm package target is `clawsense`; source checkout is still the primary path while public package publishing is pending.
+
+## Validation
+
+Common checks:
+
+```bash
+npm run check
+npm test
+npm run check:release
+npm run check:phase9
+```
+
+Android build:
+
+```bash
+cd android
+JAVA_HOME='/Applications/Android Studio.app/Contents/jbr/Contents/Home' ./gradlew assembleDebug
+```
+
+Repo-local OpenClaw workflow:
+
+```bash
+scripts/local-openclaw.sh pair
+scripts/local-openclaw.sh devices
+scripts/local-openclaw.sh media-today
+scripts/local-openclaw.sh review-today
+scripts/local-openclaw.sh evidence-video
+```
+
+## Privacy And Safety Stance
+
+ClawSense is designed around consent, local-first data handling, inspectable evidence, trigger auditing, and explicit user control.
+
+- Public demos and benchmarks should use scripted, consented scenes.
+- Private raw audio, images, videos, gateway tokens, API keys, and local `.local/openclaw` state should not be published.
+- The system should answer from captured evidence and say when evidence is missing.
+- Background speech should not become an implicit command.
+- ClawSense does not make automatic micro-expression, emotion, or inner-state conclusions from faces or images.
 
 ## Recommended Model Setup
 
-ClawSense is now designed for **OpenClaw instances driven by native multimodal models**.
+ClawSense is designed for OpenClaw instances driven by native multimodal models.
 
 Recommended examples:
 
@@ -60,73 +129,43 @@ Non-multimodal OpenClaw setups are still supported as a degraded path, but they 
 
 ## Control Plane Direction
 
-ClawSense does **not** currently replace its working ingest path with the official OpenClaw Android Companion protocol.
+ClawSense does not currently replace its working ingest path with the official OpenClaw Android Companion protocol.
 
 The intended long-term direction is:
 
 - official OpenClaw control-plane compatibility for device presence, pairing semantics, and on-demand commands
-- ClawSense data-plane retention for continuous audio / image ingest, event indexing, media storage, and daily review
+- ClawSense data-plane retention for continuous audio/image/video ingest, event indexing, media storage, and daily review
 
-That means the future target is a **hybrid architecture**, not a full rewrite of the current MVP transport.
-
-## What Works Today
-
-The following paths have been verified on a real server plus a real Android phone:
-
-- OpenClaw server plugin loading
-- QR pairing
-- persistent `deviceSecret`
-- Android foreground service start / stop
-- clear runtime states in the app UI
-- audio upload
-- image upload
-- heartbeat reporting
-- server-side ClawSense journal persistence
-- raw media persistence in a durable media root
-- lightweight host-side media library page
-- daily review generation over indexed event windows
+That means the future target is a hybrid architecture, not a full rewrite of the current MVP transport.
 
 ## Product Entry Points
 
 ClawSense currently has three user-facing entry points, and each one has a different job:
 
-- `openclaw clawsense devices`
-  Use this to confirm which Android node is paired and still alive.
-- `openclaw clawsense media today` or `/plugins/clawsense/library`
-  Use this to browse the raw perception library by date, device, audio, and image. This is the raw sensing surface, not the final review page.
-- `openclaw clawsense review today` or the repo-local Daily Review skill
-  Use this when you want the assistant-style end-of-day recap with people, projects, details, follow-up questions, and tomorrow focus.
+- `openclaw clawsense devices`: confirm which Android node is paired and still alive.
+- `openclaw clawsense media today` or `/plugins/clawsense/library`: browse the raw perception library by date, device, audio, image, and video.
+- `openclaw clawsense review today` or the repo-local Daily Review skill: generate the assistant-style recap with people, projects, details, follow-up questions, and tomorrow focus.
 
 ## Media Library Access Model
 
-ClawSense media browsing follows one hard rule:
-
-- it should reuse the **same host and origin the user already uses for OpenClaw**
-- it should **not** depend on any ClawSense-owned public relay domain
-- it should **not** assume users will configure a custom domain, reverse proxy, or extra route by hand
+ClawSense media browsing follows one hard rule: it should reuse the same host and origin the user already uses for OpenClaw.
 
 So the intended default shape is:
 
-- if a user opens OpenClaw at `http://1.2.3.4:18789/`
-  the library should live at `http://1.2.3.4:18789/plugins/clawsense/library`
-- if a user opens OpenClaw at `https://example.com/`
-  the library should live at `https://example.com/plugins/clawsense/library`
+- if a user opens OpenClaw at `http://1.2.3.4:18789/`, the library should live at `http://1.2.3.4:18789/plugins/clawsense/library`
+- if a user opens OpenClaw at `https://example.com/`, the library should live at `https://example.com/plugins/clawsense/library`
 
-The media library is meant to become a **same-host, same-origin, lightweight page**. Export stays as a secondary capability for offline backup or sharing, not the main browsing path.
+The media library is meant to be a same-host, same-origin, lightweight page. Export stays as a secondary capability for offline backup or sharing, not the main browsing path.
 
-## Quick Links
+## More Project Docs
 
 - [当前阶段交付收口清单](./docs/当前阶段交付收口清单.md)
 - [当前阶段分批提交计划](./docs/当前阶段分批提交计划.md)
 - [当前阶段正式收口总结](./docs/当前阶段正式收口总结.md)
 - [小白部署与使用指南](./docs/小白部署与使用指南.md)
 - [架构师交接摘要](./docs/架构师交接摘要.md)
-- [Android 客户端说明](./android/README.md)
 - [多 Agent 协作分工说明](./docs/多Agent协作分工说明.md)
-- [第三轮具体任务单](./docs/agents/第三轮具体任务单.md)
 - [GitHub 与 npm 发布清单](./docs/GitHub与npm发布清单.md)
-- [ClawSense Daily Review Skill](./skills/clawsense-daily-review/SKILL.md)
-- npm package target: `clawsense` (publish pending)
 - [GitHub Releases](https://github.com/cedricxie366-stack/ClawSense/releases)
 
 ## Install

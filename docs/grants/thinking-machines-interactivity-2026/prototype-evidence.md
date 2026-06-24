@@ -1,12 +1,12 @@
 # Evidence of Existing Prototype
 
-This page summarizes current ClawSense implementation evidence that can support the grant application's feasibility section.
+This page summarizes the current ClawSense implementation details that support the feasibility section of the grant application.
 
 ## Repository
 
 - GitHub: `https://github.com/cedricxie366-stack/ClawSense`
 - Package target: `clawsense`
-- Current architecture: OpenClaw plugin plus Android client
+- Current architecture: OpenClaw plugin and Android client
 
 ## Implemented Capabilities
 
@@ -28,7 +28,7 @@ This page summarizes current ClawSense implementation evidence that can support 
 
 - pairing endpoint
 - audio/image/video ingest endpoints
-- fast artifact persistence with asynchronous analysis
+- fast artifact persistence and asynchronous analysis
 - media/event indexing
 - same-origin lightweight media library
 - evidence bundle export
@@ -88,4 +88,4 @@ scripts/local-openclaw.sh evidence-video
 
 ## Public Demo Readiness
 
-The public demo should use scripted, consented scenes only. Do not include private personal traces or local `.local/openclaw` state.
+The public demo should use scripted, consented scenes only. It should not include private personal traces or local `.local/openclaw` state.

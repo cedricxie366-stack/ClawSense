@@ -2,22 +2,22 @@
 
 Title: **A Real-Time Multimodal Agent for Scripted Retail Consultation**
 
-This narrative can be submitted in place of a polished video demo. It describes a low-risk, consented, reproducible scenario that demonstrates the core ClawSense-Interact research question: can an agent understand a user's immediate physical world, answer in real time, cite evidence, and remain steerable by the human?
+This narrative can be submitted in place of a polished video demo. It describes a low-risk, consented scenario for the core ClawSense-Interact question: can an agent understand a user's immediate physical world, answer in real time, cite evidence, and remain steerable by the human?
 
 ## Purpose
 
-The demo illustrates a physical-world interaction that is difficult to capture with text-only, web-only, or desktop-only benchmarks:
+The demo uses a physical-world interaction that text-only, web-only, and desktop-only benchmarks do not capture well:
 
 - multiple people speaking in a noisy environment
 - visual product or shelf context
 - customer intent that must be inferred conservatively
 - staff response and follow-up opportunity
-- need for evidence-grounded answers instead of unsupported claims
-- need to avoid background false triggers and over-recording
+- evidence-grounded answers rather than unsupported claims
+- background false-trigger and over-recording risks
 
 ## Scene
 
-A small tabletop scene is arranged to look like a retail consultation counter.
+A small tabletop scene is arranged like a retail consultation counter.
 
 Visible props:
 
@@ -77,7 +77,7 @@ Expected answer:
 
 > The customer asked whether the product is suitable as a travel gift and whether there is a promotion today. The staff response said the product is lightweight and travel-friendly, but stock should be checked before promising the promotion. The main follow-up is to confirm stock and promotion availability.
 
-The answer should include or expose evidence references:
+The answer should include, or make available, evidence references:
 
 - the audio window where the customer asked about travel and promotion
 - the staff response mentioning stock
@@ -93,7 +93,7 @@ Expected answer:
 
 > The answer is based on the recent audio transcript where the customer asked about travel and today's promotion, and the staff response that mentioned checking stock. The visual evidence also showed the product/shelf card or follow-up note.
 
-The system should avoid pretending to know details not present in the evidence, such as the real product's actual inventory, price, or customer identity.
+The system should not claim details that are absent from the evidence, such as the real product's actual inventory, price, or customer identity.
 
 ### Step 5: User Corrects a Detail
 
@@ -123,7 +123,7 @@ Expected behavior:
 
 ## What This Demo Proves
 
-This scripted demo demonstrates:
+This scripted demo is meant to show:
 
 1. **Physical-world grounding**: the agent answers questions about a real tabletop/retail scene.
 2. **Real-time multimodal interaction**: the user can ask immediately after the event.
@@ -146,4 +146,4 @@ The demo is successful if:
 
 ## Why This Is Enough Without a Video
 
-A polished video demo is useful but not required for the grant application. This scripted narrative is enough to show that the project has a concrete, reproducible interaction task that can be turned into a benchmark. It also reduces privacy risk by avoiding premature publication of real audio, faces, store materials, or customer conversations.
+A polished video demo would help, but it is not required for the grant application. This scripted narrative shows that the project has a concrete interaction task that can become a benchmark, while avoiding premature publication of real audio, faces, store materials, or customer conversations.

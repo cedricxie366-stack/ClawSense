@@ -1,4 +1,4 @@
-# ClawSense-Interact: Evaluating Real-Time Multimodal Agents Grounded in a User's Immediate Physical World
+# ClawSense-Interact: Evaluating Real-Time Agents as Interactive Partners in the Physical World
 
 Principal Investigator: `[NAME]`  
 Primary contact: `[EMAIL]`  
@@ -7,11 +7,13 @@ Organization: `[Individual applicant / organization name]`
 
 ## Summary
 
-Most AI agent benchmarks focus on text, web tasks, desktop control, or short video understanding. We propose a complementary setting: agents that understand the physical world immediately around a human user. These agents are not only operating in a browser, and they are not yet manipulating objects with a robot arm. They are continuously exposed to everyday environments such as desks, classrooms, meetings, whiteboards, screens, conversations, retail product displays, sales consultations, visitors, and physical context changes, and they must interact with the user in real time.
+Almost every agent benchmark today assumes the same interaction shape: the human starts each turn, the agent answers, and the world holds still in between. ClawSense-Interact studies a setting where none of that holds. An always-on agent that follows the physical world around a user does not simply wait for turns. It must continuously decide *whether to speak at all*, its answers go stale as the room changes, and it shares a physical space the user can point at. We argue that interaction in the physical world is not turn-taking question answering; it is **continuous, asymmetric, and time-decaying mutual grounding of attention between a human and an agent**.
 
-We propose **ClawSense-Interact**, a research platform and evaluation suite for real-time multimodal agents grounded in a user's immediate physical world. The system uses a low-cost Android device as an always-on sensory node, collecting consented audio, periodic images, short video clips, timestamps, and device heartbeat signals. These signals are converted into auditable evidence bundles that can be consumed by multimodal models during live user interaction.
+This speaks directly to the program's premise that interactivity must scale with intelligence rather than stay secondary to it. Among the example settings in the call, ClawSense makes the turn-taking assumption especially visible and testable. The agent is not just navigating a browser, and it is not yet controlling a robot arm; it is trying to be a useful partner in everyday spaces: desks, classrooms, meetings, whiteboards, screens, conversations, retail product displays, sales consultations, visitors, and changing physical context.
 
-The initial benchmark scenarios will cover office, classroom, desk, and scripted retail consultation settings. Retail is a particularly strong testbed for physical-world interactive agents: the environment is noisy, visual product context matters, conversations involve multiple people, customer needs are ambiguous, staff responses have measurable business value, and privacy/safety boundaries are non-negotiable.
+**ClawSense-Interact** is a research platform and evaluation suite that treats a real-time multimodal agent as an interactive partner grounded in a user's immediate physical world. It uses a low-cost Android device as a sensory node, collecting consented audio, periodic images, short video clips, timestamps, and device heartbeat signals. These signals are converted into auditable evidence bundles that multimodal models can use during live interaction.
+
+The initial benchmark scenarios cover office, classroom, desk, and scripted retail consultation settings. Retail is a useful testbed because it puts many hard problems in one scene: noisy speech, multiple participants, visual product context, ambiguous customer needs, staff response quality, follow-up opportunities, and strict privacy boundaries.
 
 The user can ask natural questions such as:
 
@@ -26,114 +28,97 @@ The user can ask natural questions such as:
 
 The central research question is:
 
-> How should we evaluate whether a real-time multimodal agent understands the user's immediate physical world, remains safely steerable by the human, and grounds its answers in inspectable evidence rather than hallucination?
+> How should we evaluate a real-time multimodal agent as an *interactive partner* in the physical world — one that knows when to speak, whose answers stay temporally honest, and whose understanding can be repaired by the human in a single gesture — rather than as a question-answering system measured only by accuracy?
 
-This proposal focuses on evaluation, interaction, safety, and system design rather than training a new foundation model. ClawSense is already a working OpenClaw plugin plus Android client with pairing, audio/image/video ingest, evidence indexing, media review, real-time assistant query, TTS output, follow-up controls, and backpressure-aware upload handling. The grant would let us turn this working prototype into a reproducible research harness and benchmark.
+The project focuses on evaluation, interaction, safety, and system design rather than training a new foundation model. ClawSense is already a working OpenClaw plugin and Android client with pairing, audio/image/video ingest, evidence indexing, media review, real-time assistant query, TTS output, follow-up controls, and backpressure-aware upload handling. The grant would turn this prototype into a benchmark package that others can run against the same scripted scenes, evidence bundles, and metrics.
 
-The project is led as an individual research effort. Domain inspiration comes from practical AI product work in large-scale retail environments, but the grant work will begin with consented scripted sessions, anonymized evidence bundles, and privacy-preserving evaluation. Any future real-store pilot would require explicit consent and organizational approval.
+The project is led as an individual research effort. I work day-to-day on AI products in a large-scale duty-free retail group, which gives the project a realistic validation pathway: frontline salesperson-customer conversation is one of the densest real settings for these interaction problems, and while the group is not prioritizing this direction itself, it encourages me to pursue it independently and to explore future collaboration. I treat this as a feasibility and impact asset rather than a committed partnership. The grant work will begin with consented scripted sessions, anonymized evidence bundles, and privacy-preserving evaluation, and any future real-store pilot would require explicit consent and organizational approval.
 
 ## Research Agenda
 
-### 1. Immediate Physical-World Grounding
+The agenda is organized around three interaction primitives that the turn-taking paradigm leaves untested. Physical-world grounding and long-session memory are not dropped — they are treated as supporting capabilities measured inside each pillar rather than as ends in themselves.
 
-The agent must answer questions over the user's actual surroundings, not generic memory or unsupported guesses. We will evaluate:
+### Pillar A — Initiative and Interruption: When Should the Agent Speak?
 
-- current-scene grounding: "What am I looking at?"
-- recent-event grounding: "What just happened?"
-- temporal-range grounding: "What did we discuss in the past hour / four hours / yesterday?"
-- person/task grounding: "Who gave me a task?" or "Who came by?"
-- retail interaction grounding: "What did the customer ask for?", "Which product was discussed?", or "What follow-up should the staff remember?"
+A turn-based assistant never has to decide whether to talk, because the human always starts. An always-on agent does. We study proactivity calibration: when to volunteer information, when to stay silent, and when an interruption is worth the cost of the user's attention. This reframes human steering as bidirectional — not only the human steering the agent, but the agent's restraint in claiming the human's attention, and the user's ability to tune that threshold.
+
+The benchmark will evaluate:
+
+- proactive offers: should the agent surface a follow-up, a missed task, or a relevant fact unprompted?
+- silence under ambiguity: staying quiet when a prompt is not warranted
+- interruption timing during meetings, consultations, and focused work
+- user control over the proactivity threshold (more eager / more reserved)
+
+Metrics:
+
+- necessary-interruption recall
+- false-interruption rate
+- cost of harmful silence (a needed prompt withheld)
+- interruption-timing usefulness (human-rated)
+- steerability of the proactivity threshold
+
+### Pillar B — Temporally Honest Interaction: Answers Expire
+
+In the physical world, latency is not only a UX cost; it changes what is true. An answer to "what am I looking at?" delivered three seconds late may describe a scene that no longer exists. We treat interaction quality as a joint function of latency and evidence freshness, and require the agent to recognize when its own answer has gone stale.
+
+The benchmark will evaluate:
+
+- perception-to-utterance latency under live conditions
+- staleness detection: knowing when the evidence behind an answer has expired
+- current-scene vs recent-event vs time-range grounding ("now", "just happened", "the last four hours")
+- follow-up continuity and "read full answer" / "stop speaking" control reliability
+
+Metrics:
+
+- perception-to-utterance latency budget
+- answer staleness rate (evidence already expired at speak time)
+- self-flagged-expiry precision
+- end-to-end voice interaction success under live conditions
+- freshness-calibrated groundedness
+
+### Pillar C — Glanceable Evidence and One-Gesture Repair
+
+Trust in a live setting cannot rest on a paragraph the user has no time to read. We render evidence bundles as interactive SVG/HTML evidence timelines — the exact audio/image/video clips an answer rests on — so the user can verify at a glance and correct in one gesture, reusing ClawSense's existing correction loop ("that person is Alex, remember that"). We adopt a conversational-grounding view (after Clark): interaction quality is the *cost of repair*, not single-shot accuracy.
+
+The benchmark will evaluate:
+
 - evidence-grounded explanation: "Which audio/image/video evidence supports this answer?"
+- glanceable evidence UI: can the user confirm or reject an answer at a glance?
+- one-gesture repair of person, task, project, and preference labels
+- whether a correction improves later answers without creating stale or opaque memory
 
 Metrics:
 
-- evidence selection accuracy
-- temporal localization accuracy
-- answer groundedness
-- unsupported-claim rate
-- uncertainty calibration
-- user correction rate
-
-### 2. Real-Time Multimodal Interaction
-
-The agent should work with live audio, images, and short video evidence. The user can interrupt, ask follow-ups, request shorter or longer answers, ask the system to read aloud, or stop speaking.
-
-We will evaluate:
-
-- follow-up continuity
-- response latency
-- TTS usefulness
-- interruption handling
-- "read full answer" and "stop speaking" control reliability
-- real-time evidence refresh over the last seconds to minutes
-
-Metrics:
-
-- latency to evidence availability
-- end-to-end voice interaction success
-- follow-up state retention
-- speech-control success rate
-- human-rated usefulness
-
-### 3. Ambient Safety and Intent Boundaries
-
-An always-listening physical-world agent creates safety problems that turn-based text systems do not face. It must distinguish explicit user queries from background speech, meeting audio, videos playing nearby, and its own TTS output. It must not treat every spoken sentence as an instruction.
-
-We will build a safety evaluation suite for:
-
-- no-arm ambient speech: background speech should not trigger assistant queries
-- TTS echo drain: the system must not record and respond to its own output
-- accidental trigger rejection
-- automatic short-video trigger safety
-- trigger reason auditing
-- queue/backpressure-aware capture limits
-- privacy-preserving retail or customer-service scenarios where the system must not over-record, over-infer, or expose sensitive conversation details
-
-Metrics:
-
-- false activation rate
-- false rejection rate
-- echo contamination rate
-- unsafe auto-capture rate
-- trigger explanation completeness
-- recovery behavior after overload
-
-### 4. Human Steering and Long-Session Memory
-
-The user should be able to steer the system during and after long sessions. Corrections and annotations should improve later responses without turning the system into an opaque memory store.
-
-We will evaluate:
-
-- person/speaker annotation
-- project/task correction
-- user preference memory
-- daily evidence consolidation
-- episode reflection
-- whether later answers improve after user feedback
-
-Metrics:
-
-- memory hit precision
-- stale/incorrect memory rate
-- improvement after correction
+- turns-to-repair and improvement after correction
 - repeated-error rate
-- user steering effectiveness
-- cross-day task/person recall
+- evidence-verification effort (operations/glance to confirm)
+- explanation completeness of the rendered evidence UI
+- evidence selection accuracy and unsupported-claim rate
+- cross-day recall of corrected person/task labels
+
+### Cross-Cutting: Ambient Safety and Perception Legibility
+
+Two concerns run through all three pillars. **Ambient safety and intent boundaries:** an always-listening agent must separate an explicit query from background speech, meeting audio, videos playing nearby, and its own TTS output, with auditable trigger reasons and backpressure-aware capture limits. Metrics: false activation rate, false rejection rate, echo contamination rate, unsafe auto-capture rate, trigger explanation completeness, and recovery after overload. **Perception legibility and consent:** the user can steer the agent's sensing in real time ("stop listening", "forget the last five minutes"), and the agent must keep its sensing state visible, treating privacy as a real-time interaction contract rather than a static setting. This matters especially for retail and customer-service scenes, where the system must not over-record, over-infer, or expose sensitive conversation details.
+
+### Measurement and Construct Validity
+
+Every metric above is tied to an explicit grader and ground truth so that scores mean what they claim. Scripted scenes are authored with known answers, known evidence spans, and a known correct timing for when the agent should and should not speak, giving objective references for grounding, temporal localization, and interruption decisions. Programmatic graders score evidence selection, latency, staleness, and trigger safety directly from logs; subjective qualities (usefulness, repair cost, explanation completeness) use a fixed rubric with multiple human raters and reported inter-rater agreement, with an open-model judge used only as a pre-screen that is always reconciled against human labels. Every task ships with simple baselines across available multimodal and real-time models so that absolute numbers are interpretable as relative differences, and the harness runs against any OpenClaw-compatible model to keep the benchmark general and reproducible.
 
 ## System Design
 
-ClawSense-Interact will consist of:
+ClawSense-Interact consists of:
 
 - Android sensory node: audio, images, short video, heartbeat, TTS response surface
 - evidence ingest service: fast artifact persistence and asynchronous analysis
 - evidence bundle schema: transcript spans, image/video references, timestamps, source IDs, trigger reasons
-- live assistant API: current-context and time-range query handling
+- live assistant API: current-context and time-range query handling, with proactive-offer hooks
+- evidence-timeline renderer: SVG/HTML rendering of the clips behind each answer for glanceable verification and one-gesture correction
 - safety harness: ambient audio, echo, no-arm, and auto-video backpressure tests
-- evaluation dashboard: task success, latency, grounding, safety, correction, memory, and steering metrics
-- reproducible public benchmark scenarios: scripted, consented scenes that can be replayed without exposing private personal data
+- evaluation dashboard: initiative/interruption, latency and staleness, grounding, repair cost, safety, memory, and steering metrics
+- public benchmark scenarios: scripted, consented scenes that can be replayed without exposing private personal data
 - optional domain scenario packs for retail sales consultation and frontline service training
 
-We will not submit or publish private personal recordings. Public releases will use consented scripted data, anonymized evidence bundles, and reproducible scene protocols. Private longitudinal traces may be used only for internal validation with consent.
+The project will not submit or publish private personal recordings. Public releases will use consented scripted data, anonymized evidence bundles, and reproducible scene protocols. Private longitudinal traces may be used only for internal validation with consent.
 
 ## Six-Month Timeline
 
@@ -149,48 +134,46 @@ Deliverables:
 - evidence bundle schema
 - safety/privacy protocol
 
-### Month 2: Physical-World Interaction Task Set
+### Month 2: Pillar C — Glanceable Evidence and Repair
 
 - Build scripted office/classroom/desk and retail sales consultation scenarios.
-- Collect consented multimodal traces.
-- Implement graders for evidence selection, temporal grounding, and unsupported claims.
+- Build the SVG/HTML evidence-timeline renderer.
+- Implement correction/repair tasks and graders for evidence selection and unsupported claims.
 
 Deliverables:
 
-- ClawSense-Interact task set v1
-- public scripted scenario templates
-- retail consultation scenario templates
-- baseline evaluation scripts
+- ClawSense-Interact task set v1 and scripted/retail scenario templates
+- evidence-UI renderer
+- repair benchmark with cost-of-repair metrics
 
-### Month 3: Real-Time Interaction and Safety Suite
+### Month 3: Pillar B — Temporally Honest Interaction
 
-- Evaluate explicit query vs ambient speech.
-- Evaluate TTS echo drain, interruptions, and stop/read-full controls.
-- Implement automatic short-video trigger auditing.
-
-Deliverables:
-
-- ambient safety benchmark
-- interaction-control benchmark
-- safety report v1
-
-### Month 4: Human Steering and Memory Experiments
-
-- Add person/task/project correction tasks.
-- Add daily consolidation and episode reflection comparisons.
-- Measure whether feedback improves later answers.
+- Instrument perception-to-utterance latency and evidence freshness.
+- Add staleness detection for expired answers.
+- Evaluate live voice interaction, follow-ups, and stop/read-full controls.
 
 Deliverables:
 
-- steering benchmark
-- memory ablation report
-- correction/recovery metrics
+- latency–freshness benchmark
+- staleness graders
+- interaction-control report
+
+### Month 4: Pillar A plus Cross-Cutting Safety
+
+- Build proactivity-calibration tasks (necessary vs false interruption, silence cost, threshold steering).
+- Run ambient-safety and perception-legibility tests (explicit query vs ambient speech, TTS echo drain, trigger auditing, consent controls).
+
+Deliverables:
+
+- interruption benchmark
+- ambient-safety report
+- perception-legibility tests
 
 ### Month 5: Cross-Model Evaluation and Generalization
 
 - Run baselines across available multimodal and real-time systems.
 - Test whether the benchmark generalizes beyond ClawSense/OpenClaw.
-- Use Tinker credits for open-model fine-tuning or evaluator/adjudicator experiments where useful.
+- Use Tinker credits for open-model fine-tuning or evaluator/adjudicator experiments where they help the evaluation.
 
 Deliverables:
 
@@ -202,7 +185,7 @@ Deliverables:
 
 - Release benchmark schema, harness, scripted dataset, and evaluation scripts.
 - Publish a technical report with results, lessons, and limitations.
-- Document privacy/safety best practices for physical-world interactive agents.
+- Document privacy/safety practices for physical-world interactive agents.
 
 Deliverables:
 
@@ -213,16 +196,16 @@ Deliverables:
 
 ## Expected Outcomes
 
-By the end of the project, we expect to deliver:
+By the end of the project, the expected outputs are:
 
-1. A reproducible benchmark for real-time agents grounded in a user's immediate physical world.
-2. A safety evaluation suite for ambient multimodal agents.
-3. A set of metrics for evidence-grounded, time-aware, steerable interaction.
+1. A reproducible benchmark that treats a real-time physical-world agent as an interactive partner rather than a question-answering system.
+2. The first task sets for three under-studied interaction primitives: agent initiative and interruption timing, temporally honest (expiring) answers, and glanceable-evidence one-gesture repair.
+3. A safety and perception-legibility evaluation suite for always-on multimodal agents.
 4. Open-source tooling that other researchers can adapt to their own models and environments.
-5. A technical report identifying where current models fail: time-range selection, visual grounding, ambient intent boundaries, evidence citation, long-session memory, and user steering.
+5. A technical report identifying where current models fail: when-to-speak, answer staleness, evidence citation, repair cost, long-session memory, and user steering.
 
 ## Broader Impact
 
-Physical-world interactive agents could become useful assistants for offices, classrooms, accessibility, field work, and personal knowledge work. They also create privacy and safety risks. This project is designed around consent, inspectable evidence, local-first data handling, trigger auditing, and explicit user control. We aim to make this research useful not only for building more capable systems, but for making them safer and more understandable.
+Physical-world interactive agents could become useful assistants for offices, classrooms, accessibility, field work, and personal knowledge work. They also create privacy and safety risks. This project is built around consent, inspectable evidence, local-first data handling, trigger auditing, and explicit user control. The goal is to make these systems easier to evaluate before they are used in real environments.
 
-Retail and frontline service are especially important long-term contexts. A safe, evidence-grounded physical-world agent could help staff review customer needs, improve training, identify missed follow-up opportunities, and connect real customer interactions to business value without relying on unsupported inference or hidden surveillance. This grant will focus on scripted and consented research settings first, establishing evaluation and safety foundations before any real-world deployment.
+Retail and frontline service are especially important long-term contexts. A safe, evidence-grounded physical-world agent could help staff review customer needs, improve training, identify missed follow-up opportunities, and connect real customer interactions to business value without relying on unsupported inference or hidden surveillance. The grant work would stay in scripted and consented research settings first, establishing evaluation and safety foundations before any real-world deployment.

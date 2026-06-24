@@ -1,6 +1,6 @@
 # Submission Checklist
 
-Official application email should include the items below.
+The application email should include the items below.
 
 ## Required
 
@@ -23,7 +23,7 @@ Official application email should include the items below.
   - media/evidence library
   - assistant query answer
   - validation report or test output
-- [ ] "Evidence of existing prototype" summary
+- [ ] Evidence of existing prototype summary
 - [ ] Scripted demo narrative, if no video demo is submitted
 - [ ] Privacy and data-handling note
 - [ ] 6-month work plan matched to budget

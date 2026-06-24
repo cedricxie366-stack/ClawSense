@@ -1,6 +1,6 @@
 # Scripted Demo Plan
 
-Goal: produce a 60-90 second public demo that proves the project is real without exposing private personal recordings.
+Goal: produce a 60-90 second public demo that shows the project is real without exposing private personal recordings.
 
 ## Demo Story
 
@@ -40,7 +40,7 @@ Scenario: a retail consultation or desk/classroom-style scripted scene. The pref
 - If screen capture is used, use a mock document or public web page.
 - If retail context is used, use mock products, public product pages, or explicitly authorized materials.
 - Blur faces unless participants explicitly consent to public display.
-- Prefer exporting anonymized evidence bundles over raw private media.
+- Prefer anonymized evidence bundles over raw private media.
 
 ## Suggested Demo Questions
 

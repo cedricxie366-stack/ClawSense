@@ -4,9 +4,9 @@ Subject: Interactivity Research Grant Proposal: ClawSense-Interact
 
 Dear Thinking Machines Grants Team,
 
-Please find attached our proposal for the Interactivity Research Grants program.
+I am submitting my proposal for the Interactivity Research Grants program.
 
-Title: ClawSense-Interact: Evaluating Real-Time Multimodal Agents Grounded in a User's Immediate Physical World
+Title: ClawSense-Interact: Evaluating Real-Time Agents as Interactive Partners in the Physical World
 
 Primary contact:
 

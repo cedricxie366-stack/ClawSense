@@ -10,7 +10,7 @@ Official grant pages:
 
 ## Positioning
 
-ClawSense should be presented as a research platform for agents that understand a user's immediate physical world through continuous multimodal evidence and real-time interaction.
+ClawSense should be presented as a research platform that treats a real-time multimodal agent as an *interactive partner* in the user's immediate physical world, not merely a system that understands a scene. The central claim is that physical-world interaction is not turn-taking question answering, but continuous, asymmetric, time-decaying mutual grounding of attention. Among the program's example settings, ClawSense directly challenges the turn-taking assumption built into chat and coding-agent steering.
 
 Avoid framing the application as:
 
@@ -18,10 +18,11 @@ Avoid framing the application as:
 - a broad AGI manifesto
 - a robot manipulation project
 - a web automation benchmark
+- a pure accuracy/grounding benchmark (interactivity, not accuracy, is the object of study)
 
 Preferred framing:
 
-> ClawSense-Interact evaluates real-time multimodal agents grounded in the user's immediate physical world. It tests whether an agent can answer questions about what the user just saw or heard, cite inspectable evidence, reject ambient false triggers, accept user corrections, and improve over long sessions.
+> ClawSense-Interact evaluates a real-time multimodal agent as an interactive partner in the user's physical world, across three interaction primitives the turn-taking paradigm never tests: when the agent should speak at all (initiative/interruption), whether an answer is still true by the time it is spoken (temporal honesty), and how cheaply a human can verify and repair it via glanceable evidence (one-gesture repair). Grounding, ambient safety, and long-session memory are measured as supporting capabilities inside these pillars.
 
 Important domain angle:
 

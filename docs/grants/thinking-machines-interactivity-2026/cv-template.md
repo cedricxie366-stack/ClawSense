@@ -17,7 +17,7 @@ Website/GitHub/LinkedIn: `[LINKS]`
 
 ### ClawSense
 
-- Built an OpenClaw plugin plus Android client that turns an Android phone into an always-on multimodal sensory node.
+- Built an OpenClaw plugin and Android client that turns an Android phone into an always-on multimodal sensory node.
 - Implemented pairing, foreground audio/image/video ingest, media/evidence indexing, real-time assistant query, TTS, validation harnesses, and evidence-grounded review flows.
 - Research direction: real-time multimodal agents grounded in the user's immediate physical world.
 

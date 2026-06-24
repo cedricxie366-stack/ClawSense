@@ -2,7 +2,7 @@
   "name": "clawsense",
   "version": "0.1.0",
   "private": false,
-  "description": "Always-on sensory companion plugin for OpenClaw",
+  "description": "Real-time multimodal evidence harness for physical-world agents on OpenClaw",
   "homepage": "https://github.com/cedricxie366-stack/ClawSense",
   "bugs": {
     "url": "https://github.com/cedricxie366-stack/ClawSense/issues"
