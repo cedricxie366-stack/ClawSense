@@ -67,8 +67,18 @@
 cd /Users/cedric/Documents/ClawSense
 npm run check
 npm test
+npm run check:non-device-product-gate
 npm run check:release
 ```
+
+如果只需要复查最近一次非真机产品门禁结果，不要重跑长门禁，使用：
+
+```bash
+cd /Users/cedric/Documents/ClawSense
+npm run report:non-device-product-gate
+```
+
+若输出 `freshness.isStale=true`，不要拿这份旧报告签核，先重跑 `npm run check:non-device-product-gate`。
 
 Android 相关改动还需要：
 

@@ -9,6 +9,7 @@ REPORT_LOG="$REPORT_DIR/current-phase-$TS.log"
 ACCEPTANCE_OUT="$REPORT_DIR/acceptance-$TS.out"
 EVIDENCE_OUT="$REPORT_DIR/video-evidence-$TS.out"
 PHASE9_OUT="$REPORT_DIR/phase9-$TS.out"
+PUBLIC_REPLAY_OUT="$REPORT_DIR/public-ami-replay-$TS.out"
 ADB_OUT="$REPORT_DIR/adb-devices-$TS.out"
 
 mkdir -p "$REPORT_DIR"
@@ -82,13 +83,22 @@ else
   log "skipping repo-local setup because SYNC_LOCAL_OPENCLAW=0"
 fi
 
+PUBLIC_REPLAY_DATE="$(date +%F)"
+export CLAWSENSE_PUBLIC_AMI_REPLAY_DATE="$PUBLIC_REPLAY_DATE"
+capture_logged "$PUBLIC_REPLAY_OUT" npm run check:public-replay
+LEGACY_AMI_FIXTURE_WAV="$ROOT_DIR/.local/test-fixtures/ami-es2002a/raw/ES2002a.Mix-Headset.wav"
+if [[ -f "$LEGACY_AMI_FIXTURE_WAV" ]]; then
 run_logged node scripts/replay-ami-fixture.mjs --reset --force
+else
+  log "skip legacy AMI fixture replay; missing $LEGACY_AMI_FIXTURE_WAV and public AMI replay already passed"
+fi
 run_logged node scripts/replay-mit-lecture-fixture.mjs --reset --force
 run_logged node scripts/replay-mit-lecture-video-fixture.mjs --reset --force
 run_logged bash scripts/local-openclaw.sh openclaw config set plugins.entries.clawsense.config.hostModelVideoMode '"keyframes"' --strict-json
 
-log "run: annotate AMI fixture speaker smoke"
-node <<'NODE' 2>&1 | tee -a "$REPORT_LOG"
+if [[ -f "$LEGACY_AMI_FIXTURE_WAV" ]]; then
+  log "run: annotate AMI fixture speaker smoke"
+  node <<'NODE' 2>&1 | tee -a "$REPORT_LOG"
 const fs = require("node:fs");
 const { spawnSync } = require("node:child_process");
 
@@ -126,6 +136,9 @@ if (result.status !== 0) {
   process.exit(result.status ?? 1);
 }
 NODE
+else
+  log "skip legacy AMI speaker smoke; public AMI replay already validated speaker annotation"
+fi
 
 capture_logged "$ACCEPTANCE_OUT" bash scripts/local-openclaw.sh acceptance
 capture_logged "$EVIDENCE_OUT" --timeout "${PHASE_EVIDENCE_TIMEOUT_SECONDS:-120}" bash scripts/local-openclaw.sh openclaw clawsense evidence --lookbackDays 7 --modality video --focus what_happened --question "这段视频里老师讲了什么重点？"
@@ -139,10 +152,12 @@ else
 fi
 
 REQUIRE_ANDROID_DEVICE="${REQUIRE_ANDROID_DEVICE:-0}" \
+PUBLIC_REPLAY_EXPECTED_DATE="$PUBLIC_REPLAY_DATE" \
 REPORT_JSON="$REPORT_JSON" \
 ACCEPTANCE_OUT="$ACCEPTANCE_OUT" \
 EVIDENCE_OUT="$EVIDENCE_OUT" \
 PHASE9_OUT="$PHASE9_OUT" \
+PUBLIC_REPLAY_OUT="$PUBLIC_REPLAY_OUT" \
 ADB_OUT="$ADB_OUT" \
 node <<'NODE'
 const fs = require("node:fs");
@@ -199,6 +214,8 @@ function extractJson(raw, label) {
         ? (candidate) => candidate?.ok === true && candidate?.evidenceBundle
         : label === "phase9"
           ? (candidate) => candidate?.ok === true && candidate?.phase9
+          : label === "public-replay"
+            ? (candidate) => candidate?.ok === true && candidate?.replay && candidate?.before && candidate?.after
           : (candidate) => candidate && typeof candidate === "object" && !Array.isArray(candidate);
   const object = candidates.find((candidate) => candidate && typeof candidate === "object" && !Array.isArray(candidate) && predicate(candidate));
   if (!object) {
@@ -226,10 +243,12 @@ function requireNumberAtLeast(value, expected, label) {
 const acceptanceRaw = fs.readFileSync(process.env.ACCEPTANCE_OUT, "utf8");
 const evidenceRaw = fs.readFileSync(process.env.EVIDENCE_OUT, "utf8");
 const phase9Raw = fs.readFileSync(process.env.PHASE9_OUT, "utf8");
+const publicReplayRaw = fs.readFileSync(process.env.PUBLIC_REPLAY_OUT, "utf8");
 const adbRaw = fs.readFileSync(process.env.ADB_OUT, "utf8");
 const acceptance = extractJson(acceptanceRaw, "acceptance");
 const evidence = extractJson(evidenceRaw, "video-evidence");
 const phase9 = extractJson(phase9Raw, "phase9");
+const publicReplay = extractJson(publicReplayRaw, "public-replay");
 const adb = countAdbDevices(adbRaw);
 const requireAndroidDevice = process.env.REQUIRE_ANDROID_DEVICE === "1";
 
@@ -285,6 +304,23 @@ for (const group of ["autoVideoTrigger", "host", "android", "liveReport"]) {
   }
 }
 
+if (publicReplay.ok !== true) {
+  throw new Error("public_replay_not_ok");
+}
+const publicReplayExpectedDate = process.env.PUBLIC_REPLAY_EXPECTED_DATE || "2026-01-15";
+if (publicReplay.replay?.fixtureDate !== publicReplayExpectedDate) {
+  throw new Error(`public_replay_unexpected_fixture_date:${publicReplay.replay?.fixtureDate ?? "<missing>"}`);
+}
+requireNumberAtLeast(publicReplay.replay?.segmentCount, 12, "publicReplaySegmentCount");
+requireNumberAtLeast(publicReplay.before?.transcriptSpanCount, 10, "publicReplayBeforeTranscriptSpans");
+requireNumberAtLeast(publicReplay.before?.topicSegmentCount, 1, "publicReplayBeforeTopicSegments");
+requireNumberAtLeast(publicReplay.before?.evidenceFollowUpTargetCount, 1, "publicReplayBeforeFollowups");
+requireNumberAtLeast(publicReplay.after?.transcriptSpanCount, 10, "publicReplayAfterTranscriptSpans");
+requireNumberAtLeast(publicReplay.after?.evidenceFollowUpTargetCount, 1, "publicReplayAfterFollowups");
+if (publicReplay.annotation?.displayName !== "Sarah") {
+  throw new Error(`public_replay_annotation_missing:${publicReplay.annotation?.displayName ?? "<missing>"}`);
+}
+
 if (requireAndroidDevice && adb.devices.length === 0) {
   throw new Error("android_device_required_but_missing");
 }
@@ -315,6 +351,14 @@ const summary = {
     hostChecks: Object.keys(phase9.phase9.host).length,
     androidChecks: Object.keys(phase9.phase9.android).length,
     liveReportChecks: Object.keys(phase9.phase9.liveReport).length,
+  },
+  publicReplay: {
+    fixtureDate: publicReplay.replay.fixtureDate,
+    segmentCount: publicReplay.replay.segmentCount,
+    transcriptSpans: publicReplay.before.transcriptSpanCount,
+    topicSegments: publicReplay.before.topicSegmentCount,
+    evidenceFollowUpTargets: publicReplay.before.evidenceFollowUpTargetCount,
+    annotatedSpeaker: publicReplay.annotation.displayName,
   },
   android: {
     adbAvailable: adb.adbAvailable,

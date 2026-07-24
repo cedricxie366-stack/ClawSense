@@ -1,4 +1,6 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
+import path from "node:path";
 import type { ClawSenseConfig } from "./config.js";
 import type { ClawSenseMemorySearchHit } from "./memory-store.js";
 import {
@@ -9,12 +11,16 @@ import {
   transcribeAudioWithFallbackModel,
   understandAudioWithPrimaryModel,
 } from "./openai-client.js";
+import { localAsrProviderLabel, transcribeAudioBatchWithLocalAsr, transcribeAudioWithLocalAsr } from "./local-asr.js";
+import type { AudioTranscriptSegment, AudioTranscriptionAttempt } from "./openai-client.js";
 import type { OpenClawConfig, PluginLogger } from "./openclaw-types.js";
 import type {
   ClawSenseArtifactRecord,
   ClawSenseCaptureEvent,
   ClawSenseDailyConsolidation,
+  ClawSenseConversationDigestSnapshot,
   ClawSenseDailyReview,
+  ClawSenseMemoryCard,
   ClawSensePersonAnnotation,
   ClawSenseReviewSection,
   ClawSenseSpeakerAnnotation,
@@ -48,6 +54,17 @@ type ReviewWindow = {
   summaryCapturedAt: number;
 };
 
+type HistoricalMemoryCardSummary = {
+  cardId: string;
+  kind: ClawSenseMemoryCard["kind"];
+  title: string;
+  summary: string;
+  confidence: ClawSenseMemoryCard["confidence"];
+  timeRanges: string[];
+  taskHints: string[];
+  transcriptExcerpts: string[];
+};
+
 type PhaseAcceptanceStatus = "pass" | "needs-work" | "missing-data";
 type PhaseAcceptanceCriterionId =
   | "office-recap"
@@ -71,6 +88,169 @@ type RecentActivitySnapshot = {
     videoCount: number;
   }>;
 };
+type AudioBackfillProvider = "auto" | "local-asr" | "compatible-asr";
+type AudioBackfillDiarizationOptions = {
+  provider: DiarizationProbeProvider;
+  speakerModel: string;
+};
+type AudioBackfillResultItem = {
+  eventId: string;
+  artifactId: string;
+  fileName: string;
+  provider: string;
+  status: "succeeded" | "failed" | "skipped";
+  dryRun?: boolean;
+  transcriptPreview?: string;
+  transcriptSegmentCount?: number;
+  speakerTimelineSegmentCount?: number;
+  analysisFailureReason?: string;
+};
+type AudioBackfillCandidate = {
+  event: ClawSenseCaptureEvent;
+  artifact: ClawSenseArtifactRecord;
+  date: string;
+  window?: ReviewWindow;
+};
+type AudioBackfillQueueJobStatus = "pending" | "running" | "succeeded" | "failed" | "skipped";
+type AudioBackfillQueueJob = {
+  jobId: string;
+  eventId: string;
+  artifactId: string;
+  date: string;
+  fileName: string;
+  sizeBytes: number;
+  capturedAt: number;
+  clipMs?: number;
+  voicedMs?: number;
+  status: AudioBackfillQueueJobStatus;
+  attempts: number;
+  createdAt: number;
+  updatedAt: number;
+  startedAt?: number;
+  completedAt?: number;
+  provider?: string;
+  transcriptPreview?: string;
+  transcriptSegmentCount?: number;
+  speakerTimelineSegmentCount?: number;
+  analysisFailureReason?: string;
+};
+type AudioBackfillQueue = {
+  queueId: string;
+  createdAt: number;
+  updatedAt: number;
+  dates: string[];
+  provider: AudioBackfillProvider;
+  diarizationProvider?: DiarizationProbeProvider;
+  speakerModel?: string;
+  includeTranscribed: boolean;
+  dryRun: boolean;
+  jobs: AudioBackfillQueueJob[];
+};
+type AudioBackfillQueueFile = {
+  version: 1;
+  queues: AudioBackfillQueue[];
+};
+type AudioBackfillQueueStats = Record<AudioBackfillQueueJobStatus, number> & {
+  total: number;
+  remaining: number;
+};
+type AudioBackfillQueueSummary = {
+  queueId: string;
+  createdAt: number;
+  updatedAt: number;
+  dates: string[];
+  provider: AudioBackfillProvider;
+  diarizationProvider?: DiarizationProbeProvider;
+  speakerModel?: string;
+  includeTranscribed: boolean;
+  dryRun: boolean;
+  stats: AudioBackfillQueueStats;
+  audio: {
+    totalClipMs: number;
+    remainingClipMs: number;
+    totalVoicedMs: number;
+    remainingVoicedMs: number;
+  };
+  recentJobs: Array<{
+    jobId: string;
+    eventId: string;
+    artifactId: string;
+    date: string;
+    fileName: string;
+    capturedAt: number;
+    clipMs?: number;
+    voicedMs?: number;
+    status: AudioBackfillQueueJobStatus;
+    attempts: number;
+    provider?: string;
+    transcriptPreview?: string;
+    transcriptSegmentCount?: number;
+    speakerTimelineSegmentCount?: number;
+    analysisFailureReason?: string;
+  }>;
+};
+type AudioBackfillQueueRunResult = {
+  queue: AudioBackfillQueueSummary;
+  attempted: number;
+  succeeded: number;
+  failed: number;
+  skipped: number;
+  items: AudioBackfillResultItem[];
+};
+type AudioBackfillWorkerStatus = {
+  generatedAt: number;
+  enabled: boolean;
+  config: {
+    provider: AudioBackfillProvider;
+    batchSize: number;
+    maxJobs: number;
+    lookbackDays: number;
+    includeTranscribed: boolean;
+    intervalSeconds: number;
+  };
+  stats: {
+    queueCount: number;
+    activeQueueCount: number;
+    pendingJobs: number;
+    runningJobs: number;
+    failedJobs: number;
+    remainingJobs: number;
+    remainingClipMs: number;
+    remainingVoicedMs: number;
+  };
+  activeQueue: AudioBackfillQueueSummary | null;
+  latestQueues: AudioBackfillQueueSummary[];
+  nextActions: string[];
+};
+type AudioBackfillWorkerRunResult = {
+  generatedAt: number;
+  planned: boolean;
+  reason: "resumed-existing-queue" | "planned-new-queue" | "no-audio-candidates";
+  queue: AudioBackfillQueueSummary | null;
+  run: AudioBackfillQueueRunResult | null;
+  status: AudioBackfillWorkerStatus;
+};
+type DiarizationProbeProvider = "funasr" | "whisperx" | "pyannote" | "hybrid" | "local-asr";
+type DiarizationProbeItem = {
+  eventId: string;
+  artifactId: string;
+  fileName: string;
+  provider: string;
+  diarizationProvider: DiarizationProbeProvider;
+  status: "succeeded" | "failed";
+  transcriptPreview?: string;
+  transcriptSegmentCount: number;
+  speakerTimelineSegmentCount: number;
+  speakerSegmentCount: number;
+  speakerLabels: string[];
+  analysisFailureReason?: string;
+};
+type DiarizationProbeDiagnosis =
+  | "speaker-ready"
+  | "asr-ok-speaker-missing"
+  | "asr-empty"
+  | "asr-failed"
+  | "no-audio-candidates";
 
 const REVIEW_SECTION_TITLES = [
   "Today at a glance",
@@ -93,6 +273,7 @@ const AUDIO_BACKFILL_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 const ASSISTANT_RECENT_ACTIVITY_LOOKBACK_DAYS = 7;
 const MULTIMODAL_REVIEW_INSTRUCTIONS = [
   "你正在为 ClawSense 生成当天回顾，角色是可靠的助理，而不是机械纪要。",
+  "除非原始专有名词必须保留英文，所有 summary、section title 以外的 items 和追问都必须使用简体中文。",
   "只能根据给定的事件窗口、人物注释和图片来写，不要编造未出现的事实。",
   "不要对情绪、意图、关系状态或微表情下结论；如果不确定，只能写成观察或待确认问题。",
   "如果画面全黑、近乎全黑、模糊或可能被遮挡，只能写成“黑暗环境”或“镜头可能被遮挡，待确认”，不要推断设备关闭、故障、休眠或其他系统状态。",
@@ -114,6 +295,12 @@ const MULTIMODAL_REVIEW_INSTRUCTIONS = [
   "如果转写、图片或人物信息不足，请直接指出素材不足，不要假装已经确认。",
   "keyWindowIds 只保留 1 到 3 个最值得回看的窗口 ID。",
 ].join("\n");
+
+type ReviewGenerationPayload = {
+  summary: string;
+  sections: ClawSenseReviewSection[];
+  keyWindowIds?: string[];
+};
 
 export class ClawSenseReviewEngine {
   private readonly cfg: ClawSenseConfig;
@@ -302,6 +489,8 @@ export class ClawSenseReviewEngine {
     };
     review?: ClawSenseDailyReview;
     consolidation?: ClawSenseDailyConsolidation;
+    rollingDigests: ClawSenseConversationDigestSnapshot[];
+    memoryCards: ClawSenseMemoryCard[];
     windows: Array<{
       windowId: string;
       deviceId: string;
@@ -328,6 +517,8 @@ export class ClawSenseReviewEngine {
         analysisProvider?: string;
         analysisStatus?: ClawSenseCaptureEvent["analysisStatus"];
         analysisFailureReason?: string;
+        transcriptSegments?: AudioTranscriptSegment[];
+        speakerTimelineSegments?: AudioTranscriptSegment[];
         artifact?: {
           artifactId: string;
           fileName: string;
@@ -448,6 +639,25 @@ export class ClawSenseReviewEngine {
       modality: params.modality,
     });
     const shouldUseReviewSummary = Boolean(review?.summary?.trim()) && events.length > 0;
+    const currentRollingDigest = buildRollingConversationDigestSnapshot({
+      scope,
+      date,
+      startAt,
+      endAt,
+      now,
+      windows,
+      events,
+    });
+    if (currentRollingDigest) {
+      await this.stateStore.putConversationDigest(currentRollingDigest);
+      const memoryCards = buildMemoryCardsFromRollingDigest(currentRollingDigest);
+      await this.stateStore.putMemoryCards(memoryCards);
+    }
+    const rollingDigests =
+      currentRollingDigest
+        ? [currentRollingDigest]
+        : await this.stateStore.listConversationDigests({ date, scope, startAt, endAt });
+    const memoryCards = await this.stateStore.listMemoryCards({ date, scope, startAt, endAt });
 
     return {
       scope,
@@ -486,6 +696,8 @@ export class ClawSenseReviewEngine {
       },
       review,
       consolidation,
+      rollingDigests: rollingDigests.slice(0, 3),
+      memoryCards: memoryCards.slice(0, 24),
       windows: contextWindows.map((window) => ({
         windowId: window.windowId,
         deviceId: window.deviceId,
@@ -515,6 +727,8 @@ export class ClawSenseReviewEngine {
             analysisProvider: event.analysisProvider,
             analysisStatus: event.analysisStatus,
             analysisFailureReason: event.analysisFailureReason,
+            transcriptSegments: event.transcriptSegments,
+            speakerTimelineSegments: event.speakerTimelineSegments,
             artifact: buildArtifactPayload(
               artifactById.get(event.artifactId),
               params.artifactUrlBase,
@@ -622,6 +836,8 @@ export class ClawSenseReviewEngine {
       windowId: string;
       timeRange: string;
       transcript?: string;
+      transcriptSegments?: AudioTranscriptSegment[];
+      speakerTimelineSegments?: AudioTranscriptSegment[];
       summary?: string;
       analysisProvider: string;
       analysisFailureReason?: string;
@@ -712,6 +928,8 @@ export class ClawSenseReviewEngine {
       windowId: string;
       timeRange: string;
       transcript?: string;
+      transcriptSegments?: AudioTranscriptSegment[];
+      speakerTimelineSegments?: AudioTranscriptSegment[];
       summary?: string;
       analysisProvider: string;
       analysisFailureReason?: string;
@@ -739,10 +957,33 @@ export class ClawSenseReviewEngine {
             mime: artifact.mime,
           });
           let transcript = multimodalAttempt.transcript;
+          let transcriptSegments: AudioTranscriptSegment[] | undefined;
+          let speakerTimelineSegments: AudioTranscriptSegment[] | undefined;
           const summary = multimodalAttempt.summary;
           let analysisProvider = multimodalAttempt.analysisProvider;
           let analysisFailureReason = multimodalAttempt.analysisFailureReason;
           let sttProvider: ClawSenseCaptureEvent["sttProvider"];
+
+          if (!normalizeSemanticText(transcript)) {
+            const localAsrAttempt = await transcribeAudioWithLocalAsr({
+              cfg: this.cfg,
+              filePath: artifact.storagePath,
+              resolveStateDir: () => this.stateStore.getStateDir(),
+              logger: this.logger,
+            });
+            if (normalizeSemanticText(localAsrAttempt.transcript)) {
+              transcript = localAsrAttempt.transcript;
+              transcriptSegments = localAsrAttempt.transcriptSegments;
+              speakerTimelineSegments = localAsrAttempt.speakerTimelineSegments;
+              analysisProvider = `${multimodalAttempt.analysisProvider}+${localAsrAttempt.analysisProvider}`;
+              sttProvider = "local-asr";
+            } else if (localAsrAttempt.analysisFailureReason !== "query_time_local_asr_disabled") {
+              analysisFailureReason = combineFailureReasons(
+                analysisFailureReason,
+                localAsrAttempt.analysisFailureReason,
+              );
+            }
+          }
 
           if (!normalizeSemanticText(transcript)) {
             const asrAttempt = await transcribeAudioWithFallbackModel({
@@ -771,6 +1012,8 @@ export class ClawSenseReviewEngine {
               artifactId: artifact.artifactId,
               summary,
               transcript,
+              transcriptSegments,
+              speakerTimelineSegments,
               analysisProvider,
               analysisStatus: normalizeSemanticText(transcript) ? "succeeded" : "degraded",
               analysisFailureReason,
@@ -785,6 +1028,8 @@ export class ClawSenseReviewEngine {
             windowId: window.windowId,
             timeRange: `${toTimeLabel(window.startedAt)}-${toTimeLabel(window.endedAt)}`,
             transcript,
+            transcriptSegments,
+            speakerTimelineSegments,
             summary,
             analysisProvider,
             analysisFailureReason,
@@ -885,6 +1130,7 @@ export class ClawSenseReviewEngine {
         transcriptExcerpt?: string;
         artifactUrls: string[];
       }>;
+      memoryCards: HistoricalMemoryCardSummary[];
     }>
   > {
     if (!params.question?.trim()) {
@@ -914,6 +1160,7 @@ export class ClawSenseReviewEngine {
     const windows = groupWindows(events, artifactById)
       .slice()
       .sort((left, right) => right.endedAt - left.endedAt);
+    const memoryCards = await this.stateStore.listMemoryCards();
 
     const results = targets.flatMap((target) => {
       const matchedWindows = windows.filter((window) => doesWindowMatchHistoricalTarget(window, target));
@@ -937,6 +1184,11 @@ export class ClawSenseReviewEngine {
           .slice(0, 2)
           .map((artifact) => `${params.artifactUrlBase}?id=${encodeURIComponent(artifact.artifactId)}`),
       }));
+      const matchedMemoryCards = selectHistoricalMemoryCardsForWindows({
+        memoryCards,
+        matchedWindows,
+        targetTerms: buildHistoricalIdentityTargetTerms(target),
+      });
 
       return [{
         kind: target.kind,
@@ -950,6 +1202,7 @@ export class ClawSenseReviewEngine {
         firstSeenAt,
         lastSeenAt,
         recentMoments,
+        memoryCards: matchedMemoryCards,
       }];
     });
 
@@ -982,6 +1235,7 @@ export class ClawSenseReviewEngine {
         transcriptExcerpt?: string;
         artifactUrls: string[];
       }>;
+      memoryCards: HistoricalMemoryCardSummary[];
     }>
   > {
     if (!params.question?.trim()) {
@@ -1007,9 +1261,16 @@ export class ClawSenseReviewEngine {
     const windows = groupWindows(events, artifactById)
       .slice()
       .sort((left, right) => right.endedAt - left.endedAt);
+    const memoryCards = await this.stateStore.listMemoryCards();
 
     const results = targets.flatMap((target) => {
-      const matchedWindows = windows.filter((window) => doesWindowMatchHistoricalProjectTarget(window, target));
+      const matchedWindows = windows
+        .filter((window) => doesWindowMatchHistoricalProjectTarget(window, target))
+        .sort(
+          (left, right) =>
+            scoreHistoricalProjectWindow(right, target) - scoreHistoricalProjectWindow(left, target) ||
+            right.endedAt - left.endedAt,
+        );
       if (matchedWindows.length === 0) {
         return [];
       }
@@ -1030,6 +1291,11 @@ export class ClawSenseReviewEngine {
           .slice(0, 2)
           .map((artifact) => `${params.artifactUrlBase}?id=${encodeURIComponent(artifact.artifactId)}`),
       }));
+      const matchedMemoryCards = selectHistoricalMemoryCardsForWindows({
+        memoryCards,
+        matchedWindows,
+        targetTerms: buildHistoricalProjectTargetTerms(target),
+      });
 
       return [{
         ref: target.ref,
@@ -1040,6 +1306,7 @@ export class ClawSenseReviewEngine {
         firstSeenAt,
         lastSeenAt,
         recentMoments,
+        memoryCards: matchedMemoryCards,
       }];
     });
 
@@ -1746,9 +2013,13 @@ export class ClawSenseReviewEngine {
   }
 
   async runMaintenanceTick(now = Date.now()): Promise<void> {
-    const pendingBackfillCandidates = await this.estimatePendingAudioBackfillCandidates(now);
-    const adaptiveMaxArtifacts = resolveMaintenanceBackfillBatchSize(pendingBackfillCandidates);
-    await this.runAudioBackfillTick({ now, maxArtifacts: adaptiveMaxArtifacts });
+    if (this.cfg.asrWorkerEnabled) {
+      await this.runAudioBackfillWorkerTick({ now });
+    } else {
+      const pendingBackfillCandidates = await this.estimatePendingAudioBackfillCandidates(now);
+      const adaptiveMaxArtifacts = resolveMaintenanceBackfillBatchSize(pendingBackfillCandidates);
+      await this.runAudioBackfillTick({ now, maxArtifacts: adaptiveMaxArtifacts });
+    }
     if (new Date(now).getHours() !== 22) {
       return;
     }
@@ -1796,29 +2067,571 @@ export class ClawSenseReviewEngine {
     now?: number;
     dates?: string[];
     maxArtifacts?: number;
+    provider?: AudioBackfillProvider;
+    diarizationProvider?: string;
+    speakerModel?: string;
+    dryRun?: boolean;
+    includeTranscribed?: boolean;
   }): Promise<{
     attempted: number;
     succeeded: number;
     failed: number;
     skipped: number;
+    dryRun?: boolean;
+    provider?: AudioBackfillProvider;
+    items?: AudioBackfillResultItem[];
   }> {
-    type AudioBackfillCandidate = {
-      event: ClawSenseCaptureEvent;
-      artifact: ClawSenseArtifactRecord;
-      date: string;
-      window?: ReviewWindow;
-    };
     const now = params?.now ?? Date.now();
-    const maxArtifacts = Math.max(1, Math.min(params?.maxArtifacts ?? 2, 6));
-    const primaryProviderId = resolvePrimaryMultimodalModel(this.cfg, this.runtimeConfig).providerId;
-    const fallbackSttProviderId = this.resolveFallbackSttProviderId(primaryProviderId);
+    const provider = params?.provider ?? "auto";
+    const diarization = resolveAudioBackfillDiarizationOptions(params);
+    const dryRun = Boolean(params?.dryRun);
+    const includeTranscribed = Boolean(params?.includeTranscribed);
+    const maxArtifacts = resolveAudioBackfillMaxArtifacts(params?.maxArtifacts, { dryRun });
+    const candidates = await this.selectAudioBackfillCandidates({
+      now,
+      dates: params?.dates,
+      maxArtifacts,
+      provider,
+      includeTranscribed,
+    });
+
+    if (candidates.length === 0) {
+      return {
+        attempted: 0,
+        succeeded: 0,
+        failed: 0,
+        skipped: 0,
+        ...(dryRun ? { dryRun: true, provider, items: [] } : {}),
+      };
+    }
+
+    return await this.processAudioBackfillCandidates({
+      candidates,
+      now,
+      provider,
+      diarization,
+      dryRun,
+    });
+  }
+
+  async planAudioBackfillQueue(params?: {
+    now?: number;
+    dates?: string[];
+    maxArtifacts?: number;
+    provider?: AudioBackfillProvider;
+    diarizationProvider?: string;
+    speakerModel?: string;
+    dryRun?: boolean;
+    includeTranscribed?: boolean;
+    persistEmpty?: boolean;
+  }): Promise<AudioBackfillQueueSummary> {
+    const now = params?.now ?? Date.now();
+    const provider = params?.provider ?? "local-asr";
+    const diarization = resolveAudioBackfillDiarizationOptions(params);
+    const dryRun = Boolean(params?.dryRun);
+    const includeTranscribed = params?.includeTranscribed ?? true;
+    const maxArtifacts = resolveAudioBackfillQueueMaxJobs(params?.maxArtifacts, { dryRun });
     const dates =
       params?.dates && params.dates.length > 0
         ? Array.from(new Set(params.dates.map((date) => this.normalizeDateInput(date))))
-        : [toLocalDateKey(now), toLocalDateKey(now - 24 * 60 * 60 * 1000)];
+        : [toLocalDateKey(now)];
+    const candidates = await this.selectAudioBackfillCandidates({
+      now,
+      dates,
+      maxArtifacts,
+      provider,
+      includeTranscribed,
+    });
+    const file = await this.readAudioBackfillQueueFile();
+    const queueIdBase = `asr-${new Date(now).toISOString().replace(/[:.]/g, "-")}-${randomId().slice(0, 8)}`;
+    let queueId = queueIdBase;
+    let collisionIndex = 2;
+    while (file.queues.some((item) => item.queueId === queueId)) {
+      queueId = `${queueIdBase}-${collisionIndex}`;
+      collisionIndex += 1;
+    }
+    const queue: AudioBackfillQueue = {
+      queueId,
+      createdAt: now,
+      updatedAt: now,
+      dates,
+      provider,
+      ...(diarization
+        ? {
+            diarizationProvider: diarization.provider,
+            speakerModel: diarization.speakerModel,
+          }
+        : {}),
+      includeTranscribed,
+      dryRun,
+      jobs: candidates.map((candidate) => {
+        const audioHint = parseClawSenseAudioSessionHint(candidate.event.note);
+        return {
+          jobId: candidate.event.eventId,
+          eventId: candidate.event.eventId,
+          artifactId: candidate.artifact.artifactId,
+          date: candidate.date,
+          fileName: candidate.artifact.fileName,
+          sizeBytes: candidate.artifact.sizeBytes,
+          capturedAt: candidate.event.capturedAt,
+          clipMs: audioHint?.clipMs,
+          voicedMs: audioHint?.voicedMs,
+          status: "pending" as const,
+          attempts: 0,
+          createdAt: now,
+          updatedAt: now,
+        };
+      }),
+    };
+    if (queue.jobs.length > 0 || params?.persistEmpty !== false) {
+      file.queues = [queue, ...file.queues.filter((item) => item.queueId !== queue.queueId)].slice(0, 20);
+      await this.writeAudioBackfillQueueFile(file);
+    }
+    return summarizeAudioBackfillQueue(queue);
+  }
+
+  async getAudioBackfillQueueStatus(queueId?: string): Promise<AudioBackfillQueueSummary | null> {
+    const queue = await this.resolveAudioBackfillQueue(queueId);
+    return queue ? summarizeAudioBackfillQueue(queue) : null;
+  }
+
+  async getAudioBackfillWorkerStatus(now = Date.now()): Promise<AudioBackfillWorkerStatus> {
+    const file = await this.readAudioBackfillQueueFile();
+    const latestQueues = file.queues.slice(0, 5).map((queue) => summarizeAudioBackfillQueue(queue));
+    const activeRawQueue = findActiveAudioBackfillQueue(file.queues, { dryRun: false });
+    const activeQueue = activeRawQueue ? summarizeAudioBackfillQueue(activeRawQueue) : null;
+    const productionQueues = latestQueues.filter((queue) => !queue.dryRun);
+    const stats = productionQueues.reduce(
+      (summary, queue) => {
+        summary.pendingJobs += queue.stats.pending;
+        summary.runningJobs += queue.stats.running;
+        summary.failedJobs += queue.stats.failed;
+        summary.remainingJobs += queue.stats.remaining;
+        summary.remainingClipMs += queue.audio.remainingClipMs;
+        summary.remainingVoicedMs += queue.audio.remainingVoicedMs;
+        if (queue.stats.pending > 0 || queue.stats.running > 0) {
+          summary.activeQueueCount += 1;
+        }
+        return summary;
+      },
+      {
+        queueCount: file.queues.filter((queue) => !queue.dryRun).length,
+        activeQueueCount: 0,
+        pendingJobs: 0,
+        runningJobs: 0,
+        failedJobs: 0,
+        remainingJobs: 0,
+        remainingClipMs: 0,
+        remainingVoicedMs: 0,
+      },
+    );
+    return {
+      generatedAt: now,
+      enabled: this.cfg.asrWorkerEnabled,
+      config: {
+        provider: this.cfg.asrWorkerProvider,
+        batchSize: this.cfg.asrWorkerBatchSize,
+        maxJobs: this.cfg.asrWorkerMaxJobs,
+        lookbackDays: this.cfg.asrWorkerLookbackDays,
+        includeTranscribed: this.cfg.asrWorkerIncludeTranscribed,
+        intervalSeconds: this.cfg.asrWorkerIntervalSeconds,
+      },
+      stats,
+      activeQueue,
+      latestQueues,
+      nextActions: buildAudioBackfillWorkerNextActions({
+        enabled: this.cfg.asrWorkerEnabled,
+        activeQueue,
+        stats,
+      }),
+    };
+  }
+
+  async runAudioBackfillWorkerTick(params?: {
+    now?: number;
+    dates?: string[];
+    lookbackDays?: number;
+    maxJobs?: number;
+    batchSize?: number;
+    provider?: AudioBackfillProvider;
+    diarizationProvider?: string;
+    speakerModel?: string;
+    dryRun?: boolean;
+    includeTranscribed?: boolean;
+  }): Promise<AudioBackfillWorkerRunResult> {
+    const now = params?.now ?? Date.now();
+    const file = await this.readAudioBackfillQueueFile();
+    const batchSize = Math.max(1, Math.min(params?.batchSize ?? this.cfg.asrWorkerBatchSize, 50));
+    const dryRun = Boolean(params?.dryRun);
+    const provider = params?.provider ?? this.cfg.asrWorkerProvider;
+    const diarization = resolveAudioBackfillDiarizationOptions(params);
+    const includeTranscribed = params?.includeTranscribed ?? this.cfg.asrWorkerIncludeTranscribed;
+    const activeQueue = findActiveAudioBackfillQueue(file.queues, { dryRun });
+    const queue =
+      activeQueue
+        ? summarizeAudioBackfillQueue(activeQueue)
+        : await this.planAudioBackfillQueue({
+            now,
+            dates: params?.dates ?? buildRecentDateKeys(now, params?.lookbackDays ?? this.cfg.asrWorkerLookbackDays),
+            maxArtifacts: params?.maxJobs ?? this.cfg.asrWorkerMaxJobs,
+            provider,
+            ...(diarization
+              ? {
+                  diarizationProvider: diarization.provider,
+                  speakerModel: diarization.speakerModel,
+                }
+              : {}),
+            dryRun,
+            includeTranscribed,
+            persistEmpty: false,
+          });
+    if (queue.stats.remaining === 0) {
+      return {
+        generatedAt: now,
+        planned: !activeQueue,
+        reason: "no-audio-candidates",
+        queue,
+        run: null,
+        status: await this.getAudioBackfillWorkerStatus(now),
+      };
+    }
+    const run = await this.runAudioBackfillQueue({
+      queueId: queue.queueId,
+      now,
+      batchSize,
+      dryRun,
+    });
+    return {
+      generatedAt: now,
+      planned: !activeQueue,
+      reason: activeQueue ? "resumed-existing-queue" : "planned-new-queue",
+      queue: run?.queue ?? queue,
+      run,
+      status: await this.getAudioBackfillWorkerStatus(now),
+    };
+  }
+
+  async runDiarizationProbe(params?: {
+    now?: number;
+    dates?: string[];
+    maxArtifacts?: number;
+    provider?: string;
+    speakerModel?: string;
+  }): Promise<{
+    attempted: number;
+    succeeded: number;
+    failed: number;
+    speakerReady: boolean;
+    speakerModel: string;
+    diarizationProvider: DiarizationProbeProvider;
+    provider: string;
+    diagnosis: DiarizationProbeDiagnosis;
+    nextActions: string[];
+    items: DiarizationProbeItem[];
+  }> {
+    const now = params?.now ?? Date.now();
+    const diarizationProvider = normalizeDiarizationProbeProvider(params?.provider);
+    const speakerModel = resolveDiarizationProbeSpeakerModel(diarizationProvider, params?.speakerModel);
+    const maxArtifacts = Math.max(1, Math.min(params?.maxArtifacts ?? 3, 20));
+    const candidates = await this.selectAudioBackfillCandidates({
+      now,
+      dates: params?.dates,
+      maxArtifacts,
+      provider: "local-asr",
+      includeTranscribed: true,
+    });
+    if (candidates.length === 0) {
+      return {
+        attempted: 0,
+        succeeded: 0,
+        failed: 0,
+        speakerReady: false,
+        speakerModel,
+        diarizationProvider,
+        provider: localAsrProviderLabel(this.cfg),
+        diagnosis: "no-audio-candidates",
+        nextActions: [
+          "先确认目标日期有音频 artifact；必要时运行 asr-queue plan 查看候选。",
+        ],
+        items: [],
+      };
+    }
+    const attempts = await transcribeAudioBatchWithLocalAsr({
+      cfg: this.cfg,
+      items: candidates.map((candidate) => ({
+        id: candidate.event.eventId,
+        filePath: candidate.artifact.storagePath,
+      })),
+      resolveStateDir: () => this.stateStore.getStateDir(),
+      logger: this.logger,
+      extraEnv: buildDiarizationProbeEnv(diarizationProvider, speakerModel),
+    });
+    let succeeded = 0;
+    let failed = 0;
+    const items = candidates.map((candidate): DiarizationProbeItem => {
+      const attempt = attempts.get(candidate.event.eventId);
+      const transcript = normalizeSemanticText(attempt?.transcript);
+      const segments = attempt?.transcriptSegments ?? [];
+      const speakerTimelineSegments = attempt?.speakerTimelineSegments ?? [];
+      const speakerEvidenceSegments = speakerTimelineSegments.length > 0 ? speakerTimelineSegments : segments;
+      const speakerLabels = dedupeStrings(
+        speakerEvidenceSegments.map((segment) => normalizeSemanticText(segment.speakerLabel)).filter(Boolean),
+      );
+      const item: DiarizationProbeItem = {
+        eventId: candidate.event.eventId,
+        artifactId: candidate.artifact.artifactId,
+        fileName: candidate.artifact.fileName,
+        provider: attempt?.analysisProvider ?? localAsrProviderLabel(this.cfg),
+        diarizationProvider,
+        status: transcript ? "succeeded" : "failed",
+        transcriptPreview: transcript ? truncateForLog(transcript, 120) : undefined,
+        transcriptSegmentCount: segments.length,
+        speakerTimelineSegmentCount: speakerTimelineSegments.length,
+        speakerSegmentCount: speakerEvidenceSegments.filter((segment) => normalizeSemanticText(segment.speakerLabel)).length,
+        speakerLabels,
+        analysisFailureReason: attempt?.analysisFailureReason,
+      };
+      if (item.status === "succeeded") {
+        succeeded += 1;
+      } else {
+        failed += 1;
+      }
+      return item;
+    });
+    const speakerReady = items.some((item) => item.speakerSegmentCount > 0 && item.speakerLabels.length > 0);
+    const diagnosis = resolveDiarizationProbeDiagnosis({
+      attempted: candidates.length,
+      succeeded,
+      speakerReady,
+      items,
+    });
+    return {
+      attempted: candidates.length,
+      succeeded,
+      failed,
+      speakerReady,
+      speakerModel,
+      diarizationProvider,
+      provider: localAsrProviderLabel(this.cfg),
+      diagnosis,
+      nextActions: buildDiarizationProbeNextActions(diagnosis, {
+        speakerModel,
+        provider: diarizationProvider,
+      }),
+      items,
+    };
+  }
+
+  async runAudioBackfillQueue(params?: {
+    queueId?: string;
+    now?: number;
+    batchSize?: number;
+    dryRun?: boolean;
+  }): Promise<AudioBackfillQueueRunResult | null> {
+    const now = params?.now ?? Date.now();
+    const file = await this.readAudioBackfillQueueFile();
+    const queueIndex = resolveAudioBackfillQueueIndex(file.queues, params?.queueId);
+    if (queueIndex < 0) {
+      return null;
+    }
+    let queue = file.queues[queueIndex];
+    const batchSize = Math.max(1, Math.min(params?.batchSize ?? 6, 50));
+    const pendingJobs = queue.jobs
+      .filter((job) => job.status === "pending" || job.status === "failed")
+      .sort((left, right) => left.capturedAt - right.capturedAt)
+      .slice(0, batchSize);
+    if (pendingJobs.length === 0) {
+      return {
+        queue: summarizeAudioBackfillQueue(queue),
+        attempted: 0,
+        succeeded: 0,
+        failed: 0,
+        skipped: 0,
+        items: [],
+      };
+    }
+
+    const runningEventIds = new Set(pendingJobs.map((job) => job.eventId));
+    queue = {
+      ...queue,
+      updatedAt: now,
+      dryRun: params?.dryRun ?? queue.dryRun,
+      jobs: queue.jobs.map((job) =>
+        runningEventIds.has(job.eventId)
+          ? {
+              ...job,
+              status: "running" as const,
+              attempts: job.attempts + 1,
+              startedAt: now,
+              updatedAt: now,
+            }
+          : job,
+      ),
+    };
+    file.queues[queueIndex] = queue;
+    await this.writeAudioBackfillQueueFile(file);
+
+    const candidates = await this.resolveAudioBackfillQueueCandidates(queue, pendingJobs);
+    const result = await this.processAudioBackfillCandidates({
+      candidates,
+      now,
+      provider: queue.provider,
+      diarization: queue.diarizationProvider
+        ? {
+            provider: queue.diarizationProvider,
+            speakerModel: queue.speakerModel ?? resolveDiarizationProbeSpeakerModel(queue.diarizationProvider),
+          }
+        : undefined,
+      dryRun: params?.dryRun ?? queue.dryRun,
+    });
+    const itemByEventId = new Map(result.items?.map((item) => [item.eventId, item]) ?? []);
+    const refreshedFile = await this.readAudioBackfillQueueFile();
+    const refreshedIndex = resolveAudioBackfillQueueIndex(refreshedFile.queues, queue.queueId);
+    if (refreshedIndex < 0) {
+      return null;
+    }
+    const refreshedQueue = refreshedFile.queues[refreshedIndex];
+    const nextQueue: AudioBackfillQueue = {
+      ...refreshedQueue,
+      updatedAt: now,
+      jobs: refreshedQueue.jobs.map((job) => {
+        if (!runningEventIds.has(job.eventId)) {
+          return job;
+        }
+        const item = itemByEventId.get(job.eventId);
+        if (!item) {
+          return {
+            ...job,
+            status: "failed",
+            updatedAt: now,
+            completedAt: now,
+            analysisFailureReason: "audio_backfill_queue_missing_result",
+          };
+        }
+        return {
+          ...job,
+          status: item.status,
+          updatedAt: now,
+          completedAt: now,
+          provider: item.provider,
+          transcriptPreview: item.transcriptPreview,
+          transcriptSegmentCount: item.transcriptSegmentCount,
+          speakerTimelineSegmentCount: item.speakerTimelineSegmentCount,
+          analysisFailureReason: item.analysisFailureReason,
+        };
+      }),
+    };
+    refreshedFile.queues[refreshedIndex] = nextQueue;
+    await this.writeAudioBackfillQueueFile(refreshedFile);
+    return {
+      queue: summarizeAudioBackfillQueue(nextQueue),
+      attempted: result.attempted,
+      succeeded: result.succeeded,
+      failed: result.failed,
+      skipped: result.skipped,
+      items: result.items ?? [],
+    };
+  }
+
+  private async resolveAudioBackfillQueue(queueId?: string): Promise<AudioBackfillQueue | null> {
+    const file = await this.readAudioBackfillQueueFile();
+    const index = resolveAudioBackfillQueueIndex(file.queues, queueId);
+    return index >= 0 ? file.queues[index] : null;
+  }
+
+  private async resolveAudioBackfillQueueCandidates(
+    queue: AudioBackfillQueue,
+    jobs: AudioBackfillQueueJob[],
+  ): Promise<AudioBackfillCandidate[]> {
+    const [events, artifacts] = await Promise.all([
+      this.stateStore.listEvents(),
+      this.stateStore.listArtifacts(),
+    ]);
+    const eventById = new Map(events.map((event) => [event.eventId, event]));
+    const artifactById = new Map(artifacts.map((artifact) => [artifact.artifactId, artifact]));
+    const eventsByDate = new Map<string, ClawSenseCaptureEvent[]>();
+    const windowByDateAndEventId = new Map<string, Map<string, ReviewWindow>>();
+
+    const getWindowByEventId = (date: string): Map<string, ReviewWindow> => {
+      const existing = windowByDateAndEventId.get(date);
+      if (existing) {
+        return existing;
+      }
+      const dateEvents = eventsByDate.get(date) ?? events.filter((event) => toLocalDateKey(event.capturedAt) === date);
+      eventsByDate.set(date, dateEvents);
+      const next = new Map(
+        groupWindows(dateEvents, artifactById).flatMap((window) =>
+          window.events.map((event) => [event.eventId, window] as const),
+        ),
+      );
+      windowByDateAndEventId.set(date, next);
+      return next;
+    };
+
+    return jobs.flatMap((job) => {
+      const event = eventById.get(job.eventId);
+      const artifact = artifactById.get(job.artifactId);
+      if (!event || !artifact || artifact.deletedAt || artifact.modality !== "audio") {
+        return [];
+      }
+      const date = queue.dates.includes(job.date) ? job.date : toLocalDateKey(event.capturedAt);
+      return [
+        {
+          event,
+          artifact,
+          date,
+          window: getWindowByEventId(date).get(event.eventId),
+        },
+      ];
+    });
+  }
+
+  private getAudioBackfillQueuePath(): string {
+    return path.join(this.stateStore.getStateDir(), "plugins", "clawsense", "asr-backfill-queues.json");
+  }
+
+  private async readAudioBackfillQueueFile(): Promise<AudioBackfillQueueFile> {
+    try {
+      const raw = await fs.readFile(this.getAudioBackfillQueuePath(), "utf8");
+      const parsed = JSON.parse(raw) as Partial<AudioBackfillQueueFile>;
+      return {
+        version: 1,
+        queues: Array.isArray(parsed.queues)
+          ? parsed.queues
+              .map((queue) => normalizeAudioBackfillQueue(queue))
+              .filter((queue): queue is AudioBackfillQueue => Boolean(queue))
+          : [],
+      };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        this.logger.warn(`[clawsense] failed to read ASR queue file: ${String(error)}`);
+      }
+      return { version: 1, queues: [] };
+    }
+  }
+
+  private async writeAudioBackfillQueueFile(file: AudioBackfillQueueFile): Promise<void> {
+    const queuePath = this.getAudioBackfillQueuePath();
+    await fs.mkdir(path.dirname(queuePath), { recursive: true });
+    const tempPath = `${queuePath}.${process.pid}.${Date.now()}.${randomId()}.tmp`;
+    await fs.writeFile(tempPath, `${JSON.stringify({ version: 1, queues: file.queues }, null, 2)}\n`, "utf8");
+    await fs.rename(tempPath, queuePath);
+  }
+
+  private async selectAudioBackfillCandidates(params: {
+    now: number;
+    dates?: string[];
+    maxArtifacts: number;
+    provider: AudioBackfillProvider;
+    includeTranscribed: boolean;
+  }): Promise<AudioBackfillCandidate[]> {
+    const dates =
+      params.dates && params.dates.length > 0
+        ? Array.from(new Set(params.dates.map((date) => this.normalizeDateInput(date))))
+        : [toLocalDateKey(params.now), toLocalDateKey(params.now - 24 * 60 * 60 * 1000)];
     const artifacts = await this.stateStore.listArtifacts();
     const artifactById = new Map(artifacts.map((artifact) => [artifact.artifactId, artifact]));
-    const candidates = (
+    return (
       await Promise.all(
         dates.map(async (date) => {
           const dateEvents = await this.stateStore.listEventsByDate(date);
@@ -1829,7 +2642,10 @@ export class ClawSenseReviewEngine {
           );
           const dateCandidates: AudioBackfillCandidate[] = [];
           for (const event of dateEvents) {
-            if (!shouldAttemptAudioBackfill(event, now)) {
+            if (!shouldAttemptAudioBackfillCandidate(event, params.now, {
+              provider: params.provider,
+              includeTranscribed: params.includeTranscribed,
+            })) {
               continue;
             }
             const artifact = artifactById.get(event.artifactId);
@@ -1850,56 +2666,144 @@ export class ClawSenseReviewEngine {
       .flat()
       .sort((left, right) => {
         return (
-          scoreAudioBackfillCandidate({ ...right, now }) - scoreAudioBackfillCandidate({ ...left, now }) ||
+          scoreAudioBackfillCandidate({ ...right, now: params.now }) -
+            scoreAudioBackfillCandidate({ ...left, now: params.now }) ||
           left.artifact.sizeBytes - right.artifact.sizeBytes ||
           right.event.capturedAt - left.event.capturedAt
         );
       })
-      .slice(0, maxArtifacts);
+      .slice(0, params.maxArtifacts);
+  }
 
-    if (candidates.length === 0) {
-      return { attempted: 0, succeeded: 0, failed: 0, skipped: 0 };
-    }
-
+  private async processAudioBackfillCandidates(params: {
+    candidates: AudioBackfillCandidate[];
+    now: number;
+    provider: AudioBackfillProvider;
+    diarization?: AudioBackfillDiarizationOptions;
+    dryRun: boolean;
+  }): Promise<{
+    attempted: number;
+    succeeded: number;
+    failed: number;
+    skipped: number;
+    dryRun?: boolean;
+    provider?: AudioBackfillProvider;
+    items?: AudioBackfillResultItem[];
+  }> {
+    const primaryProviderId = resolvePrimaryMultimodalModel(this.cfg, this.runtimeConfig).providerId;
+    const fallbackSttProviderId = this.resolveFallbackSttProviderId(primaryProviderId);
     let attempted = 0;
     let succeeded = 0;
     let failed = 0;
     let skipped = 0;
+    const items: AudioBackfillResultItem[] = [];
+    const localBatchAttempts =
+      params.provider === "local-asr" && params.candidates.length > 1
+        ? await transcribeAudioBatchWithLocalAsr({
+            cfg: this.cfg,
+            items: params.candidates.map((candidate) => ({
+              id: candidate.event.eventId,
+              filePath: candidate.artifact.storagePath,
+            })),
+            resolveStateDir: () => this.stateStore.getStateDir(),
+            logger: this.logger,
+            extraEnv: buildAudioBackfillDiarizationEnv(params.diarization),
+          })
+        : new Map<string, AudioTranscriptionAttempt>();
 
-    for (const candidate of candidates) {
+    for (const candidate of params.candidates) {
       attempted += 1;
       try {
-        const body = await fs.readFile(candidate.artifact.storagePath);
-        const asrAttempt = await transcribeAudioWithFallbackModel({
-          cfg: this.cfg,
-          runtimeConfig: this.runtimeConfig,
-          body,
-          fileName: candidate.artifact.fileName,
-          mime: candidate.artifact.mime,
-          providerId: fallbackSttProviderId,
-          openai: this.resolveMultimodalClient(fallbackSttProviderId),
-        });
-        if (normalizeSemanticText(asrAttempt.transcript)) {
+        const asrAttempt =
+          localBatchAttempts.get(candidate.event.eventId) ??
+          await this.runAudioBackfillAttempt({
+            candidate,
+            provider: params.provider,
+            diarization: params.diarization,
+            fallbackSttProviderId,
+          });
+        const transcriptText = normalizeSemanticText(asrAttempt.transcript);
+        const transcriptSegmentCount = asrAttempt.transcriptSegments?.length ?? 0;
+        const speakerTimelineSegmentCount = asrAttempt.speakerTimelineSegments?.length ?? 0;
+        if (transcriptText) {
+          const transcriptForWrite = normalizeSemanticText(candidate.event.transcript)
+            ? candidate.event.transcript
+            : asrAttempt.transcript;
+          if (params.dryRun) {
+            succeeded += 1;
+            items.push({
+              eventId: candidate.event.eventId,
+              artifactId: candidate.artifact.artifactId,
+              fileName: candidate.artifact.fileName,
+              provider: asrAttempt.analysisProvider,
+              status: "succeeded",
+              dryRun: true,
+              transcriptPreview: truncateForLog(transcriptText, 120),
+              transcriptSegmentCount,
+              speakerTimelineSegmentCount,
+            });
+            continue;
+          }
           const result = await this.stateStore.backfillCaptureAnalysis({
             artifactId: candidate.artifact.artifactId,
-            transcript: asrAttempt.transcript,
+            transcript: transcriptForWrite,
+            transcriptSegments: asrAttempt.transcriptSegments,
+            speakerTimelineSegments: asrAttempt.speakerTimelineSegments,
             analysisProvider: asrAttempt.analysisProvider,
             analysisStatus: "succeeded",
             analysisFailureReason: undefined,
-            sttProvider: inferBackfillSttProvider(asrAttempt.analysisProvider),
-            attemptedAt: now,
+            sttProvider: asrAttempt.analysisProvider.startsWith("local-asr:")
+              ? "local-asr"
+              : inferBackfillSttProvider(asrAttempt.analysisProvider),
+            attemptedAt: params.now,
           });
           if (result.updated) {
             succeeded += 1;
+            items.push({
+              eventId: candidate.event.eventId,
+              artifactId: candidate.artifact.artifactId,
+              fileName: candidate.artifact.fileName,
+              provider: asrAttempt.analysisProvider,
+              status: "succeeded",
+              transcriptPreview: truncateForLog(transcriptText, 120),
+              transcriptSegmentCount,
+              speakerTimelineSegmentCount,
+            });
             this.logger.info(
               `[clawsense] audio backfill captured transcript eventId=${candidate.event.eventId} artifactId=${candidate.artifact.artifactId} bytes=${candidate.artifact.sizeBytes}`,
             );
           } else {
             skipped += 1;
+            items.push({
+              eventId: candidate.event.eventId,
+              artifactId: candidate.artifact.artifactId,
+              fileName: candidate.artifact.fileName,
+              provider: asrAttempt.analysisProvider,
+              status: "skipped",
+              transcriptPreview: truncateForLog(transcriptText, 120),
+              transcriptSegmentCount,
+              speakerTimelineSegmentCount,
+            });
           }
           continue;
         }
 
+        if (params.dryRun) {
+          failed += 1;
+          items.push({
+            eventId: candidate.event.eventId,
+            artifactId: candidate.artifact.artifactId,
+            fileName: candidate.artifact.fileName,
+            provider: asrAttempt.analysisProvider,
+            status: "failed",
+            dryRun: true,
+            analysisFailureReason: combineFailureReasons(
+              candidate.event.analysisFailureReason,
+              asrAttempt.analysisFailureReason,
+            ),
+          });
+          continue;
+        }
         await this.stateStore.noteAudioBackfillAttempt({
           artifactId: candidate.artifact.artifactId,
           analysisProvider: asrAttempt.analysisProvider,
@@ -1907,10 +2811,34 @@ export class ClawSenseReviewEngine {
             candidate.event.analysisFailureReason,
             asrAttempt.analysisFailureReason,
           ),
-          attemptedAt: now,
+          attemptedAt: params.now,
         });
         failed += 1;
+        items.push({
+          eventId: candidate.event.eventId,
+          artifactId: candidate.artifact.artifactId,
+          fileName: candidate.artifact.fileName,
+          provider: asrAttempt.analysisProvider,
+          status: "failed",
+          analysisFailureReason: combineFailureReasons(
+            candidate.event.analysisFailureReason,
+            asrAttempt.analysisFailureReason,
+          ),
+        });
       } catch (error) {
+        if (params.dryRun) {
+          failed += 1;
+          items.push({
+            eventId: candidate.event.eventId,
+            artifactId: candidate.artifact.artifactId,
+            fileName: candidate.artifact.fileName,
+            provider: "audio-backfill",
+            status: "failed",
+            dryRun: true,
+            analysisFailureReason: `audio_backfill_error:${String(error)}`,
+          });
+          continue;
+        }
         await this.stateStore.noteAudioBackfillAttempt({
           artifactId: candidate.artifact.artifactId,
           analysisProvider: "audio-backfill",
@@ -1918,13 +2846,83 @@ export class ClawSenseReviewEngine {
             candidate.event.analysisFailureReason,
             `audio_backfill_error:${String(error)}`,
           ),
-          attemptedAt: now,
+          attemptedAt: params.now,
         });
         failed += 1;
+        items.push({
+          eventId: candidate.event.eventId,
+          artifactId: candidate.artifact.artifactId,
+          fileName: candidate.artifact.fileName,
+          provider: "audio-backfill",
+          status: "failed",
+          analysisFailureReason: `audio_backfill_error:${String(error)}`,
+        });
       }
     }
 
-    return { attempted, succeeded, failed, skipped };
+    return {
+      attempted,
+      succeeded,
+      failed,
+      skipped,
+      ...(params.dryRun || params.provider !== "auto"
+        ? { dryRun: params.dryRun || undefined, provider: params.provider, items }
+        : {}),
+    };
+  }
+
+  private async runAudioBackfillAttempt(params: {
+    candidate: AudioBackfillCandidate;
+    provider: AudioBackfillProvider;
+    diarization?: AudioBackfillDiarizationOptions;
+    fallbackSttProviderId?: string;
+  }): Promise<AudioTranscriptionAttempt> {
+    const tryLocalAsr = params.provider === "auto" || params.provider === "local-asr";
+    let localAttempt: AudioTranscriptionAttempt | null = null;
+    if (tryLocalAsr) {
+      localAttempt = await transcribeAudioWithLocalAsr({
+        cfg: this.cfg,
+        filePath: params.candidate.artifact.storagePath,
+        resolveStateDir: () => this.stateStore.getStateDir(),
+        logger: this.logger,
+        extraEnv: buildAudioBackfillDiarizationEnv(params.diarization),
+      });
+      if (normalizeSemanticText(localAttempt.transcript) || params.provider === "local-asr") {
+        return localAttempt;
+      }
+    }
+
+    if (params.provider === "local-asr") {
+      return localAttempt ?? {
+        analysisProvider: "local-asr:none",
+        analysisFailureReason: "query_time_local_asr_disabled",
+      };
+    }
+
+    const body = await fs.readFile(params.candidate.artifact.storagePath);
+    const compatibleAttempt = await transcribeAudioWithFallbackModel({
+      cfg: this.cfg,
+      runtimeConfig: this.runtimeConfig,
+      body,
+      fileName: params.candidate.artifact.fileName,
+      mime: params.candidate.artifact.mime,
+      providerId: params.fallbackSttProviderId,
+      openai: this.resolveMultimodalClient(params.fallbackSttProviderId),
+    });
+    if (
+      localAttempt?.analysisFailureReason &&
+      localAttempt.analysisFailureReason !== "query_time_local_asr_disabled" &&
+      !normalizeSemanticText(compatibleAttempt.transcript)
+    ) {
+      return {
+        ...compatibleAttempt,
+        analysisFailureReason: combineFailureReasons(
+          localAttempt.analysisFailureReason,
+          compatibleAttempt.analysisFailureReason,
+        ),
+      };
+    }
+    return compatibleAttempt;
   }
 
   async renderLibraryPage(date: string, artifactUrlBase: string, libraryUrlBase: string): Promise<string> {
@@ -3629,47 +4627,117 @@ export class ClawSenseReviewEngine {
       }
     }
 
+    let parsed: ReviewGenerationPayload | null = null;
+    let generationFailure: unknown;
     try {
       const response = await reviewOpenai.responses.create({
         model,
         input: [{ role: "user", content } as any],
       });
-      const parsed = safeParseJson<{ summary: string; sections: ClawSenseReviewSection[]; keyWindowIds?: string[] }>(
-        response.output_text,
-      );
-      if (!parsed || !parsed.summary || !Array.isArray(parsed.sections)) {
-        return null;
-      }
-
-      const keyWindowIds = dedupeStrings(
-        (parsed.keyWindowIds ?? []).filter((windowId) => keyWindows.some((window) => window.windowId === windowId)),
-      );
-      const selectedWindowIds = keyWindowIds.length
-        ? keyWindowIds
-        : keyWindows.map((window) => window.windowId).slice(0, 3);
-      const keyEventIds = windows
-        .filter((window) => selectedWindowIds.includes(window.windowId))
-        .flatMap((window) => window.events.map((event) => event.eventId));
-      const keyArtifactIds = windows
-        .filter((window) => selectedWindowIds.includes(window.windowId))
-        .flatMap((window) => window.artifacts.map((artifact) => artifact.artifactId));
-
-      return {
-        reviewId: randomId(),
-        date,
-        generatedAt: Date.now(),
-        mode: "multimodal",
-        model,
-        summary: parsed.summary.trim() || fallback.summary,
-        sections: normalizeReviewSections(parsed.sections, fallback.sections),
-        keyEventIds: keyEventIds.length ? keyEventIds : fallback.keyEventIds,
-        keyArtifactIds: keyArtifactIds.length ? keyArtifactIds : fallback.keyArtifactIds,
-      };
+      parsed = parseReviewGenerationPayload(response.output_text);
     } catch (error) {
-      this.logger.warn(`[clawsense] multimodal daily review failed, using heuristic fallback: ${String(error)}`);
+      generationFailure = error;
+    }
+
+    if (!parsed) {
+      try {
+        const chat = await reviewOpenai.chat.completions.create({
+          model,
+          messages: [
+            {
+              role: "user",
+              content: toReviewChatContent(content),
+            },
+          ],
+        });
+        parsed = parseReviewGenerationPayload(extractChatCompletionText(chat));
+      } catch (error) {
+        generationFailure = error;
+      }
+    }
+
+    if (!parsed) {
+      if (generationFailure) {
+        this.logger.warn(`[clawsense] multimodal daily review failed, using heuristic fallback: ${String(generationFailure)}`);
+      }
       return null;
     }
+
+    const keyWindowIds = dedupeStrings(
+      (parsed.keyWindowIds ?? []).filter((windowId) => keyWindows.some((window) => window.windowId === windowId)),
+    );
+    const selectedWindowIds = keyWindowIds.length
+      ? keyWindowIds
+      : keyWindows.map((window) => window.windowId).slice(0, 3);
+    const keyEventIds = windows
+      .filter((window) => selectedWindowIds.includes(window.windowId))
+      .flatMap((window) => window.events.map((event) => event.eventId));
+    const keyArtifactIds = windows
+      .filter((window) => selectedWindowIds.includes(window.windowId))
+      .flatMap((window) => window.artifacts.map((artifact) => artifact.artifactId));
+
+    return {
+      reviewId: randomId(),
+      date,
+      generatedAt: Date.now(),
+      mode: "multimodal",
+      model,
+      summary: parsed.summary.trim() || fallback.summary,
+      sections: normalizeReviewSections(parsed.sections, fallback.sections),
+      keyEventIds: keyEventIds.length ? keyEventIds : fallback.keyEventIds,
+      keyArtifactIds: keyArtifactIds.length ? keyArtifactIds : fallback.keyArtifactIds,
+    };
   }
+}
+
+function parseReviewGenerationPayload(text: string | undefined): ReviewGenerationPayload | null {
+  const parsed = safeParseJson<ReviewGenerationPayload>(text ?? "");
+  if (!parsed || !parsed.summary || !Array.isArray(parsed.sections)) {
+    return null;
+  }
+  return parsed;
+}
+
+function toReviewChatContent(content: any[]): any[] {
+  const converted: any[] = [];
+  for (const part of content) {
+    if (part?.type === "input_text" && typeof part.text === "string") {
+      converted.push({ type: "text", text: part.text });
+      continue;
+    }
+    if (part?.type === "input_image" && typeof part.image_url === "string") {
+      converted.push({
+        type: "image_url",
+        image_url: {
+          url: part.image_url,
+          detail: part.detail ?? "auto",
+        },
+      });
+    }
+  }
+  return converted;
+}
+
+function extractChatCompletionText(completion: unknown): string {
+  const content = (completion as { choices?: Array<{ message?: { content?: unknown } }> })?.choices?.[0]?.message?.content;
+  if (typeof content === "string") {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === "string") {
+          return part;
+        }
+        if (part && typeof part === "object" && "text" in part && typeof part.text === "string") {
+          return part.text;
+        }
+        return "";
+      })
+      .filter(Boolean)
+      .join("\n");
+  }
+  return "";
 }
 
 function buildHeuristicReview(
@@ -5196,6 +6264,111 @@ function doesWindowMatchHistoricalProjectTarget(
   );
 }
 
+function scoreHistoricalProjectWindow(window: ReviewWindow, target: HistoricalProjectTarget): number {
+  const projectHitCount = window.events.reduce(
+    (count, event) => count + event.projectRefs.filter((projectRef) => target.projectRefs.has(projectRef)).length,
+    0,
+  );
+  const tagHitCount = window.events.reduce(
+    (count, event) => count + event.tags.filter((tag) => target.tags.has(tag)).length,
+    0,
+  );
+  const hasTranscript = isUsableTranscriptText(window.transcriptText);
+  const summary = normalizeSemanticText(window.primarySummary);
+  const looksVisuallyEmpty = /(全黑|黑屏|纯色背景|没有任何可见|缺乏可辨识|无法观察到任何)/.test(summary);
+  return (
+    projectHitCount * 10 +
+    tagHitCount * 3 +
+    (hasTranscript ? 24 : 0) +
+    (window.audioCount > 0 ? 8 : 0) +
+    (isUsableVisualSummaryText(summary) ? 2 : 0) -
+    (looksVisuallyEmpty ? 12 : 0)
+  );
+}
+
+function selectHistoricalMemoryCardsForWindows(params: {
+  memoryCards: ClawSenseMemoryCard[];
+  matchedWindows: ReviewWindow[];
+  targetTerms: string[];
+}): HistoricalMemoryCardSummary[] {
+  if (params.memoryCards.length === 0 || params.matchedWindows.length === 0) {
+    return [];
+  }
+  const windowIds = new Set(params.matchedWindows.map((window) => window.windowId));
+  const matchedStartAt = params.matchedWindows.reduce(
+    (earliest, window) => Math.min(earliest, window.startedAt),
+    Number.POSITIVE_INFINITY,
+  );
+  const matchedEndAt = params.matchedWindows.reduce((latest, window) => Math.max(latest, window.endedAt), 0);
+  const targetTerms = dedupeStrings(params.targetTerms.map((term) => normalizeSemanticText(term).toLowerCase()).filter(Boolean));
+
+  return params.memoryCards
+    .map((card) => {
+      const evidenceWindowHits = card.evidence.windowIds.filter((windowId) => windowIds.has(windowId)).length;
+      const text = normalizeSemanticText(
+        [
+          card.title,
+          card.summary,
+          ...card.keywords,
+          ...card.evidence.taskHints,
+          ...card.evidence.transcriptExcerpts,
+        ].join(" "),
+      ).toLowerCase();
+      const termHits = targetTerms.filter((term) => term.length >= 2 && text.includes(term)).length;
+      const overlapsTime = card.endAt >= matchedStartAt && card.startAt <= matchedEndAt;
+      const score = evidenceWindowHits * 24 + termHits * 4 + (overlapsTime ? 2 : 0) + (card.confidence === "medium" ? 1 : 0);
+      return { card, score, evidenceWindowHits };
+    })
+    .filter((item) => item.evidenceWindowHits > 0 || item.score >= 8)
+    .sort(
+      (left, right) =>
+        right.score - left.score ||
+        memoryCardKindPriority(left.card.kind) - memoryCardKindPriority(right.card.kind) ||
+        right.card.lastSeenAt - left.card.lastSeenAt,
+    )
+    .slice(0, 6)
+    .map(({ card }) => ({
+      cardId: card.cardId,
+      kind: card.kind,
+      title: card.title,
+      summary: card.summary,
+      confidence: card.confidence,
+      timeRanges: card.evidence.timeRanges.slice(0, 4),
+      taskHints: card.evidence.taskHints.slice(0, 4),
+      transcriptExcerpts: card.evidence.transcriptExcerpts.slice(0, 3),
+    }));
+}
+
+function buildHistoricalIdentityTargetTerms(target: HistoricalIdentityTarget): string[] {
+  if (target.kind === "person") {
+    return [
+      target.ref,
+      target.displayName,
+      target.relationship ?? "",
+      target.notes ?? "",
+      target.nextWatchFor ?? "",
+      ...Array.from(target.personRefs),
+    ];
+  }
+  return [
+    target.ref,
+    target.displayName,
+    target.relationship ?? "",
+    target.notes ?? "",
+    target.nextWatchFor ?? "",
+    ...Array.from(target.windowIds),
+  ];
+}
+
+function buildHistoricalProjectTargetTerms(target: HistoricalProjectTarget): string[] {
+  return [
+    target.ref,
+    target.label,
+    ...Array.from(target.projectRefs),
+    ...Array.from(target.tags),
+  ];
+}
+
 function buildFallbackSections(
   date: string,
   windows: ReviewWindow[],
@@ -5608,6 +6781,18 @@ const PROJECT_LABEL_ALIASES: Record<string, string> = {
   lab_work: "实验任务",
   launch: "上线主线",
   launch_checklist: "上线清单",
+  ai_coaching: "AI 陪练",
+  "ai-coaching": "AI 陪练",
+  corpus_sync: "语料同步",
+  corpus: "语料同步",
+  "data-sync": "数据同步",
+  assessment_rubric: "考核规则",
+  assessment: "考核规则",
+  rubric: "评分规则",
+  ai_report_optimization: "AI 陪练报告优化",
+  "ai-report": "AI 陪练报告",
+  training_arrangement: "培训安排",
+  "training-plan": "培训安排",
 };
 
 function isLowValueText(value: string): boolean {
@@ -5772,6 +6957,463 @@ function shouldAttemptAudioBackfill(event: ClawSenseCaptureEvent, now: number): 
   return true;
 }
 
+function shouldAttemptAudioBackfillCandidate(
+  event: ClawSenseCaptureEvent,
+  now: number,
+  params: { provider: AudioBackfillProvider; includeTranscribed: boolean },
+): boolean {
+  if (event.modality !== "audio") {
+    return false;
+  }
+  const hasTranscript = Boolean(normalizeSemanticText(event.transcript));
+  const hasSegments = Array.isArray(event.transcriptSegments) && event.transcriptSegments.length > 0;
+  if (hasTranscript) {
+    return (
+      params.includeTranscribed &&
+      (params.provider === "local-asr" || params.provider === "auto") &&
+      !hasSegments
+    );
+  }
+  return shouldAttemptAudioBackfill(event, now);
+}
+
+function resolveAudioBackfillMaxArtifacts(
+  requested: number | undefined,
+  params: { dryRun: boolean },
+): number {
+  const fallback = 2;
+  const limit = typeof requested === "number" ? (params.dryRun ? 50 : 20) : 6;
+  return Math.max(1, Math.min(requested ?? fallback, limit));
+}
+
+function resolveAudioBackfillQueueMaxJobs(
+  requested: number | undefined,
+  params: { dryRun: boolean },
+): number {
+  const fallback = params.dryRun ? 50 : 24;
+  const limit = params.dryRun ? 200 : 100;
+  return Math.max(1, Math.min(requested ?? fallback, limit));
+}
+
+function resolveAudioBackfillQueueIndex(queues: AudioBackfillQueue[], queueId?: string): number {
+  if (queues.length === 0) {
+    return -1;
+  }
+  if (!queueId) {
+    return 0;
+  }
+  return queues.findIndex((queue) => queue.queueId === queueId);
+}
+
+function summarizeAudioBackfillQueue(queue: AudioBackfillQueue): AudioBackfillQueueSummary {
+  return {
+    queueId: queue.queueId,
+    createdAt: queue.createdAt,
+    updatedAt: queue.updatedAt,
+    dates: queue.dates,
+    provider: queue.provider,
+    diarizationProvider: queue.diarizationProvider,
+    speakerModel: queue.speakerModel,
+    includeTranscribed: queue.includeTranscribed,
+    dryRun: queue.dryRun,
+    stats: countAudioBackfillQueueJobs(queue.jobs),
+    audio: summarizeAudioBackfillQueueAudio(queue.jobs),
+    recentJobs: summarizeAudioBackfillQueueJobs(queue.jobs),
+  };
+}
+
+function summarizeAudioBackfillQueueAudio(jobs: AudioBackfillQueueJob[]): AudioBackfillQueueSummary["audio"] {
+  const remainingStatuses = new Set<AudioBackfillQueueJobStatus>(["pending", "running", "failed"]);
+  return jobs.reduce(
+    (summary, job) => {
+      const clipMs = Math.max(0, job.clipMs ?? 0);
+      const voicedMs = Math.max(0, job.voicedMs ?? 0);
+      summary.totalClipMs += clipMs;
+      summary.totalVoicedMs += voicedMs;
+      if (remainingStatuses.has(job.status)) {
+        summary.remainingClipMs += clipMs;
+        summary.remainingVoicedMs += voicedMs;
+      }
+      return summary;
+    },
+    {
+      totalClipMs: 0,
+      remainingClipMs: 0,
+      totalVoicedMs: 0,
+      remainingVoicedMs: 0,
+    },
+  );
+}
+
+function summarizeAudioBackfillQueueJobs(
+  jobs: AudioBackfillQueueJob[],
+): AudioBackfillQueueSummary["recentJobs"] {
+  const statusPriority: Record<AudioBackfillQueueJobStatus, number> = {
+    failed: 0,
+    running: 1,
+    pending: 2,
+    skipped: 3,
+    succeeded: 4,
+  };
+  return jobs
+    .slice()
+    .sort(
+      (left, right) =>
+        statusPriority[left.status] - statusPriority[right.status] ||
+        right.updatedAt - left.updatedAt ||
+        left.capturedAt - right.capturedAt,
+    )
+    .slice(0, 8)
+    .map((job) => ({
+      jobId: job.jobId,
+      eventId: job.eventId,
+      artifactId: job.artifactId,
+      date: job.date,
+      fileName: job.fileName,
+      capturedAt: job.capturedAt,
+      clipMs: job.clipMs,
+      voicedMs: job.voicedMs,
+      status: job.status,
+      attempts: job.attempts,
+      provider: job.provider,
+      transcriptPreview: job.transcriptPreview,
+      transcriptSegmentCount: job.transcriptSegmentCount,
+      speakerTimelineSegmentCount: job.speakerTimelineSegmentCount,
+      analysisFailureReason: job.analysisFailureReason,
+    }));
+}
+
+function resolveDiarizationProbeDiagnosis(params: {
+  attempted: number;
+  succeeded: number;
+  speakerReady: boolean;
+  items: DiarizationProbeItem[];
+}): DiarizationProbeDiagnosis {
+  if (params.attempted === 0) {
+    return "no-audio-candidates";
+  }
+  if (params.speakerReady) {
+    return "speaker-ready";
+  }
+  if (params.succeeded === 0) {
+    return "asr-failed";
+  }
+  const hasTranscriptOrSegments = params.items.some(
+    (item) => Boolean(item.transcriptPreview?.trim()) || item.transcriptSegmentCount > 0,
+  );
+  return hasTranscriptOrSegments ? "asr-ok-speaker-missing" : "asr-empty";
+}
+
+function buildDiarizationProbeNextActions(
+  diagnosis: DiarizationProbeDiagnosis,
+  params: { speakerModel: string; provider: DiarizationProbeProvider },
+): string[] {
+  switch (diagnosis) {
+    case "speaker-ready":
+      return [
+        "可选择少量真实音频写回验证 speakerLabel 是否能进入 taskAttribution。",
+      ];
+    case "asr-ok-speaker-missing":
+      return [
+        `当前 ${params.provider}:${params.speakerModel} 没有产出 speaker labels；继续评估 WhisperX / pyannote / FunASR / hybrid 其他 speaker 模型组合。`,
+        "在 speaker 未解决前，任务归属继续保守表达，不要把“我/你/我们”自动归为用户本人。",
+      ];
+    case "asr-empty":
+      return [
+        "ASR 没有产出可用文本；先检查音频是否静音、过短、格式异常或 VAD 切分过碎。",
+      ];
+    case "asr-failed":
+      return [
+        "本地 ASR 命令失败；先运行 clawsense asr-status，并查看 items[].analysisFailureReason。",
+      ];
+    case "no-audio-candidates":
+      return [
+        "目标日期没有可探测音频；先确认媒体库和 artifact retention，再运行 asr-queue plan。",
+      ];
+  }
+}
+
+function normalizeDiarizationProbeProvider(value: unknown): DiarizationProbeProvider {
+  const normalized = firstString(value)?.trim().toLowerCase();
+  if (normalized === "whisperx" || normalized === "whisper-x") {
+    return "whisperx";
+  }
+  if (normalized === "pyannote" || normalized === "pyannote.audio") {
+    return "pyannote";
+  }
+  if (
+    normalized === "hybrid" ||
+    normalized === "whisper-funasr" ||
+    normalized === "whisperx-funasr" ||
+    normalized === "whisperx+funasr"
+  ) {
+    return "hybrid";
+  }
+  if (normalized === "local-asr" || normalized === "command" || normalized === "custom") {
+    return "local-asr";
+  }
+  return "funasr";
+}
+
+function resolveDiarizationProbeSpeakerModel(
+  provider: DiarizationProbeProvider,
+  requested?: string,
+): string {
+  const trimmed = requested?.trim();
+  if (trimmed) {
+    return trimmed;
+  }
+  if (provider === "whisperx") {
+    return "pyannote/speaker-diarization";
+  }
+  if (provider === "pyannote") {
+    return "pyannote/speaker-diarization-3.1";
+  }
+  if (provider === "hybrid") {
+    return "whisperx+funasr:cam++";
+  }
+  if (provider === "local-asr") {
+    return "external-command";
+  }
+  return "cam++";
+}
+
+function buildDiarizationProbeEnv(
+  provider: DiarizationProbeProvider,
+  speakerModel: string,
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    CLAWSENSE_DIARIZATION_PROVIDER: provider,
+    CLAWSENSE_DIARIZATION_SPEAKER_MODEL: speakerModel,
+    CLAWSENSE_FUNASR_SENTENCE_TIMESTAMP: "1",
+  };
+  if (provider === "funasr") {
+    env.CLAWSENSE_FUNASR_SPK_MODEL = speakerModel;
+  }
+  if (provider === "hybrid") {
+    const speakerModelParts = speakerModel.split(":");
+    env.CLAWSENSE_HYBRID_SPEAKER_MODEL = speakerModel.includes(":")
+      ? speakerModelParts[speakerModelParts.length - 1] ?? speakerModel
+      : speakerModel;
+  }
+  return env;
+}
+
+function resolveAudioBackfillDiarizationOptions(params?: {
+  diarizationProvider?: string;
+  speakerModel?: string;
+}): AudioBackfillDiarizationOptions | undefined {
+  const provider = normalizeOptionalDiarizationProbeProvider(params?.diarizationProvider);
+  if (!provider) {
+    return undefined;
+  }
+  return {
+    provider,
+    speakerModel: resolveDiarizationProbeSpeakerModel(provider, params?.speakerModel),
+  };
+}
+
+function normalizeOptionalDiarizationProbeProvider(value: unknown): DiarizationProbeProvider | undefined {
+  return firstString(value) ? normalizeDiarizationProbeProvider(value) : undefined;
+}
+
+function buildAudioBackfillDiarizationEnv(
+  diarization?: AudioBackfillDiarizationOptions,
+): NodeJS.ProcessEnv | undefined {
+  return diarization ? buildDiarizationProbeEnv(diarization.provider, diarization.speakerModel) : undefined;
+}
+
+function buildAudioBackfillWorkerNextActions(params: {
+  enabled: boolean;
+  activeQueue: AudioBackfillQueueSummary | null;
+  stats: AudioBackfillWorkerStatus["stats"];
+}): string[] {
+  if (!params.enabled) {
+    return [
+      "如需自动补强历史音频，配置 plugins.entries.clawsense.config.asrWorkerEnabled=true 后重启网关。",
+      "也可以先手动运行 openclaw clawsense asr-worker run-once --dry-run 验证候选和耗时。",
+    ];
+  }
+  if (!params.activeQueue && params.stats.remainingJobs === 0) {
+    return [
+      "当前没有待处理 ASR 队列；保持手机上传后再观察 worker status。",
+    ];
+  }
+  if (params.stats.failedJobs > 0) {
+    return [
+      "存在 failed ASR job；查看 latestQueues[].recentJobs[].analysisFailureReason 后重新 run-once。",
+    ];
+  }
+  if (!params.activeQueue && params.stats.remainingJobs > 0) {
+    return [
+      "当前没有可运行的 pending/running ASR job；若只剩历史 failed job，请查看失败原因或重新规划队列。",
+    ];
+  }
+  return [
+    "worker 正在按队列补强音频；可用 asr-worker status 观察 remainingClipMs 和 recentJobs。",
+  ];
+}
+
+function buildRecentDateKeys(now: number, lookbackDays: number): string[] {
+  const days = Math.max(1, Math.min(Math.round(lookbackDays), 14));
+  return Array.from({ length: days }, (_unused, index) => toLocalDateKey(now - index * 24 * 60 * 60 * 1000));
+}
+
+function countAudioBackfillQueueJobs(jobs: AudioBackfillQueueJob[]): AudioBackfillQueueStats {
+  const stats: AudioBackfillQueueStats = {
+    pending: 0,
+    running: 0,
+    succeeded: 0,
+    failed: 0,
+    skipped: 0,
+    total: jobs.length,
+    remaining: 0,
+  };
+  for (const job of jobs) {
+    stats[job.status] += 1;
+  }
+  stats.remaining = stats.pending + stats.running + stats.failed;
+  return stats;
+}
+
+function findActiveAudioBackfillQueue(
+  queues: AudioBackfillQueue[],
+  params: { dryRun: boolean },
+): AudioBackfillQueue | undefined {
+  return queues.find((queue) => queue.dryRun === params.dryRun && hasRunnableAudioBackfillJobs(queue));
+}
+
+function hasRunnableAudioBackfillJobs(queue: AudioBackfillQueue): boolean {
+  return queue.jobs.some((job) => job.status === "pending" || job.status === "running");
+}
+
+function normalizeAudioBackfillQueue(raw: unknown): AudioBackfillQueue | null {
+  if (!isRecord(raw)) {
+    return null;
+  }
+  const queueId = firstString(raw.queueId);
+  if (!queueId) {
+    return null;
+  }
+  const now = Date.now();
+  const provider = normalizeAudioBackfillQueueProvider(raw.provider);
+  const diarizationProvider = normalizeOptionalDiarizationProbeProvider(raw.diarizationProvider);
+  return {
+    queueId,
+    createdAt: readFiniteNumber(raw.createdAt) ?? now,
+    updatedAt: readFiniteNumber(raw.updatedAt) ?? readFiniteNumber(raw.createdAt) ?? now,
+    dates: Array.isArray(raw.dates) ? raw.dates.flatMap((date) => firstString(date) ?? []) : [],
+    provider,
+    ...(diarizationProvider
+      ? {
+          diarizationProvider,
+          speakerModel: firstString(raw.speakerModel) ?? resolveDiarizationProbeSpeakerModel(diarizationProvider),
+        }
+      : {}),
+    includeTranscribed: Boolean(raw.includeTranscribed),
+    dryRun: Boolean(raw.dryRun),
+    jobs: Array.isArray(raw.jobs)
+      ? raw.jobs.flatMap((job) => normalizeAudioBackfillQueueJob(job))
+      : [],
+  };
+}
+
+function normalizeAudioBackfillQueueJob(raw: unknown): AudioBackfillQueueJob[] {
+  if (!isRecord(raw)) {
+    return [];
+  }
+  const jobId = firstString(raw.jobId, raw.eventId);
+  const eventId = firstString(raw.eventId);
+  const artifactId = firstString(raw.artifactId);
+  const date = firstString(raw.date);
+  const fileName = firstString(raw.fileName) ?? "";
+  const createdAt = readFiniteNumber(raw.createdAt) ?? Date.now();
+  if (!jobId || !eventId || !artifactId || !date) {
+    return [];
+  }
+  return [
+    {
+      jobId,
+      eventId,
+      artifactId,
+      date,
+      fileName,
+      sizeBytes: readFiniteNumber(raw.sizeBytes) ?? 0,
+      capturedAt: readFiniteNumber(raw.capturedAt) ?? createdAt,
+      clipMs: readFiniteNumber(raw.clipMs),
+      voicedMs: readFiniteNumber(raw.voicedMs),
+      status: normalizeAudioBackfillQueueJobStatus(raw.status),
+      attempts: readFiniteNumber(raw.attempts) ?? 0,
+      createdAt,
+      updatedAt: readFiniteNumber(raw.updatedAt) ?? createdAt,
+      startedAt: readFiniteNumber(raw.startedAt),
+      completedAt: readFiniteNumber(raw.completedAt),
+      provider: firstString(raw.provider),
+      transcriptPreview: firstString(raw.transcriptPreview),
+      transcriptSegmentCount: readFiniteNumber(raw.transcriptSegmentCount),
+      speakerTimelineSegmentCount: readFiniteNumber(raw.speakerTimelineSegmentCount),
+      analysisFailureReason: firstString(raw.analysisFailureReason),
+    },
+  ];
+}
+
+function normalizeAudioBackfillQueueProvider(value: unknown): AudioBackfillProvider {
+  const normalized = firstString(value)?.trim().toLowerCase();
+  if (normalized === "local-asr" || normalized === "local" || normalized === "funasr" || normalized === "whisper") {
+    return "local-asr";
+  }
+  if (
+    normalized === "compatible-asr" ||
+    normalized === "compatible" ||
+    normalized === "cloud" ||
+    normalized === "stt"
+  ) {
+    return "compatible-asr";
+  }
+  return "auto";
+}
+
+function normalizeAudioBackfillQueueJobStatus(value: unknown): AudioBackfillQueueJobStatus {
+  const normalized = firstString(value)?.trim().toLowerCase();
+  if (
+    normalized === "pending" ||
+    normalized === "running" ||
+    normalized === "succeeded" ||
+    normalized === "failed" ||
+    normalized === "skipped"
+  ) {
+    return normalized;
+  }
+  return "pending";
+}
+
+function firstString(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return String(value);
+    }
+  }
+  return undefined;
+}
+
+function readFiniteNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
 function resolveMaintenanceBackfillBatchSize(pendingCandidates: number): number {
   if (pendingCandidates >= 30) {
     return 6;
@@ -5783,6 +7425,14 @@ function resolveMaintenanceBackfillBatchSize(pendingCandidates: number): number 
     return 4;
   }
   return 3;
+}
+
+function truncateForLog(value: string, maxLength: number): string {
+  const normalized = normalizeSemanticText(value);
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, Math.max(0, maxLength - 1))}…`;
 }
 
 function pickBestAudioArtifact(
@@ -5807,6 +7457,310 @@ function pickQueryTimeAudioArtifacts(
 
 function randomId(): string {
   return `review_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function buildRollingConversationDigestSnapshot(params: {
+  scope: "last-hour" | "today" | "custom-range";
+  date: string;
+  startAt: number;
+  endAt: number;
+  now: number;
+  windows: ReviewWindow[];
+  events: ClawSenseCaptureEvent[];
+}): ClawSenseConversationDigestSnapshot | undefined {
+  const transcriptWindows = params.windows.filter((window) => window.transcriptText.trim());
+  if (transcriptWindows.length === 0 && params.windows.length < 3) {
+    return undefined;
+  }
+  const orderedWindows = params.windows
+    .slice()
+    .sort((left, right) => left.startedAt - right.startedAt)
+    .filter((window) => window.transcriptText.trim() || window.primarySummary.trim());
+  if (orderedWindows.length === 0) {
+    return undefined;
+  }
+  const topicIndex = orderedWindows.slice(0, 36).map((window, index) => {
+    const sourceText = `${window.primarySummary} ${window.transcriptText}`;
+    const keywordHints = extractRollingDigestKeywords(sourceText);
+    const taskHints = extractRollingDigestTaskHints(sourceText);
+    const transcriptExcerpt = window.transcriptText.trim()
+      ? truncateText(toSingleLine(window.transcriptText), 300)
+      : undefined;
+    return {
+      index: index + 1,
+      windowId: window.windowId,
+      timeRange: `${toTimeLabel(window.startedAt)}-${toTimeLabel(window.endedAt)}`,
+      title: buildRollingDigestTopicTitle(sourceText, window),
+      summary: truncateText(toSingleLine(resolveWindowDisplaySummary(window)), 220),
+      keywordHints,
+      taskHints,
+      ...(transcriptExcerpt ? { transcriptExcerpt } : {}),
+    };
+  });
+  const digestId = buildRollingDigestId({
+    scope: params.scope,
+    date: params.date,
+    startAt: params.startAt,
+    endAt: params.endAt,
+    sourceEventCount: params.events.length,
+    sourceWindowCount: params.windows.length,
+  });
+  return {
+    digestId,
+    date: params.date,
+    scope: params.scope,
+    startAt: params.startAt,
+    endAt: params.endAt,
+    generatedAt: params.now,
+    sourceEventCount: params.events.length,
+    sourceWindowCount: params.windows.length,
+    transcriptWindowCount: transcriptWindows.length,
+    summary: `${formatContextRange(params.startAt, params.endAt)} 持久化索引：${params.windows.length} 个窗口，${transcriptWindows.length} 个含转写窗口，${topicIndex.length} 个可检索话题。`,
+    topicIndex,
+    keywordIndex: buildRollingDigestKeywordIndex(topicIndex),
+  };
+}
+
+function buildMemoryCardsFromRollingDigest(digest: ClawSenseConversationDigestSnapshot): ClawSenseMemoryCard[] {
+  const now = digest.generatedAt;
+  const cards: ClawSenseMemoryCard[] = [];
+  for (const topic of digest.topicIndex.slice(0, 24)) {
+    const sourceText = toSingleLine([
+      topic.title,
+      topic.summary,
+      topic.transcriptExcerpt,
+      ...topic.keywordHints,
+      ...topic.taskHints,
+    ].filter(Boolean).join(" "));
+    const evidence = {
+      digestId: digest.digestId,
+      topicIndexes: [topic.index],
+      windowIds: [topic.windowId],
+      timeRanges: [topic.timeRange],
+      taskHints: topic.taskHints.slice(0, 4),
+      transcriptExcerpts: topic.transcriptExcerpt ? [topic.transcriptExcerpt] : [],
+    };
+    for (const [taskIndex, task] of topic.taskHints.slice(0, 3).entries()) {
+      cards.push({
+        cardId: buildMemoryCardId(digest.digestId, "task", topic.index, `${taskIndex}:${task}`),
+        date: digest.date,
+        scope: digest.scope,
+        kind: "task",
+        title: truncateText(task.replace(/^[，,。；;\s]+/u, ""), 48),
+        summary: `任务线索来自第 ${topic.index} 段（${topic.timeRange}）：${truncateText(task, 180)}`,
+        status: "active",
+        confidence: topic.transcriptExcerpt ? "medium" : "low",
+        startAt: digest.startAt,
+        endAt: digest.endAt,
+        lastSeenAt: now,
+        createdAt: now,
+        updatedAt: now,
+        keywords: dedupeStrings(["任务", ...topic.keywordHints]).slice(0, 8),
+        source: "rolling-digest",
+        evidence,
+      });
+    }
+    if (looksLikeAttentionMemory(sourceText)) {
+      cards.push({
+        cardId: buildMemoryCardId(digest.digestId, "attention", topic.index, sourceText),
+        date: digest.date,
+        scope: digest.scope,
+        kind: "attention",
+        title: `注意：${topic.title}`,
+        summary: `值得后续追问或确认：${truncateText(topic.summary || topic.transcriptExcerpt || sourceText, 180)}`,
+        status: "active",
+        confidence: topic.transcriptExcerpt ? "medium" : "low",
+        startAt: digest.startAt,
+        endAt: digest.endAt,
+        lastSeenAt: now,
+        createdAt: now,
+        updatedAt: now,
+        keywords: dedupeStrings(["注意", ...topic.keywordHints]).slice(0, 8),
+        source: "rolling-digest",
+        evidence,
+      });
+    }
+    if (looksLikeLearningMemory(sourceText)) {
+      cards.push({
+        cardId: buildMemoryCardId(digest.digestId, "learning", topic.index, sourceText),
+        date: digest.date,
+        scope: digest.scope,
+        kind: "learning",
+        title: `学习点：${topic.title}`,
+        summary: `可沉淀为学习/知识点：${truncateText(topic.summary || topic.transcriptExcerpt || sourceText, 180)}`,
+        status: "active",
+        confidence: topic.transcriptExcerpt ? "medium" : "low",
+        startAt: digest.startAt,
+        endAt: digest.endAt,
+        lastSeenAt: now,
+        createdAt: now,
+        updatedAt: now,
+        keywords: dedupeStrings(["学习点", ...topic.keywordHints]).slice(0, 8),
+        source: "rolling-digest",
+        evidence,
+      });
+    }
+    if (topic.keywordHints.length > 0 || topic.transcriptExcerpt) {
+      cards.push({
+        cardId: buildMemoryCardId(digest.digestId, "topic", topic.index, topic.title),
+        date: digest.date,
+        scope: digest.scope,
+        kind: "topic",
+        title: topic.title,
+        summary: `话题索引第 ${topic.index} 段（${topic.timeRange}）：${truncateText(topic.summary || topic.transcriptExcerpt || sourceText, 180)}`,
+        status: "active",
+        confidence: topic.transcriptExcerpt ? "medium" : "low",
+        startAt: digest.startAt,
+        endAt: digest.endAt,
+        lastSeenAt: now,
+        createdAt: now,
+        updatedAt: now,
+        keywords: topic.keywordHints.slice(0, 8),
+        source: "rolling-digest",
+        evidence,
+      });
+    }
+  }
+  return dedupeMemoryCards(cards).slice(0, 60);
+}
+
+function buildMemoryCardId(digestId: string, kind: ClawSenseMemoryCard["kind"], topicIndex: number, text: string): string {
+  const raw = `${digestId}:${kind}:${topicIndex}:${normalizeSemanticText(text)}`;
+  return `memcard_${createHash("sha1").update(raw).digest("hex").slice(0, 18)}`;
+}
+
+function dedupeMemoryCards(cards: ClawSenseMemoryCard[]): ClawSenseMemoryCard[] {
+  const byId = new Map<string, ClawSenseMemoryCard>();
+  for (const card of cards) {
+    byId.set(card.cardId, card);
+  }
+  return Array.from(byId.values()).sort(
+    (left, right) => memoryCardKindPriority(left.kind) - memoryCardKindPriority(right.kind) || left.startAt - right.startAt,
+  );
+}
+
+function memoryCardKindPriority(kind: ClawSenseMemoryCard["kind"]): number {
+  switch (kind) {
+    case "task":
+      return 0;
+    case "attention":
+      return 1;
+    case "learning":
+      return 2;
+    case "topic":
+      return 3;
+  }
+}
+
+function looksLikeAttentionMemory(text: string): boolean {
+  return /风险|注意|待确认|问题|bug|阻塞|卡住|安全|合规|缺口|异常|跟进|遗漏|关键|重要/u.test(text);
+}
+
+function looksLikeLearningMemory(text: string): boolean {
+  return /学习|知识|课堂|老师|课程|作业|考试|算法|模型|理论|Scaling|Law|边界|方法|机制|原理/u.test(text);
+}
+
+function buildRollingDigestId(params: {
+  scope: string;
+  date: string;
+  startAt: number;
+  endAt: number;
+  sourceEventCount: number;
+  sourceWindowCount: number;
+}): string {
+  const raw = `${params.scope}:${params.date}:${params.startAt}:${params.endAt}:${params.sourceWindowCount}:${params.sourceEventCount}`;
+  return `digest_${createHash("sha1").update(raw).digest("hex").slice(0, 16)}`;
+}
+
+function buildRollingDigestTopicTitle(text: string, window: ReviewWindow): string {
+  const normalized = toSingleLine(text);
+  const candidates = [
+    { title: "任务与行动项", keywords: ["任务", "行动项", "负责", "跟进", "安排", "确认", "提交"] },
+    { title: "数据与接口方案", keywords: ["数据", "数仓", "接口", "API", "阿里云", "同步", "库"] },
+    { title: "AI 陪练与剧本", keywords: ["AI陪练", "陪练", "剧本", "语料", "对练", "通话"] },
+    { title: "考核与报表", keywords: ["考核", "考试", "报表", "通过率", "缺陷项", "汇总"] },
+    { title: "培训与工单流程", keywords: ["培训", "海南", "上海", "物流", "工单", "角色"] },
+    { title: "视频/画面内容", keywords: ["视频", "画面", "图片", "截图", "字幕", "访谈"] },
+  ];
+  const winner = candidates
+    .map((candidate) => ({
+      ...candidate,
+      score: candidate.keywords.reduce(
+        (score, keyword) => score + (normalized.toLowerCase().includes(keyword.toLowerCase()) ? 1 : 0),
+        0,
+      ),
+    }))
+    .sort((left, right) => right.score - left.score)[0];
+  if (winner && winner.score > 0) {
+    return winner.title;
+  }
+  if (window.audioCount > 0) {
+    return "音频对话片段";
+  }
+  if (window.videoCount > 0) {
+    return "视频观察片段";
+  }
+  if (window.imageCount > 0) {
+    return "图片观察片段";
+  }
+  return "事件片段";
+}
+
+function extractRollingDigestKeywords(text: string): string[] {
+  const normalized = toSingleLine(text);
+  const keywords = [
+    "数据",
+    "数仓",
+    "阿里云",
+    "API",
+    "接口",
+    "安全",
+    "AI陪练",
+    "剧本",
+    "语料",
+    "对练",
+    "考核",
+    "考试",
+    "报表",
+    "培训",
+    "海南",
+    "上海",
+    "物流",
+    "工单",
+    "售后",
+    "视频",
+    "图片",
+    "任务",
+    "负责",
+    "跟进",
+    "方案",
+  ];
+  return dedupeStrings(keywords.filter((keyword) => normalized.toLowerCase().includes(keyword.toLowerCase()))).slice(0, 8);
+}
+
+function extractRollingDigestTaskHints(text: string): string[] {
+  return toSingleLine(text)
+    .split(/[。！？!?；;]\s*|(?<=，)(?=(?:你|你们|我|我们|大家|产品|数仓|运维|售前|售后|运营|需要|要|先|再|记得|确认|提供|安排|负责|同步|开发|验证|整理|提交|跟进))/u)
+    .map((item) => item.trim().replace(/[，,；;]+$/u, "").trim())
+    .filter((item) => item.length >= 6)
+    .filter((item) => /任务|行动项|负责|跟进|需要|确认|提供|安排|同步|开发|验证|整理|提交|7月|明天|下周/u.test(item))
+    .map((item) => truncateText(item, 140))
+    .slice(0, 4);
+}
+
+function buildRollingDigestKeywordIndex(
+  topicIndex: ClawSenseConversationDigestSnapshot["topicIndex"],
+): ClawSenseConversationDigestSnapshot["keywordIndex"] {
+  const byKeyword = new Map<string, number[]>();
+  for (const topic of topicIndex) {
+    for (const keyword of topic.keywordHints) {
+      byKeyword.set(keyword, (byKeyword.get(keyword) ?? []).concat(topic.index));
+    }
+  }
+  return Array.from(byKeyword.entries())
+    .map(([keyword, topicIndexes]) => ({ keyword, topicIndexes: topicIndexes.slice(0, 12) }))
+    .sort((left, right) => right.topicIndexes.length - left.topicIndexes.length || left.keyword.localeCompare(right.keyword))
+    .slice(0, 20);
 }
 
 function buildAssistantContextSummary(

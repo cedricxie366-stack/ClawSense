@@ -33,4 +33,40 @@ describe("resolveClawSenseConfig", () => {
     expect(cfg.artifactRetentionDays).toBe(0);
     expect(cfg.maxArtifactBytes).toBe(0);
   });
+
+  it("normalizes local ASR backend aliases for open-source deployments", () => {
+    expect(resolveClawSenseConfig({ localAsrBackend: "faster-whisper" }).localAsrBackend).toBe("whisper");
+    expect(resolveClawSenseConfig({ localAsrBackend: "openai-whisper" }).localAsrBackend).toBe("whisper");
+    expect(resolveClawSenseConfig({ localAsrBackend: "fun-asr" }).localAsrBackend).toBe("funasr");
+    expect(resolveClawSenseConfig({ localAsrBackend: "funasr-sensevoice" }).localAsrBackend).toBe("funasr");
+    expect(resolveClawSenseConfig({ localAsrBackend: "sensevoice" }).localAsrBackend).toBe(
+      "sherpa-onnx-sensevoice",
+    );
+  });
+
+  it("normalizes ASR worker defaults and provider aliases", () => {
+    const defaults = resolveClawSenseConfig(undefined);
+
+    expect(defaults.asrWorkerEnabled).toBe(false);
+    expect(defaults.asrWorkerProvider).toBe("local-asr");
+    expect(defaults.asrWorkerIncludeTranscribed).toBe(true);
+
+    const cfg = resolveClawSenseConfig({
+      asrWorkerEnabled: true,
+      asrWorkerProvider: "funasr",
+      asrWorkerIntervalSeconds: 30,
+      asrWorkerBatchSize: 0,
+      asrWorkerMaxJobs: 0,
+      asrWorkerLookbackDays: 0,
+      asrWorkerIncludeTranscribed: false,
+    });
+
+    expect(cfg.asrWorkerEnabled).toBe(true);
+    expect(cfg.asrWorkerProvider).toBe("local-asr");
+    expect(cfg.asrWorkerIntervalSeconds).toBe(900);
+    expect(cfg.asrWorkerBatchSize).toBe(3);
+    expect(cfg.asrWorkerMaxJobs).toBe(24);
+    expect(cfg.asrWorkerLookbackDays).toBe(2);
+    expect(cfg.asrWorkerIncludeTranscribed).toBe(false);
+  });
 });

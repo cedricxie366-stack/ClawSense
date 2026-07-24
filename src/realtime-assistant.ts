@@ -848,6 +848,21 @@ function resolveQuestionRequestedRange(
     startOfDay.setHours(0, 0, 0, 0);
     return { startAt: startOfDay.getTime(), endAt: now, kind: "day", date: formatDateKey(startOfDay.getTime()) };
   }
+  const anchoredRange = resolveAnchoredQuestionRange(normalized, now);
+  if (anchoredRange) {
+    return anchoredRange;
+  }
+  const explicitDateKey = parseQuestionDateKey(normalized, now);
+  if (explicitDateKey) {
+    const startAt = timestampFromDateKey(explicitDateKey, 0, 0);
+    const endAt = startAt + 24 * 60 * 60_000;
+    return {
+      startAt,
+      endAt,
+      kind: "day",
+      date: explicitDateKey,
+    };
+  }
   const hourMatch = normalized.match(/(?:过去|最近|前)?\s*([0-9０-９一二两三四五六七八九十半]+)\s*(?:个)?\s*小时/);
   if (hourMatch) {
     const hours = parseChineseNumberLike(hourMatch[1] ?? "");
@@ -866,6 +881,125 @@ function resolveQuestionRequestedRange(
     return { startAt: now - 30 * 60_000, endAt: now, kind: "custom" };
   }
   return null;
+}
+
+function resolveAnchoredQuestionRange(
+  normalizedQuestion: string,
+  now: number,
+): { startAt: number; endAt: number; kind: "custom"; date?: string } | null {
+  if (!/结束|截止|之前|往前|向前|倒推|为止|以前/.test(normalizedQuestion)) {
+    return null;
+  }
+  const durationMs = parseQuestionDurationMs(normalizedQuestion);
+  if (!durationMs) {
+    return null;
+  }
+  const anchorEndAt = parseQuestionAnchorEndTimestamp(normalizedQuestion, now);
+  if (!anchorEndAt) {
+    return null;
+  }
+  return {
+    startAt: anchorEndAt - durationMs,
+    endAt: anchorEndAt,
+    kind: "custom",
+  };
+}
+
+function parseQuestionDurationMs(normalizedQuestion: string): number | null {
+  const match = normalizedQuestion.match(
+    /([0-9０-９]+(?:\.[0-9０-９]+)?|一|二|两|三|四|五|六|七|八|九|十|十一|十二|十三|十四|十五|二十|三十|半)(?:个)?(小时|钟头|分钟|分|天)/,
+  );
+  if (!match) {
+    return null;
+  }
+  const amount = parseChineseNumberLike(match[1] ?? "");
+  if (!(amount > 0)) {
+    return null;
+  }
+  const unit = match[2];
+  if (unit === "小时" || unit === "钟头") {
+    return amount * 60 * 60_000;
+  }
+  if (unit === "分钟" || unit === "分") {
+    return amount * 60_000;
+  }
+  if (unit === "天") {
+    return amount * 24 * 60 * 60_000;
+  }
+  return null;
+}
+
+function parseQuestionAnchorEndTimestamp(normalizedQuestion: string, now: number): number | null {
+  const dateKey = parseQuestionDateKey(normalizedQuestion, now);
+  const clock = parseQuestionClockTime(normalizedQuestion);
+  if (dateKey && clock) {
+    return timestampFromDateKey(dateKey, clock.hour, clock.minute);
+  }
+  if (dateKey) {
+    return timestampFromDateKey(dateKey, 23, 59, 59, 999);
+  }
+  if (clock) {
+    const nowDate = new Date(now);
+    return new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate(), clock.hour, clock.minute, 0, 0).getTime();
+  }
+  return null;
+}
+
+function parseQuestionDateKey(normalizedQuestion: string, now: number): string | null {
+  const nowDate = new Date(now);
+  const compactQuestion = normalizedQuestion.replace(/\s+/g, "");
+  const isoMatch = compactQuestion.match(/(20\d{2})[-/年](\d{1,2})[-/月](\d{1,2})(?:日|号)?/);
+  if (isoMatch) {
+    return buildValidDateKey(Number(isoMatch[1]), Number(isoMatch[2]), Number(isoMatch[3]));
+  }
+  const monthDayMatch = compactQuestion.match(/(?:(20\d{2})年)?(\d{1,2})月(\d{1,2})[日号]?/);
+  if (monthDayMatch) {
+    return buildValidDateKey(
+      Number(monthDayMatch[1] ?? nowDate.getFullYear()),
+      Number(monthDayMatch[2]),
+      Number(monthDayMatch[3]),
+    );
+  }
+  return null;
+}
+
+function buildValidDateKey(year: number, month: number, day: number): string | null {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return null;
+  }
+  if (year < 2000 || year > 2100 || month < 1 || month > 12 || day < 1 || day > 31) {
+    return null;
+  }
+  const date = new Date(year, month - 1, day);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
+    return null;
+  }
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function parseQuestionClockTime(normalizedQuestion: string): { hour: number; minute: number } | null {
+  const colonMatch = normalizedQuestion.match(/(\d{1,2})[:：](\d{1,2})/);
+  if (colonMatch) {
+    const hour = Number(colonMatch[1]);
+    const minute = Number(colonMatch[2]);
+    return isValidQuestionClockTime(hour, minute) ? { hour, minute } : null;
+  }
+  const dotMatch = normalizedQuestion.match(/(\d{1,2})点(半|(\d{1,2})分?)?/);
+  if (dotMatch) {
+    const hour = Number(dotMatch[1]);
+    const minute = dotMatch[2] === "半" ? 30 : Number(dotMatch[3] ?? 0);
+    return isValidQuestionClockTime(hour, minute) ? { hour, minute } : null;
+  }
+  return null;
+}
+
+function isValidQuestionClockTime(hour: number, minute: number): boolean {
+  return Number.isInteger(hour) && Number.isInteger(minute) && hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59;
+}
+
+function timestampFromDateKey(dateKey: string, hour: number, minute: number, second = 0, millisecond = 0): number {
+  const [year, month, day] = dateKey.split("-").map((part) => Number(part));
+  return new Date(year, month - 1, day, hour, minute, second, millisecond).getTime();
 }
 
 function shouldPromoteRecentQuestionToFiveMinutes(question: string | undefined): boolean {
@@ -954,6 +1088,9 @@ function isLikelyExplicitSpokenQuery(text: string): boolean {
   // Multimodal audio understanding sometimes returns a description of the clip
   // instead of verbatim speech; never treat description-style output as the user's words.
   if (/^(听起来|似乎(是|在)|好像(是|在)|这段(音频|声音|录音)|环境音|音频(中|里)|背景(音|声))/.test(text)) {
+    return false;
+  }
+  if (looksLikeAmbientInterviewQuestion(text)) {
     return false;
   }
   return true;
@@ -1341,6 +1478,21 @@ function buildAnswerForIntent(intent: AssistantIntent, recentContext: RecentCont
       return `${intent.displayName} 在最近证据里主要出现在这些片段：${relevantSpans
         .slice(0, 2)
         .map((span) => `${span.time}：${span.text}`)
+        .join("；")}。`;
+    }
+    const relevantEvidence = recentContext.topEvidence.filter((item) => item.people.includes(intent.displayName));
+    const transcriptExcerpts = relevantEvidence
+      .map((item) => item.transcriptExcerpt?.trim())
+      .filter((text): text is string => Boolean(text));
+    if (transcriptExcerpts.length > 0) {
+      return `${intent.displayName} 在最近已标注证据里对应这些语音线索：${transcriptExcerpts
+        .slice(0, 2)
+        .join("；")}。`;
+    }
+    if (relevantEvidence.length > 0) {
+      return `${intent.displayName} 在最近已标注证据里出现过，但这段证据缺少可直接复述的语音转写；相关场景是：${relevantEvidence
+        .slice(0, 2)
+        .map((item) => item.summary)
         .join("；")}。`;
     }
     return `最近时间窗里我还没有抓到 ${intent.displayName} 的明确语音转写，但相关人物线索仍建议结合图片和更长时间窗再看一次。`;

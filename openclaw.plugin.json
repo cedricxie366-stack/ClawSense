@@ -91,6 +91,48 @@
       },
       "localAsrNumThreads": {
         "type": "number"
+      },
+      "localAsrTimeoutMs": {
+        "type": "number"
+      },
+      "localAsrCommand": {
+        "type": "string"
+      },
+      "localAsrWhisperCommand": {
+        "type": "string"
+      },
+      "localAsrWhisperModel": {
+        "type": "string"
+      },
+      "localAsrFunAsrCommand": {
+        "type": "string"
+      },
+      "localAsrFunAsrModel": {
+        "type": "string"
+      },
+      "assistantQueryAudioKeepCount": {
+        "type": "number"
+      },
+      "asrWorkerEnabled": {
+        "type": "boolean"
+      },
+      "asrWorkerIntervalSeconds": {
+        "type": "number"
+      },
+      "asrWorkerBatchSize": {
+        "type": "number"
+      },
+      "asrWorkerMaxJobs": {
+        "type": "number"
+      },
+      "asrWorkerLookbackDays": {
+        "type": "number"
+      },
+      "asrWorkerProvider": {
+        "type": "string"
+      },
+      "asrWorkerIncludeTranscribed": {
+        "type": "boolean"
       }
     }
   }

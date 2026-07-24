@@ -1,6 +1,8 @@
 package ai.openclaw.clawsense.data
 
+import ai.openclaw.clawsense.BuildConfig
 import android.os.Build
+import java.net.URI
 import java.util.ArrayDeque
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -40,7 +42,9 @@ class DeviceSessionRepository(
     val pairingSetup = SetupCodeParser.parse(setupCode)
       ?: throw IllegalArgumentException("二维码/引导码无法解析，请重新扫码。")
     pairingSetup.warning?.let { warning ->
-      throw IllegalArgumentException(warning)
+      if (!BuildConfig.DEBUG || !pairingSetup.host.isLoopbackHost()) {
+        throw IllegalArgumentException(warning)
+      }
     }
     return pairManual(
       host = pairingSetup.host,
@@ -468,6 +472,11 @@ class DeviceSessionRepository(
   private fun buildFingerprint(): String {
     return listOf(Build.BRAND, Build.MODEL, Build.DEVICE, Build.VERSION.SDK_INT.toString())
       .joinToString(":")
+  }
+
+  private fun String.isLoopbackHost(): Boolean {
+    val host = runCatching { URI(this).host?.trim()?.lowercase() }.getOrNull()
+    return host == "127.0.0.1" || host == "::1" || host == "localhost"
   }
 
   private fun applyBackpressureLocked(error: ClawSenseBackpressureException) {

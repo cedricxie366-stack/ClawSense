@@ -49,7 +49,7 @@
 说明：
 
 - 我在 `2026-03-09` 实测查过 npm registry，`clawsense`、`clawsense-openclaw-plugin`、`@clawsense/clawsense` 这三个名字当时都没有现成公开包。
-- 我在 `2026-05-30` 复查 `npm view clawsense`，仍返回 404，说明 `clawsense` 目标包名当前尚未发布。
+- 我在 `2026-07-14` 复查 `npm view clawsense version --json`，仍返回 404，说明 `clawsense` 目标包名当前尚未发布。
 - 但 `@clawsense/clawsense` 只有在你拥有 `clawsense` 这个 npm scope 时才能发，不适合作为第一次发布的默认方案。
 
 ### 第三步：以后再考虑 ClawHub
@@ -185,11 +185,13 @@ npm login
 
 ```bash
 npm run check:release
+npm publish --dry-run --access public
 npm publish --access public
 ```
 
 说明：
 
+- `npm publish --dry-run --access public` 不会真正发布包，用来确认 prepack、包内容和 registry 发布参数。
 - 如果你用的是带 scope 的包名，比如 `@你的用户名/clawsense`，通常要显式加 `--access public`
 - 如果你是无 scope 包名，有时可以不加，但我建议统一加上
 

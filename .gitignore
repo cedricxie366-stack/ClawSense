@@ -10,3 +10,4 @@ android/local.properties
 android/app/build/
 docs/求职/
 docs/grants/**/private/
+tmp/

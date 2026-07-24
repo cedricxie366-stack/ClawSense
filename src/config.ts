@@ -20,7 +20,15 @@ const DEFAULT_STT_FALLBACK_MODEL = "whisper-1";
 const DEFAULT_LOCAL_ASR_BACKEND = "none";
 const DEFAULT_LOCAL_ASR_LANGUAGE = "zh";
 const DEFAULT_LOCAL_ASR_NUM_THREADS = 2;
+const DEFAULT_LOCAL_ASR_TIMEOUT_MS = 120_000;
 const DEFAULT_ASSISTANT_QUERY_AUDIO_KEEP_COUNT = 10;
+const DEFAULT_ASR_WORKER_ENABLED = false;
+const DEFAULT_ASR_WORKER_INTERVAL_SECONDS = 15 * 60;
+const DEFAULT_ASR_WORKER_BATCH_SIZE = 3;
+const DEFAULT_ASR_WORKER_MAX_JOBS = 24;
+const DEFAULT_ASR_WORKER_LOOKBACK_DAYS = 2;
+const DEFAULT_ASR_WORKER_PROVIDER = "local-asr";
+const DEFAULT_ASR_WORKER_INCLUDE_TRANSCRIBED = true;
 
 export const clawsenseConfigSchema = Type.Object(
   {
@@ -53,7 +61,20 @@ export const clawsenseConfigSchema = Type.Object(
     localAsrTokensFile: Type.Optional(Type.String()),
     localAsrLanguage: Type.Optional(Type.String()),
     localAsrNumThreads: Type.Optional(Type.Integer({ minimum: 1 })),
+    localAsrTimeoutMs: Type.Optional(Type.Integer({ minimum: 1 })),
+    localAsrCommand: Type.Optional(Type.String()),
+    localAsrWhisperCommand: Type.Optional(Type.String()),
+    localAsrWhisperModel: Type.Optional(Type.String()),
+    localAsrFunAsrCommand: Type.Optional(Type.String()),
+    localAsrFunAsrModel: Type.Optional(Type.String()),
     assistantQueryAudioKeepCount: Type.Optional(Type.Integer({ minimum: 0 })),
+    asrWorkerEnabled: Type.Optional(Type.Boolean()),
+    asrWorkerIntervalSeconds: Type.Optional(Type.Integer({ minimum: 60 })),
+    asrWorkerBatchSize: Type.Optional(Type.Integer({ minimum: 1 })),
+    asrWorkerMaxJobs: Type.Optional(Type.Integer({ minimum: 1 })),
+    asrWorkerLookbackDays: Type.Optional(Type.Integer({ minimum: 1 })),
+    asrWorkerProvider: Type.Optional(Type.String()),
+    asrWorkerIncludeTranscribed: Type.Optional(Type.Boolean()),
   },
   { additionalProperties: false },
 );
@@ -82,13 +103,26 @@ export type ClawSenseConfig = {
   analysisMode: string;
   reviewModel?: string;
   sttFallbackModel: string;
-  localAsrBackend: "none" | "sherpa-onnx-sensevoice";
+  localAsrBackend: "none" | "whisper" | "funasr" | "sherpa-onnx-sensevoice";
   localAsrModelDir?: string;
   localAsrModelFile?: string;
   localAsrTokensFile?: string;
   localAsrLanguage: string;
   localAsrNumThreads: number;
+  localAsrTimeoutMs: number;
+  localAsrCommand?: string;
+  localAsrWhisperCommand?: string;
+  localAsrWhisperModel?: string;
+  localAsrFunAsrCommand?: string;
+  localAsrFunAsrModel?: string;
   assistantQueryAudioKeepCount: number;
+  asrWorkerEnabled: boolean;
+  asrWorkerIntervalSeconds: number;
+  asrWorkerBatchSize: number;
+  asrWorkerMaxJobs: number;
+  asrWorkerLookbackDays: number;
+  asrWorkerProvider: "auto" | "local-asr" | "compatible-asr";
+  asrWorkerIncludeTranscribed: boolean;
 };
 
 export function resolveClawSenseConfig(raw: Record<string, unknown> | undefined): ClawSenseConfig {
@@ -128,9 +162,35 @@ export function resolveClawSenseConfig(raw: Record<string, unknown> | undefined)
     localAsrLanguage: readOptionalString(cfg.localAsrLanguage) ?? DEFAULT_LOCAL_ASR_LANGUAGE,
     localAsrNumThreads:
       readOptionalInteger(cfg.localAsrNumThreads, { min: 1 }) ?? DEFAULT_LOCAL_ASR_NUM_THREADS,
+    localAsrTimeoutMs:
+      readOptionalInteger(cfg.localAsrTimeoutMs, { min: 1 }) ?? DEFAULT_LOCAL_ASR_TIMEOUT_MS,
+    localAsrCommand: readOptionalString(cfg.localAsrCommand),
+    localAsrWhisperCommand: readOptionalString(cfg.localAsrWhisperCommand),
+    localAsrWhisperModel: readOptionalString(cfg.localAsrWhisperModel),
+    localAsrFunAsrCommand: readOptionalString(cfg.localAsrFunAsrCommand),
+    localAsrFunAsrModel: readOptionalString(cfg.localAsrFunAsrModel),
     assistantQueryAudioKeepCount:
       readOptionalInteger(cfg.assistantQueryAudioKeepCount, { min: 0 }) ??
       DEFAULT_ASSISTANT_QUERY_AUDIO_KEEP_COUNT,
+    asrWorkerEnabled: typeof cfg.asrWorkerEnabled === "boolean"
+      ? cfg.asrWorkerEnabled
+      : DEFAULT_ASR_WORKER_ENABLED,
+    asrWorkerIntervalSeconds:
+      readOptionalInteger(cfg.asrWorkerIntervalSeconds, { min: 60 }) ??
+      DEFAULT_ASR_WORKER_INTERVAL_SECONDS,
+    asrWorkerBatchSize:
+      readOptionalInteger(cfg.asrWorkerBatchSize, { min: 1 }) ??
+      DEFAULT_ASR_WORKER_BATCH_SIZE,
+    asrWorkerMaxJobs:
+      readOptionalInteger(cfg.asrWorkerMaxJobs, { min: 1 }) ??
+      DEFAULT_ASR_WORKER_MAX_JOBS,
+    asrWorkerLookbackDays:
+      readOptionalInteger(cfg.asrWorkerLookbackDays, { min: 1 }) ??
+      DEFAULT_ASR_WORKER_LOOKBACK_DAYS,
+    asrWorkerProvider: normalizeAsrWorkerProvider(readOptionalString(cfg.asrWorkerProvider)),
+    asrWorkerIncludeTranscribed: typeof cfg.asrWorkerIncludeTranscribed === "boolean"
+      ? cfg.asrWorkerIncludeTranscribed
+      : DEFAULT_ASR_WORKER_INCLUDE_TRANSCRIBED,
   };
 }
 
@@ -198,6 +258,12 @@ function normalizeHostModelImageMode(value?: string): ClawSenseConfig["hostModel
 
 function normalizeLocalAsrBackend(value?: string): ClawSenseConfig["localAsrBackend"] {
   const normalized = value?.toLowerCase().trim();
+  if (normalized === "whisper" || normalized === "faster-whisper" || normalized === "openai-whisper") {
+    return "whisper";
+  }
+  if (normalized === "funasr" || normalized === "fun-asr" || normalized === "funasr-sensevoice") {
+    return "funasr";
+  }
   if (
     normalized === "sherpa-onnx-sensevoice" ||
     normalized === "sherpa-sensevoice" ||
@@ -206,4 +272,23 @@ function normalizeLocalAsrBackend(value?: string): ClawSenseConfig["localAsrBack
     return "sherpa-onnx-sensevoice";
   }
   return DEFAULT_LOCAL_ASR_BACKEND;
+}
+
+function normalizeAsrWorkerProvider(value?: string): ClawSenseConfig["asrWorkerProvider"] {
+  const normalized = value?.toLowerCase().trim();
+  if (normalized === "auto") {
+    return "auto";
+  }
+  if (normalized === "local-asr" || normalized === "local" || normalized === "funasr" || normalized === "whisper") {
+    return "local-asr";
+  }
+  if (
+    normalized === "compatible-asr" ||
+    normalized === "compatible" ||
+    normalized === "cloud" ||
+    normalized === "stt"
+  ) {
+    return "compatible-asr";
+  }
+  return DEFAULT_ASR_WORKER_PROVIDER;
 }

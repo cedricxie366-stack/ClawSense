@@ -12,6 +12,8 @@ import {
   transcribeAudioWithFallbackModel,
   understandAudioWithPrimaryModel,
 } from "./openai-client.js";
+import { transcribeAudioWithLocalAsr } from "./local-asr.js";
+import type { AudioSpeakerTimelineSegment, AudioTranscriptSegment } from "./openai-client.js";
 import type {
   ClawSenseArtifactRecord,
   ClawSenseCaptureEvent,
@@ -68,12 +70,19 @@ export type ClawSenseMemorySearchHit = {
 
 type AudioAnalysisResult = {
   transcript: string;
+  transcriptSegments?: AudioTranscriptSegment[];
+  speakerTimelineSegments?: AudioSpeakerTimelineSegment[];
   summary?: string;
-  analysisMode: "runtime-stt" | "runtime-stt-fallback" | "openai-stt-fallback" | "metadata-only";
+  analysisMode:
+    | "runtime-stt"
+    | "runtime-stt-fallback"
+    | "openai-stt-fallback"
+    | "local-asr"
+    | "metadata-only";
   analysisProvider: string;
   analysisStatus: "succeeded" | "degraded";
   analysisFailureReason?: string;
-  sttProvider?: "runtime" | "openai-fallback" | "compatible-fallback";
+  sttProvider?: "runtime" | "openai-fallback" | "compatible-fallback" | "local-asr";
 };
 
 type ImageAnalysisResult = {
@@ -129,6 +138,8 @@ type ClawSenseAnalysisCallbacks = {
 type StoredCaptureAnalysis = {
   summary: string;
   transcript?: string;
+  transcriptSegments?: AudioTranscriptSegment[];
+  speakerTimelineSegments?: AudioSpeakerTimelineSegment[];
   analysisMode: ClawSenseCaptureEvent["analysisMode"];
   analysisProvider?: ClawSenseCaptureEvent["analysisProvider"];
   analysisStatus?: ClawSenseCaptureEvent["analysisStatus"];
@@ -271,6 +282,8 @@ export class ClawSenseMemoryStore {
         modality: params.modality,
         summary: analysis.summary,
         transcript: analysis.transcript || undefined,
+        transcriptSegments: analysis.transcriptSegments,
+        speakerTimelineSegments: analysis.speakerTimelineSegments,
         note: params.note || undefined,
         createdAt,
         capturedAt: createdAt,
@@ -297,6 +310,8 @@ export class ClawSenseMemoryStore {
         modality: params.modality,
         summary: analysis.summary,
         transcript: analysis.transcript || undefined,
+        transcriptSegments: analysis.transcriptSegments,
+        speakerTimelineSegments: analysis.speakerTimelineSegments,
         createdAt,
         storedAt: stored.absolutePath,
         namespace: this.cfg.memoryNamespace,
@@ -426,6 +441,8 @@ export class ClawSenseMemoryStore {
       artifactId: artifact.artifactId,
       summary: analysis.summary,
       transcript: analysis.transcript,
+      transcriptSegments: analysis.transcriptSegments,
+      speakerTimelineSegments: analysis.speakerTimelineSegments,
       analysisMode: analysis.analysisMode,
       analysisProvider: analysis.analysisProvider,
       analysisStatus: analysis.analysisStatus,
@@ -781,6 +798,48 @@ export class ClawSenseMemoryStore {
       };
     };
 
+    const attemptLocalAsr = async (attempt: {
+      failureReason?: string;
+      providerChainPrefix: string;
+    }): Promise<{
+      result?: AudioAnalysisResult;
+      failureReason?: string;
+      provider?: string;
+    }> => {
+      const localAttempt = await transcribeAudioWithLocalAsr({
+        cfg: this.cfg,
+        filePath: params.filePath,
+        resolveStateDir: this.resolveStateDir,
+        logger: this.logger,
+      });
+      if (localAttempt.analysisFailureReason === "query_time_local_asr_disabled") {
+        return {
+          failureReason: attempt.failureReason,
+        };
+      }
+      const text = normalizeSemanticText(localAttempt.transcript);
+      if (isUsableTranscriptText(text)) {
+        return {
+          result: {
+            transcript: text,
+            transcriptSegments: localAttempt.transcriptSegments,
+            speakerTimelineSegments: localAttempt.speakerTimelineSegments,
+            analysisMode: "local-asr",
+            analysisProvider: `${attempt.providerChainPrefix}+${localAttempt.analysisProvider}`,
+            analysisStatus: "succeeded",
+            analysisFailureReason: attempt.failureReason,
+            sttProvider: "local-asr",
+          },
+          failureReason: attempt.failureReason,
+          provider: localAttempt.analysisProvider,
+        };
+      }
+      return {
+        failureReason: combineFailureReasons(attempt.failureReason, localAttempt.analysisFailureReason),
+        provider: localAttempt.analysisProvider,
+      };
+    };
+
     const attemptMultimodalFallback = async (attempt: {
       failureReason?: string;
       providerChainPrefix: string;
@@ -841,12 +900,21 @@ export class ClawSenseMemoryStore {
         text ? "runtime_stt_low_signal" : "runtime_stt_empty",
       );
       this.logger.warn(
-        `[clawsense] runtime STT produced ${text ? "low-signal" : "empty"} transcript; trying primary multimodal audio understanding`,
+        `[clawsense] runtime STT produced ${text ? "low-signal" : "empty"} transcript; trying local ASR before host-model fallbacks`,
       );
     } catch (error) {
       runtimeFailureReason = combineFailureReasons(runtimeFailureReason, classifyRuntimeSttError(error));
-      this.logger.warn(`[clawsense] runtime STT failed; trying primary multimodal audio understanding: ${String(error)}`);
+      this.logger.warn(`[clawsense] runtime STT failed; trying local ASR before host-model fallbacks: ${String(error)}`);
     }
+
+    const localAfterRuntime = await attemptLocalAsr({
+      failureReason: runtimeFailureReason,
+      providerChainPrefix: "runtime",
+    });
+    if (localAfterRuntime.result) {
+      return localAfterRuntime.result;
+    }
+    runtimeFailureReason = localAfterRuntime.failureReason;
 
     if (this.cfg.hostModelAudioMode === "asr-first") {
       this.logger.warn("[clawsense] hostModelAudioMode=asr-first, trying compatible ASR before multimodal audio understanding");
@@ -953,6 +1021,8 @@ export class ClawSenseMemoryStore {
           analysisFailureReason: audioResult?.analysisFailureReason,
         }),
         transcript: audioResult?.transcript || undefined,
+        transcriptSegments: audioResult?.transcriptSegments,
+        speakerTimelineSegments: audioResult?.speakerTimelineSegments,
         analysisMode: audioResult?.analysisMode ?? "metadata-only",
         analysisProvider: audioResult?.analysisProvider ?? "metadata-only",
         analysisStatus: audioResult?.analysisStatus ?? "degraded",

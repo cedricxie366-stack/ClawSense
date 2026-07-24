@@ -46,6 +46,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CameraAlt
 import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.GraphicEq
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Lock
@@ -88,11 +89,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.compose.foundation.text.selection.LocalTextSelectionColors
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.graphics.SolidColor
@@ -164,12 +167,17 @@ data class HostWarning(
 @Composable
 private fun ClawSenseScreen(viewModel: MainViewModel) {
   val context = LocalContext.current
+  val clipboardManager = LocalClipboardManager.current
   val uiState by viewModel.uiState.collectAsStateWithLifecycle()
   val session = uiState.session
   var scannerOpen by rememberSaveable { mutableStateOf(false) }
   val permissions = permissionSnapshot(context)
   val hostWarning = session?.let(::resolveSessionHostWarning)
   val hostBlocksStart = hostWarning?.blocksStart == true
+  fun copyToClipboard(label: String, text: String) {
+    clipboardManager.setText(AnnotatedString(text))
+    viewModel.setStatus("$label 已复制，可以直接发给我排查。")
+  }
 
   val sensorPermissionsLauncher = rememberLauncherForActivityResult(
     contract = ActivityResultContracts.RequestMultiplePermissions(),
@@ -301,6 +309,16 @@ private fun ClawSenseScreen(viewModel: MainViewModel) {
             }
           },
           onAutoVideoEnabledChange = viewModel::setAutoVideoEnabled,
+          onCopyDiagnostics = {
+            copyToClipboard(
+              label = "最近活动诊断",
+              text = buildRecentActivityDiagnostics(
+                uiState = uiState,
+                permissions = permissions,
+                hostWarning = hostWarning,
+              ),
+            )
+          },
         )
         AssistantCard(
           uiState = uiState,
@@ -327,7 +345,16 @@ private fun ClawSenseScreen(viewModel: MainViewModel) {
           },
         )
         PermissionCard(permissions)
-        EventCard(uiState.statusMessage, uiState.isBusy)
+        EventCard(
+          message = uiState.statusMessage,
+          isBusy = uiState.isBusy,
+          onCopy = { message ->
+            copyToClipboard(
+              label = "最近事件",
+              text = buildRecentEventDiagnostics(message, uiState),
+            )
+          },
+        )
 
         if (session == null) {
           PairingCard(
@@ -713,6 +740,7 @@ private fun ServiceRuntimeCard(
   onStop: () -> Unit,
   onCaptureVideo: () -> Unit,
   onAutoVideoEnabledChange: (Boolean) -> Unit,
+  onCopyDiagnostics: () -> Unit,
 ) {
   val visual = runtimeVisual(uiState.runtimeStatus, uiState.session != null)
   val updatedAtText = formatTimestamp(uiState.runtimeStatus.updatedAt)
@@ -826,11 +854,30 @@ private fun ServiceRuntimeCard(
             .padding(16.dp),
           verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-          Text(
-            text = "最近活动",
-            style = MaterialTheme.typography.titleMedium,
-            color = ClawSensePalette.TextPrimary,
-          )
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            Text(
+              text = "最近活动",
+              style = MaterialTheme.typography.titleMedium,
+              color = ClawSensePalette.TextPrimary,
+            )
+            AssistChip(
+              onClick = onCopyDiagnostics,
+              label = { Text("复制诊断") },
+              leadingIcon = {
+                Icon(Icons.Outlined.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+              },
+              colors = androidx.compose.material3.AssistChipDefaults.assistChipColors(
+                containerColor = ClawSensePalette.CardStrong,
+                labelColor = ClawSensePalette.TextPrimary,
+                leadingIconContentColor = ClawSensePalette.Accent,
+              ),
+              border = androidx.compose.foundation.BorderStroke(1.dp, ClawSensePalette.Stroke),
+            )
+          }
           ActivityRow(
             icon = Icons.Outlined.GraphicEq,
             label = "最近音频上传",
@@ -990,10 +1037,11 @@ private fun PermissionCard(permissions: PermissionSnapshot) {
 }
 
 @Composable
-private fun EventCard(message: String?, isBusy: Boolean) {
+private fun EventCard(message: String?, isBusy: Boolean, onCopy: (String) -> Unit) {
   if (message.isNullOrBlank() && !isBusy) {
     return
   }
+  val displayMessage = message ?: "处理中…"
   Card(
     colors = CardDefaults.cardColors(containerColor = Color(0xCC17202B)),
     shape = RoundedCornerShape(26.dp),
@@ -1014,9 +1062,28 @@ private fun EventCard(message: String?, isBusy: Boolean) {
       } else {
         Icon(Icons.Outlined.SettingsInputAntenna, contentDescription = null, tint = ClawSensePalette.Accent)
       }
-      Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-        Text("最近事件", style = MaterialTheme.typography.titleSmall, color = ClawSensePalette.TextPrimary)
-        Text(message ?: "处理中…", style = MaterialTheme.typography.bodyMedium, color = ClawSensePalette.TextSecondary)
+      Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Text("最近事件", style = MaterialTheme.typography.titleSmall, color = ClawSensePalette.TextPrimary)
+          AssistChip(
+            onClick = { onCopy(displayMessage) },
+            label = { Text("复制") },
+            leadingIcon = {
+              Icon(Icons.Outlined.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+            },
+            colors = androidx.compose.material3.AssistChipDefaults.assistChipColors(
+              containerColor = ClawSensePalette.CardStrong,
+              labelColor = ClawSensePalette.TextPrimary,
+              leadingIconContentColor = ClawSensePalette.Accent,
+            ),
+            border = androidx.compose.foundation.BorderStroke(1.dp, ClawSensePalette.Stroke),
+          )
+        }
+        Text(displayMessage, style = MaterialTheme.typography.bodyMedium, color = ClawSensePalette.TextSecondary)
       }
     }
   }
@@ -1567,6 +1634,69 @@ private fun formatAnalysisQueueStatus(activity: ServiceActivitySnapshot): String
     true -> "已进入后台分析队列$queueText"
     false -> "媒体已保存，等待补分析$queueText"
     null -> "暂无队列状态"
+  }
+}
+
+private fun buildRecentEventDiagnostics(message: String, uiState: MainUiState): String {
+  return buildString {
+    appendLine("ClawSense 最近事件")
+    appendLine("generatedAt=${formatTimestamp(System.currentTimeMillis())}")
+    appendLine("appVersion=${BuildConfig.VERSION_NAME}")
+    appendLine("message=$message")
+    appendLine("busy=${uiState.isBusy}")
+    appendLine("serviceEnabled=${uiState.serviceEnabled}")
+    appendLine("runtime=${uiState.runtimeStatus.phase}/${uiState.runtimeStatus.mode}")
+    appendLine("assistant=${uiState.assistant.phase}/${uiState.assistant.mode}")
+    uiState.assistant.lastError?.let { appendLine("assistantLastError=$it") }
+    uiState.serviceActivity.lastError?.let { appendLine("serviceLastError=$it") }
+    appendLine("pendingUploads=${uiState.serviceActivity.pendingUploads}")
+  }
+}
+
+private fun buildRecentActivityDiagnostics(
+  uiState: MainUiState,
+  permissions: PermissionSnapshot,
+  hostWarning: HostWarning?,
+): String {
+  val activity = uiState.serviceActivity
+  val session = uiState.session
+  return buildString {
+    appendLine("ClawSense 最近活动诊断")
+    appendLine("generatedAt=${formatTimestamp(System.currentTimeMillis())}")
+    appendLine("appVersion=${BuildConfig.VERSION_NAME}")
+    appendLine("deviceName=${uiState.deviceName}")
+    appendLine("paired=${session != null}")
+    appendLine("deviceId=${session?.deviceId ?: "none"}")
+    appendLine("host=${session?.host ?: "none"}")
+    appendLine("uploadBaseUrl=${session?.uploadBaseUrl ?: "none"}")
+    appendLine("hostWarning=${hostWarning?.title ?: "none"}")
+    appendLine("hostWarningAction=${hostWarning?.action ?: "none"}")
+    appendLine("serviceEnabled=${uiState.serviceEnabled}")
+    appendLine("runtimePhase=${uiState.runtimeStatus.phase}")
+    appendLine("runtimeMode=${uiState.runtimeStatus.mode}")
+    appendLine("runtimeUpdatedAt=${formatTimestamp(uiState.runtimeStatus.updatedAt)}")
+    appendLine("runtimeLastError=${uiState.runtimeStatus.lastError ?: "none"}")
+    appendLine("permissions.camera=${permissions.camera}")
+    appendLine("permissions.microphone=${permissions.microphone}")
+    appendLine("permissions.notifications=${permissions.notifications}")
+    appendLine("lastAudioUploadAt=${formatTimestampOrPlaceholder(activity.lastAudioUploadAt)}")
+    appendLine("lastImageUploadAt=${formatTimestampOrPlaceholder(activity.lastImageUploadAt)}")
+    appendLine("lastVideoUploadAt=${formatTimestampOrPlaceholder(activity.lastVideoUploadAt)}")
+    appendLine("videoStatus=${formatVideoStatus(activity)}")
+    appendLine("videoCaptureInProgress=${activity.videoCaptureInProgress}")
+    appendLine("analysisQueue=${formatAnalysisQueueStatus(activity)}")
+    appendLine("lastUploadStored=${activity.lastUploadStored ?: "unknown"}")
+    appendLine("lastAnalysisQueued=${activity.lastAnalysisQueued ?: "unknown"}")
+    appendLine("lastServerQueueDepth=${activity.lastServerQueueDepth ?: "unknown"}")
+    appendLine("pendingUploads=${activity.pendingUploads}")
+    appendLine("recentError=${formatRecentError(activity)}")
+    appendLine("statusMessage=${uiState.statusMessage ?: "none"}")
+    appendLine("assistantPhase=${uiState.assistant.phase}")
+    appendLine("assistantMode=${uiState.assistant.mode}")
+    appendLine("assistantQuery=${uiState.assistant.queryText ?: "none"}")
+    appendLine("assistantAnswer=${uiState.assistant.answerText ?: "none"}")
+    appendLine("assistantSpoken=${uiState.assistant.answerSpokenText ?: "none"}")
+    appendLine("assistantLastError=${uiState.assistant.lastError ?: "none"}")
   }
 }
 

@@ -47,8 +47,21 @@ export type AudioUnderstandingAttempt = {
   analysisFailureReason?: string;
 };
 
+export type AudioTranscriptSegment = {
+  startMs?: number;
+  endMs?: number;
+  text: string;
+  speakerLabel?: string;
+  confidence?: number;
+};
+
+export type AudioSpeakerTimelineSegment = AudioTranscriptSegment;
+
 export type AudioTranscriptionAttempt = {
   transcript?: string;
+  transcriptSegments?: AudioTranscriptSegment[];
+  speakerTimelineSegments?: AudioSpeakerTimelineSegment[];
+  language?: string;
   analysisProvider: string;
   analysisFailureReason?: string;
 };

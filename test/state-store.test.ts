@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ClawSenseStateStore, toLocalDateKey } from "../src/state-store.js";
+import { ClawSenseStateStore, toLocalDateKey, type ClawSenseMemoryCard } from "../src/state-store.js";
 import { issueSetupToken } from "../src/utils.js";
 
 describe("ClawSenseStateStore", () => {
@@ -239,6 +239,145 @@ describe("ClawSenseStateStore", () => {
     expect(created.event.tags).toEqual(expect.arrayContaining(["study", "experiment", "exam"]));
   });
 
+  it("derives office product project refs from AI coaching meeting transcripts", async () => {
+    const store = createStore();
+    const device = await store.registerDevice({
+      name: "PDEM10",
+      platform: "android",
+    });
+    const capturedAt = Date.UTC(2026, 5, 25, 10, 0, 0);
+
+    const created = await store.recordCapture({
+      memoryId: "audio-ai-coaching-projects",
+      namespace: "clawsense",
+      deviceId: device.deviceId,
+      modality: "audio",
+      summary: "AI 陪练系统需求评审，讨论真实语料同步、考核点、报表优化和海南物流培训安排。",
+      transcript:
+        "AI 陪练要支持聊天记录语料同步，后续还要确认考核点通过率、缺陷项报表优化，以及海南物流培训里的工单流程和角色讲解。",
+      createdAt: capturedAt,
+      capturedAt,
+      sourcePath: "/tmp/audio-ai-coaching-projects.wav",
+      fileName: "audio-ai-coaching-projects.wav",
+      mime: "audio/wav",
+      sizeBytes: 1024,
+      storageRelPath: "2026/06/25/pdem10/audio-ai-coaching-projects.wav",
+      retentionExpiresAt: capturedAt + 7 * 24 * 60 * 60 * 1000,
+      analysisMode: "runtime-stt",
+      analysisStatus: "succeeded",
+    });
+
+    expect(created.event.projectRefs).toEqual(
+      expect.arrayContaining([
+        "ai_coaching",
+        "corpus_sync",
+        "assessment_rubric",
+        "ai_report_optimization",
+        "training_arrangement",
+      ]),
+    );
+    expect(created.event.tags).toEqual(
+      expect.arrayContaining(["office", "ai-coaching", "corpus", "assessment", "ai-report", "training-plan"]),
+    );
+    expect(created.event.tags).not.toContain("social");
+  });
+
+  it("refreshes stale event semantic refs only when explicitly applied", async () => {
+    const store = createStore();
+    const device = await store.registerDevice({
+      name: "PDEM10",
+      platform: "android",
+    });
+    const capturedAt = Date.UTC(2026, 5, 25, 10, 0, 0);
+    const date = toLocalDateKey(capturedAt);
+    const created = await store.recordCapture({
+      memoryId: "audio-stale-semantic-refs",
+      namespace: "clawsense",
+      deviceId: device.deviceId,
+      modality: "audio",
+      summary: "AI 陪练系统需求评审，讨论真实语料同步和考核点。",
+      transcript: "AI 陪练要支持聊天记录语料同步，并确认考核点通过率和缺陷项报表优化。",
+      createdAt: capturedAt,
+      capturedAt,
+      sourcePath: "/tmp/audio-stale-semantic-refs.wav",
+      fileName: "audio-stale-semantic-refs.wav",
+      mime: "audio/wav",
+      sizeBytes: 1024,
+      storageRelPath: "2026/06/25/pdem10/audio-stale-semantic-refs.wav",
+      retentionExpiresAt: capturedAt + 7 * 24 * 60 * 60 * 1000,
+      analysisMode: "runtime-stt",
+      analysisStatus: "succeeded",
+    });
+
+    const statePath = path.join(rootDir, "plugins", "clawsense", "state.json");
+    const staleState = JSON.parse(await fs.readFile(statePath, "utf8"));
+    staleState.events = staleState.events.map((event: { eventId: string; projectRefs?: string[]; tags?: string[] }) =>
+      event.eventId === created.event.eventId
+        ? {
+            ...event,
+            projectRefs: [],
+            tags: ["audio-window"],
+          }
+        : event,
+    );
+    staleState.reviews = [
+      {
+        reviewId: "cached-review",
+        date,
+        generatedAt: capturedAt,
+        mode: "heuristic",
+        summary: "cached",
+        sections: [],
+        keyEventIds: [],
+        keyArtifactIds: [],
+      },
+    ];
+    staleState.consolidations = [
+      {
+        consolidationId: "cached-consolidation",
+        date,
+        generatedAt: capturedAt,
+        summary: "cached",
+        keyInsights: [],
+        tasks: [],
+        attentionItems: [],
+        learningPoints: [],
+        keyWindowIds: [],
+        people: [],
+        projects: [],
+        stats: {
+          windowCount: 0,
+          eventCount: 0,
+          audioWindowCount: 0,
+          transcriptReadyWindows: 0,
+          imageCount: 0,
+          audioCount: 0,
+          degradedEventCount: 0,
+        },
+      },
+    ];
+    await fs.writeFile(statePath, `${JSON.stringify(staleState, null, 2)}\n`, "utf8");
+
+    const dryRun = await store.refreshEventSemanticSignals({ date, apply: false });
+    expect(dryRun.changedEvents).toBe(1);
+    expect(dryRun.sampleChanges[0]?.nextProjectRefs).toEqual(
+      expect.arrayContaining(["ai_coaching", "corpus_sync", "assessment_rubric", "ai_report_optimization"]),
+    );
+    expect((await store.listEvents())[0]?.projectRefs).toEqual([]);
+
+    const applied = await store.refreshEventSemanticSignals({ date, apply: true });
+    const [updated] = await store.listEvents();
+    expect(applied.changedEvents).toBe(1);
+    expect(applied.invalidatedDates).toEqual([date]);
+    expect(updated?.projectRefs).toEqual(
+      expect.arrayContaining(["ai_coaching", "corpus_sync", "assessment_rubric", "ai_report_optimization"]),
+    );
+
+    const appliedState = JSON.parse(await fs.readFile(statePath, "utf8"));
+    expect(appliedState.reviews).toEqual([]);
+    expect(appliedState.consolidations).toEqual([]);
+  });
+
   it("adds video and keyframe semantic tags when video request markers are present", async () => {
     const store = createStore();
     const device = await store.registerDevice({
@@ -364,6 +503,206 @@ describe("ClawSenseStateStore", () => {
     expect(loaded?.summary).toContain("课堂复习");
     expect(loaded?.projects[0]?.ref).toBe("exam_prep");
     expect(listed).toHaveLength(1);
+  });
+
+  it("stores searchable conversation digest snapshots", async () => {
+    const store = createStore();
+    const first = {
+      digestId: "digest-2026-06-25",
+      date: "2026-06-25",
+      scope: "today" as const,
+      startAt: Date.UTC(2026, 5, 25, 0, 0, 0),
+      endAt: Date.UTC(2026, 5, 26, 0, 0, 0),
+      generatedAt: Date.UTC(2026, 5, 25, 12, 0, 0),
+      sourceEventCount: 20,
+      sourceWindowCount: 3,
+      transcriptWindowCount: 2,
+      summary: "6月25日持久化会议索引。",
+      topicIndex: [
+        {
+          index: 1,
+          windowId: "audio-session::meeting-1",
+          timeRange: "09:58-10:15",
+          title: "AI 陪练与剧本",
+          summary: "讨论 AI 陪练剧本生成。",
+          keywordHints: ["AI陪练", "剧本"],
+          taskHints: ["产品团队需要确认接口方案。"],
+          transcriptExcerpt: "来介绍一下 AI 陪练相关的功能。",
+        },
+      ],
+      keywordIndex: [
+        {
+          keyword: "AI陪练",
+          topicIndexes: [1],
+        },
+      ],
+    };
+    await store.putConversationDigest(first);
+    await store.putConversationDigest({
+      ...first,
+      generatedAt: first.generatedAt + 1_000,
+      summary: "更新后的索引。",
+    });
+
+    const listed = await store.listConversationDigests({
+      date: "2026-06-25",
+      startAt: Date.UTC(2026, 5, 25, 8, 0, 0),
+      endAt: Date.UTC(2026, 5, 25, 12, 0, 0),
+    });
+
+    expect(listed).toHaveLength(1);
+    expect(listed[0]?.summary).toBe("更新后的索引。");
+    expect(listed[0]?.topicIndex[0]?.keywordHints).toEqual(["AI陪练", "剧本"]);
+  });
+
+  it("stores filterable long-term memory cards", async () => {
+    const store = createStore();
+    const startAt = Date.UTC(2026, 5, 25, 9, 58, 0);
+    const endAt = Date.UTC(2026, 5, 25, 10, 15, 0);
+    await store.putMemoryCards([
+      {
+        cardId: "memcard-task-1",
+        date: "2026-06-25",
+        scope: "custom-range",
+        kind: "task",
+        title: "产品团队需要确认接口方案",
+        summary: "任务线索来自第 1 段。",
+        status: "active",
+        confidence: "medium",
+        startAt,
+        endAt,
+        lastSeenAt: endAt,
+        createdAt: startAt,
+        updatedAt: endAt,
+        keywords: ["任务", "接口"],
+        source: "rolling-digest",
+        evidence: {
+          digestId: "digest-1",
+          topicIndexes: [1],
+          windowIds: ["audio-session::meeting-1"],
+          timeRanges: ["09:58-10:15"],
+          taskHints: ["产品团队需要确认接口方案。"],
+          transcriptExcerpts: ["来介绍一下 AI 陪练相关的功能。"],
+        },
+      },
+      {
+        cardId: "memcard-topic-1",
+        date: "2026-06-25",
+        scope: "custom-range",
+        kind: "topic",
+        title: "AI 陪练与剧本",
+        summary: "话题索引第 1 段。",
+        status: "active",
+        confidence: "medium",
+        startAt,
+        endAt,
+        lastSeenAt: endAt,
+        createdAt: startAt,
+        updatedAt: endAt,
+        keywords: ["AI陪练"],
+        source: "rolling-digest",
+        evidence: {
+          digestId: "digest-1",
+          topicIndexes: [1],
+          windowIds: ["audio-session::meeting-1"],
+          timeRanges: ["09:58-10:15"],
+          taskHints: [],
+          transcriptExcerpts: ["来介绍一下 AI 陪练相关的功能。"],
+        },
+      },
+    ]);
+
+    const all = await store.listMemoryCards({
+      date: "2026-06-25",
+      startAt: Date.UTC(2026, 5, 25, 9, 0, 0),
+      endAt: Date.UTC(2026, 5, 25, 11, 0, 0),
+    });
+    const tasks = await store.listMemoryCards({
+      date: "2026-06-25",
+      kind: "task",
+    });
+
+    expect(all.map((card) => card.kind)).toEqual(["task", "topic"]);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]?.title).toContain("接口方案");
+  });
+
+  it("merges semantically duplicate memory cards while preserving evidence", async () => {
+    const store = createStore();
+    const startAt = Date.UTC(2026, 5, 25, 9, 58, 0);
+    const middleAt = Date.UTC(2026, 5, 25, 10, 8, 0);
+    const endAt = Date.UTC(2026, 5, 25, 10, 15, 0);
+    const firstCard: ClawSenseMemoryCard = {
+      cardId: "memcard-task-old",
+      date: "2026-06-25",
+      scope: "custom-range",
+      kind: "task",
+      title: "产品团队需要确认接口方案",
+      summary: "任务线索来自第 1 段。",
+      status: "active",
+      confidence: "low",
+      startAt,
+      endAt: middleAt,
+      lastSeenAt: middleAt,
+      createdAt: startAt,
+      updatedAt: middleAt,
+      keywords: ["任务", "接口"],
+      source: "rolling-digest",
+      evidence: {
+        digestId: "digest-old",
+        topicIndexes: [1],
+        windowIds: ["audio-session::meeting-1"],
+        timeRanges: ["09:58-10:08"],
+        taskHints: ["产品团队需要确认接口方案。"],
+        transcriptExcerpts: ["需要确认接口字段。"],
+      },
+    };
+    const secondCard: ClawSenseMemoryCard = {
+      ...firstCard,
+      cardId: "memcard-task-new",
+      summary: "任务线索来自第 2 段，补充了 API 输出方式。",
+      confidence: "medium",
+      startAt: middleAt,
+      endAt,
+      lastSeenAt: endAt,
+      createdAt: middleAt,
+      updatedAt: endAt,
+      keywords: ["任务", "API"],
+      evidence: {
+        digestId: "digest-new",
+        topicIndexes: [2],
+        windowIds: ["audio-session::meeting-2"],
+        timeRanges: ["10:08-10:15"],
+        taskHints: ["提供 API 输出方案。"],
+        transcriptExcerpts: ["或者我们提供 API 出来。"],
+      },
+    };
+
+    await store.putMemoryCards([firstCard]);
+    await store.putMemoryCards([secondCard]);
+
+    const cards = await store.listMemoryCards({ date: "2026-06-25", kind: "task" });
+
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toEqual(
+      expect.objectContaining({
+        cardId: "memcard-task-old",
+        title: "产品团队需要确认接口方案",
+        confidence: "medium",
+        startAt,
+        endAt,
+        createdAt: startAt,
+        updatedAt: endAt,
+        lastSeenAt: endAt,
+      }),
+    );
+    expect(cards[0]?.keywords).toEqual(["任务", "接口", "API"]);
+    expect(cards[0]?.evidence.digestId).toBe("digest-new");
+    expect(cards[0]?.evidence.topicIndexes).toEqual([1, 2]);
+    expect(cards[0]?.evidence.windowIds).toEqual(["audio-session::meeting-1", "audio-session::meeting-2"]);
+    expect(cards[0]?.evidence.timeRanges).toEqual(["09:58-10:08", "10:08-10:15"]);
+    expect(cards[0]?.evidence.taskHints).toEqual(["产品团队需要确认接口方案。", "提供 API 输出方案。"]);
+    expect(cards[0]?.evidence.transcriptExcerpts).toEqual(["需要确认接口字段。", "或者我们提供 API 出来。"]);
   });
 
   it("groups audio and nearby images into the same event window", async () => {

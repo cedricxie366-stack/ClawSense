@@ -509,9 +509,9 @@ class AndroidAudioSensorHal(
     // Dedicated assistant-query recorder: more sensitive than the ambient VAD and
     // bounded by a hard cap so a query never waits on ambient silence heuristics.
     val queryMaxDurationMs: Long = 8_000,
-    val querySilenceTimeoutMs: Long = 1_200,
-    val queryMinVoicedMs: Long = 400,
-    val queryVadThresholdRms: Double = 0.008,
+    val querySilenceTimeoutMs: Long = 1_500,
+    val queryMinVoicedMs: Long = 240,
+    val queryVadThresholdRms: Double = 0.004,
   )
 
   private fun audioSourceName(source: Int): String {

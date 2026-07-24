@@ -4,7 +4,7 @@
 
 把 ClawSense 从“ingest 阶段就产出最终 summary 的插件”，改成“为 OpenClaw 主模型提供全天 evidence 的记忆层”。
 
-## 当前进展快照（2026-06-02）
+## 当前进展快照（2026-07-14）
 
 ### 产品主线调整
 
@@ -37,23 +37,42 @@ Phase 8 的代码闭环已先按通过处理，真实长对话素材由验收线
   - context/evidence 输出、artifact refs、窗口化结构均已上线
 - Phase 3（retrieval 层）：已完成基础能力并投入使用
   - 时间窗与人物/项目线索检索可用，音频补强与回填链可用
+  - rolling digest 已可沉淀为长期 `memoryCards`（任务 / 话题 / 注意 / 学习点），并通过 CLI 与 `responseHints` 暴露，作为后续 transcript/caption embedding 的对象层
+  - `memoryCards` 已可输出 Markdown 报告并写入 drafts 目录，形成“证据 -> 记忆卡片 -> 可保存文档草稿”的非真机闭环
+  - embedding 前召回排序已具备可解释输出：`memoryCardMatches` 包含 `retrievalRank`、`score`、`matchedTerms`、`matchReasons`，用于在未配置向量库时稳定回答任务/风险/学习/文档类问题
+  - 记忆卡片语义去重 / 证据归并已具备存储层保障：同一日期、scope、类型和标题的卡片会合并证据链，避免多次 rolling digest 后重复膨胀
+  - 人物 / 项目历史追问已接入长期记忆卡片：历史对象会携带相关任务卡 / 话题卡，并在 `clawsense_context` 中展示“关联记忆卡片”
+  - `openclaw clawsense history` 已作为人物 / 项目历史记忆 CLI 观测入口，便于验收线程检查历史项、关联卡片和继续追问目标
+  - 办公业务主线抽取已增强：`AI 陪练 / 语料同步 / 考核规则 / 报告优化 / 培训安排` 会成为稳定 `projectRefs`；旧历史 state 可用 `openclaw clawsense refresh-semantics [date]` dry-run / `--apply` 迁移语义索引
+  - 项目历史追问已补齐中文别名和证据质量排序：自然语言问“AI 陪练这个项目之前出现过什么”时，优先返回可读 transcript / 音频证据，再带关联 `memoryCards`
+  - speaker 标注辅助已从“缺身份提示”升级为“任务归属影响面提示”：`speaker-slots` 会输出 `slotTaskImpacts`、候选标注命令和 `requiresDiarization`，明确哪些任务只能靠窗口上下文暂时推断，哪些仍需要句子级 speaker 才能精确归属
 - Phase 4（上下文工具重构）：已完成并默认 evidence-first
   - 聊天页与工具输出已以 evidence 为主，不再依赖弱 summary
+  - `audioDiagnostics` 已进入 evidence bundle / `responseHints`：OpenClaw 主模型能知道 raw audio 当前是 `available`、`deleted` 还是缺 artifact record，避免把 retention 删除误判成“模型没听音频”
+  - context/evidence 只暴露 `artifact.available=true` 的原始音频引用；raw audio 已删除时改为明确给出 blocker 和 next actions
 - Phase 5（主模型 consolidation）：已完成首版并持续加固
   - 日级 consolidation 生成与缓存复用已上线，质量持续优化中
 - Phase 6（配置标准化）：收口中（接近完成）
   - 多 provider fallback 技术债已收口
   - capability 配置项（audio/image/video/retrieval）已对齐并补齐回归测试
   - `acceptance-plan` 已上线，用于可执行验收闭环
-- Phase 7（验收矩阵）：进行中（主要阻塞项）
+- Phase 7（验收矩阵）：Host / fixture 已 ready-to-close，最终仍等物理 Android live
   - CLI 验收能力已可跑：`acceptance` / `acceptance-plan` / `doctor`
+  - `npm run check:non-device-product-gate` 已成为非真机产品质量门禁：覆盖 Evidence v2 synthetic 正向音频诊断、conversation routing 公开 AMI 对话包、6 月 25 日真实历史 retention 边界、公开 AMI/中文会议 replay、active raw audio positive、speaker slots 和自动视频 fixture
+  - `npm run report:non-device-product-gate` 已可只读最近一次 `.local/non-device-product-gate-reports/latest.json` 摘要，方便主开发线程 / 验收线程快速复查关键字段而不重跑完整门禁；当前 `freshness.isStale=false`
+  - 当前非真机 gate 最新通过指标：`passed=9`、`skipped=0`、`failed=0`，报告为 `.local/non-device-product-gate-reports/non-device-product-gate-2026-07-13T17-25-48-127Z.json`；`evidence-v2-synthetic` 和 `conversation-routing` 均显示 `rawAudioArtifacts=available`、`audioBlockerIds=["audio-ready"]`；`historical-real-state` 显示 `contextAudioMatchesDiagnostics=true` 且 raw audio retention 删除被正确标成 `raw-audio-retention-deleted`
+  - `CHECK_ANDROID=0 npm run check:release` 已接入轻量 `check:evidence-v2`，发布边界会实际验证长音频 topic、speaker timeline、任务归属和 audioDiagnostics 正向路径；最新运行通过，`274` tests passed
   - 公开 fixture 覆盖已补齐 AMI 办公会议 + MIT 课堂 transcript + MIT 课堂视频；当前 repo-local acceptance 已达到 `5/5`、`100%`、`ready-to-close`
+  - 公开 AMI 办公会议 replay 已进入 `check:phase`：阶段门禁会把公开 AMI hybrid ASR 结果写入当天日期，并验证 transcript spans、topic segments、followups 和 `speaker_2 -> Sarah` 标注复用
+  - 公开 AliMeeting 中文会议已补齐 optional host-side 验证：metadata smoke、120 秒远场切片、FunASR-primary + CAM++ 深测，以及 `check:public-zh-replay` 写入 ClawSense context/followups/speaker annotation 链路
   - 视频验收已不再只靠 `hostModelVideoMode=none` 跳过：`keyframes` 模式下公开视频 fixture 可提供 1 个真实 MP4、3 个关键帧、3 条同 `videoRequestId` 的 transcript spans
-  - `npm run check:phase` 已新增为当前阶段一键门禁，覆盖 release gate、Android debug build、公开视频 replay、speaker annotation smoke、acceptance 与 video evidence 断言
-  - `check:stage-final` / `check:stage-final:doctor` 已新增为最终阶段门禁：必须同时拥有 fresh primary Android live report 和 fresh no-arm ambient report
-  - 截至 2026-06-02 23:38，最新 phase report `.local/current-phase-reports/current-phase-20260602-233556.json` 已为 `ok=true`，并包含 Phase 9 汇总 `autoVideoTriggerChecks=4`、`hostChecks=7`、`androidChecks=11`、`liveReportChecks=5`；最新 `check:stage-final:doctor` 状态仍预期为 `primary-live-stale`，因为 2026-05-31 的 primary live / no-arm 报告早于当前 phase report，必须重新跑 fresh Android live 验收
+  - `npm run check:phase` 已作为当前阶段一键门禁，覆盖 release gate、公开视频 replay、speaker annotation smoke、acceptance、video evidence 与 Phase 9 断言；当私有 AMI fixture 缺失时，会用公开 AMI replay 兜住办公会议场景
+  - `check:stage-final` / `check:stage-final:doctor` 已新增为最终阶段门禁：必须同时拥有 fresh primary Android live report 和 fresh no-arm ambient report；当前只读 doctor 状态为 `primary-live-stale`
+  - 截至 2026-07-03 17:30，最新 phase report `.local/current-phase-reports/current-phase-20260703-173031.json` 已为 `ok=true`，`phaseState=ready-to-close`，并包含 Phase 9 汇总 `autoVideoTriggerChecks=4`、`hostChecks=7`、`androidChecks=11`、`liveReportChecks=5`
+  - 同一报告中的公开 AMI replay 指标为：`segmentCount=36`、`transcriptSpans=12`、`topicSegments=10`、`evidenceFollowUpTargets=8`、`annotatedSpeaker=Sarah`
+  - AliMeeting 中文 replay 指标为：`segmentCount=7`、`transcriptSpanCount=7`、`topicSegmentCount=1`、`evidenceFollowUpTargetCount=2`、`annotatedSpeaker=同事A`；这条不进入默认 phase gate，但作为中文办公会议 ASR / speaker 回归入口保留
   - 自动视频验收已从 primary live 中独立出来：正向自动视频报告必须用 `EXPECT_AUTO_VIDEO=1 scripts/check-android-live.sh collect` 生成；如果本阶段把主动视频也作为发布硬门槛，再用 `REQUIRE_AUTO_VIDEO_LIVE=1 npm run check:stage-final` 要求第三份 fresh auto-video live 证据
-  - 真实 Android 采集、TTS 体验、手动短视频入库和 no-arm 环境音不污染验收仍是主阻塞
+  - 真实 Android 采集、TTS 体验、手动短视频入库和 no-arm 环境音不污染验收仍是主阻塞；`check:android-live:doctor` 当前为 `waiting-for-device`，唯一 blocker 是 `no authorized Android device connected`
 - Phase 2（结构化层）：视频子项已进入 M2 手动短视频收口
   - `/api/clawsense/ingest/video` 已可入队/入库（受 `hostModelVideoMode` 开关控制）
   - `keyframes` 模式：视频原片保留 + 可选关键帧入队，视频事件仍以 metadata/degraded 方式落库
@@ -152,10 +171,12 @@ Phase 8 的代码闭环已先按通过处理，真实长对话素材由验收线
 
 - retrieval service
 - retrieval ranking rules
+- speaker 标注影响面：`slotTaskImpacts` 将未归属任务、候选 speaker slot 和可复制标注命令连起来，并明确 `window-context-only` 与 `exact-speaker-label` 的差异
 
 ### 验收
 
 - 给定问题，能召回合理的候选 evidence windows
+- 当用户问“哪些任务分配给我”但 speaker 未标注时，系统不能硬判归属；应给出需要标注的 speaker slot、受影响任务样例和是否仍需要 diarization
 
 ## Phase 4：上下文工具重构
 
@@ -441,13 +462,14 @@ Phase 9 不是替代 Phase 8，而是让 Phase 8 在真实全天使用里不崩�
 2. 已完成首版：连续追问、`读全文 / 简短点 / 继续说` 模板承接
 3. 已完成首版：`draft_document` action intent 与 markdown 草稿落地
 4. 已完成公开素材 fixture 收口：AMI 办公会议 + MIT 课堂 replay / rubric / speaker annotation smoke，repo-local acceptance `ready-to-close`
-5. 已完成当前阶段一键门禁：`npm run check:phase`
-6. 已完成 Phase 9A/B 最小闭环：fast ingest、async analysis、queue-status、analysis-retry、Android 上传 ACK / 队列状态展示
-7. 已完成 Phase 9C 最小闭环：Host 下发一次性 `video_clip` directive，Android 用户开启后低频自动录制 6 秒视频并写入触发原因
-8. 已完成 Phase 9 机器门禁：`npm run check:phase9` 覆盖触发规则、Host / Android invariant 和 live report 汇总字段，并已接入 release / phase gate；live report 现在能区分 primary / no-arm / auto-video 三类证据
-9. 下一步：真机验证 Phase 9C 默认关闭、开启后触发、note metadata、冷却 / 上限和 Host evidence 回答；正向自动视频报告必须用 `EXPECT_AUTO_VIDEO=1` 生成，严格最终门禁用 `REQUIRE_AUTO_VIDEO_LIVE=1`
-10. 真机验证并调优 Android 自适应节流：拥堵时降低图片频率、延后低信号音频、暂停自动视频
-11. 最后再决定是否进入连续视频、端侧 pre-buffer 和全天记忆向量化增强
+5. 已完成中文公开会议 host-side 回归：AliMeeting metadata / FunASR-primary 深测 / ClawSense replay / speaker 标注复用
+6. 已完成当前阶段一键门禁：`npm run check:phase`
+7. 已完成 Phase 9A/B 最小闭环：fast ingest、async analysis、queue-status、analysis-retry、Android 上传 ACK / 队列状态展示
+8. 已完成 Phase 9C 最小闭环：Host 下发一次性 `video_clip` directive，Android 用户开启后低频自动录制 6 秒视频并写入触发原因
+9. 已完成 Phase 9 机器门禁：`npm run check:phase9` 覆盖触发规则、Host / Android invariant 和 live report 汇总字段，并已接入 release / phase gate；live report 现在能区分 primary / no-arm / auto-video 三类证据
+10. 下一步：真机验证 Phase 9C 默认关闭、开启后触发、note metadata、冷却 / 上限和 Host evidence 回答；正向自动视频报告必须用 `EXPECT_AUTO_VIDEO=1` 生成，严格最终门禁用 `REQUIRE_AUTO_VIDEO_LIVE=1`
+11. 真机验证并调优 Android 自适应节流：拥堵时降低图片频率、延后低信号音频、暂停自动视频
+12. 最后再决定是否进入连续视频、端侧 pre-buffer 和全天记忆向量化增强
 
 ## 里程碑
 

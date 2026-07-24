@@ -1,0 +1,4 @@
+interface:
+  display_name: "Source Reading Coach"
+  short_description: "Whole-source reading companion"
+  default_prompt: "Use $source-reading-coach to guide a whole-source reading session with source links, original text and translation when allowed, explanation, Q&A, teach-back, and assessment."

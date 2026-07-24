@@ -233,6 +233,7 @@ data class AssistantQuerySttDiagnostics(
   val failureReason: String? = null,
   val rawQueryText: String? = null,
   val queryRewriteReason: String? = null,
+  val queryAccepted: Boolean? = null,
   val queryDurationMs: Long? = null,
 )
 

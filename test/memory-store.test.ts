@@ -1299,6 +1299,44 @@ describe("ClawSenseMemoryStore", () => {
     expect(event.sttProvider).toBe("runtime");
   });
 
+  it("uses local Whisper ASR after empty runtime STT during audio ingest", async () => {
+    const commandPath = await writeExecutableScript(
+      rootDir,
+      "memory-whisper-stub.sh",
+      `#!/bin/sh
+printf '%s\\n' '{"segments":[{"start":0,"end":2.2,"text":"刚才确认了客户培训安排。","speaker":"speaker_1"}]}'
+`,
+    );
+    const harness = await createHarness(rootDir, {
+      mediaRoot: path.join(rootDir, "audio-local-asr-media"),
+      localAsrBackend: "whisper",
+      localAsrWhisperCommand: commandPath,
+      localAsrLanguage: "zh",
+    });
+
+    await harness.memoryStore.ingest({
+      device: harness.device,
+      modality: "audio",
+      body: createWaveBuffer(5_000),
+      fileName: "capture.wav",
+      mime: "audio/wav",
+      capturedAt: Date.now(),
+      transcribeAudio: async () => ({ text: "" }),
+      describeImage: async () => ({ text: "unused" }),
+    });
+
+    const event = await latestEvent(harness.stateStore);
+
+    expect(event.transcript).toBe("刚才确认了客户培训安排。");
+    expect(event.transcriptSegments).toEqual([
+      { startMs: 0, endMs: 2200, text: "刚才确认了客户培训安排。", speakerLabel: "speaker_1" },
+    ]);
+    expect(event.analysisMode).toBe("local-asr");
+    expect(event.analysisProvider).toBe("runtime+local-asr:whisper:zh");
+    expect(event.analysisStatus).toBe("succeeded");
+    expect(event.sttProvider).toBe("local-asr");
+  });
+
   it("stores captures immediately as pending and backfills analysis asynchronously", async () => {
     const harness = await createHarness(rootDir, {
       mediaRoot: path.join(rootDir, "audio-pending-media"),
@@ -2038,6 +2076,13 @@ const testLogger = {
   warn() {},
   error() {},
 };
+
+async function writeExecutableScript(rootDir: string, fileName: string, body: string): Promise<string> {
+  const filePath = path.join(rootDir, fileName);
+  await fs.writeFile(filePath, body, "utf8");
+  await fs.chmod(filePath, 0o755);
+  return filePath;
+}
 
 function createWaveBuffer(durationMs: number): Buffer {
   const sampleRate = 16_000;

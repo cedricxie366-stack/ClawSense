@@ -14,8 +14,11 @@ import type { OpenClawPluginApi } from "./src/openclaw-types.js";
 import { DEFAULT_PAIRING_TTL_SECONDS, clawsenseConfigSchema, resolveClawSenseConfig } from "./src/config.js";
 import { createJsonRoute, json, methodNotAllowed, parseBearerToken, readJson, unauthorized } from "./src/http.js";
 import {
+  type ClawSenseArtifactRecord,
+  type ClawSenseCaptureEvent,
   type ClawSenseDeviceRecord,
   type ClawSenseIngestReceipt,
+  type ClawSenseMemoryCard,
   type ClawSenseSetupToken,
   ClawSenseStateStore,
 } from "./src/state-store.js";
@@ -29,7 +32,7 @@ import {
   transcribeAudioWithFallbackModel,
   understandAudioWithPrimaryModel,
 } from "./src/openai-client.js";
-import { transcribeAudioWithLocalAsr } from "./src/local-asr.js";
+import { inspectLocalAsrConfig, transcribeAudioWithLocalAsr } from "./src/local-asr.js";
 import { enqueueIngestJob } from "./src/ingest-queue.js";
 import {
   buildCliAnnotationApplyPlan,
@@ -97,6 +100,8 @@ const plugin = {
     const DEVICE_HEARTBEAT_STALE_FACTOR = 3;
     let maintenanceTimer: NodeJS.Timeout | null = null;
     let analysisRecoveryTimer: NodeJS.Timeout | null = null;
+    let asrWorkerTimer: NodeJS.Timeout | null = null;
+    let asrWorkerActive = false;
     const analysisQueue: Array<{
       requestId: string;
       device: ClawSenseDeviceRecord;
@@ -133,6 +138,29 @@ const plugin = {
       issuedAt: number;
       expiresAt: number;
     }>();
+
+    const runAsrWorkerSafely = async (reason: "startup" | "interval" | "manual"): Promise<void> => {
+      if (asrWorkerActive) {
+        api.logger.warn(`[clawsense] ASR worker skipped ${reason}; previous tick is still running`);
+        return;
+      }
+      asrWorkerActive = true;
+      try {
+        const result = await reviewEngine.runAudioBackfillWorkerTick();
+        const attempted = result.run?.attempted ?? 0;
+        if (attempted > 0 || result.reason !== "no-audio-candidates") {
+          api.logger.info(
+            `[clawsense] ASR worker ${reason} reason=${result.reason} attempted=${attempted} succeeded=${
+              result.run?.succeeded ?? 0
+            } failed=${result.run?.failed ?? 0} remaining=${result.queue?.stats.remaining ?? 0}`,
+          );
+        }
+      } catch (error) {
+        api.logger.warn(`[clawsense] ASR worker ${reason} failed: ${String(error)}`);
+      } finally {
+        asrWorkerActive = false;
+      }
+    };
 
     const publicBaseUrl = (): string =>
       inferPublicBaseUrl({
@@ -1505,6 +1533,7 @@ const plugin = {
             failureReason: transcribed.failureReason ?? null,
             rawQueryText: resolvedQuery.rawQueryText || null,
             queryRewriteReason: resolvedQuery.reason ?? null,
+            queryAccepted: Boolean(resolvedQuery.queryText),
             queryDurationMs:
               typeof payload.queryDurationMs === "number" && Number.isFinite(payload.queryDurationMs)
                 ? payload.queryDurationMs
@@ -2162,7 +2191,63 @@ const plugin = {
         clawsense
           .command("context [scopeOrDate]")
           .description("输出给普通聊天使用的 ClawSense 受控上下文")
-          .action(async (scopeOrDate?: string) => {
+          .option("--question <question>", "原始用户问题；传入后会走聊天工具同款日期/时间窗推断和证据排序")
+          .option("--focus <focus>", "general | what_happened | watch_for")
+          .option("--deviceId <deviceId>", "按设备过滤")
+          .option("--modality <modality>", "audio | image | video")
+          .option("--startAt <ms>", "自定义时间窗起点（毫秒）")
+          .option("--endAt <ms>", "自定义时间窗终点（毫秒）")
+          .option("--lookbackDays <days>", "滚动回看天数（2-30），自动转 custom-range")
+          .action(async (
+            scopeOrDate?: string,
+            options?: {
+              question?: string;
+              focus?: string;
+              deviceId?: string;
+              modality?: string;
+              startAt?: string;
+              endAt?: string;
+              lookbackDays?: string;
+            },
+          ) => {
+            const shouldUseResolvedToolContext = Boolean(
+              options?.question ||
+                options?.focus ||
+                options?.deviceId ||
+                options?.modality ||
+                options?.startAt ||
+                options?.endAt ||
+                options?.lookbackDays,
+            );
+            if (shouldUseResolvedToolContext) {
+              const rawParams: ClawSenseContextToolParams = {
+                focus: coerceContextFocus(options?.focus),
+                question: options?.question,
+                deviceId: options?.deviceId,
+                modality: coerceModality(options?.modality),
+                startAt: parseOptionalFiniteNumber(options?.startAt),
+                endAt: parseOptionalFiniteNumber(options?.endAt),
+                lookbackDays: parseOptionalFiniteNumber(options?.lookbackDays),
+              };
+              if (scopeOrDate === "today" || scopeOrDate === "last-hour") {
+                rawParams.scope = scopeOrDate;
+              } else if (scopeOrDate?.trim()) {
+                rawParams.date = reviewEngine.normalizeDateInput(scopeOrDate.trim());
+              }
+              const resolved = await resolveClawSenseContext(
+                {
+                  reviewEngine,
+                  artifactUrlBase,
+                },
+                rawParams,
+              );
+              process.stdout.write(`${safeJsonStringify(resolved.ok ? {
+                ok: true,
+                text: resolved.text,
+                ...resolved.details,
+              } : resolved.details)}\n`);
+              return;
+            }
             const scope = coerceContextScope(scopeOrDate);
             const date =
               scopeOrDate && scopeOrDate !== "today" && scopeOrDate !== "last-hour"
@@ -2287,6 +2372,539 @@ const plugin = {
                 ...payload,
               })}\n`,
             );
+          });
+
+        clawsense
+          .command("history [scopeOrDate]")
+          .description("输出人物 / 项目历史记忆，并带出关联长期记忆卡片")
+          .option("--question <question>", "原始用户问题，例如：Amy 之前出现过什么？")
+          .option("--type <type>", "all | identity | project", "all")
+          .option("--focus <focus>", "general | what_happened | watch_for", "what_happened")
+          .option("--deviceId <deviceId>", "按设备过滤")
+          .option("--modality <modality>", "audio | image | video")
+          .option("--startAt <ms>", "自定义当前上下文时间窗起点（毫秒）")
+          .option("--endAt <ms>", "自定义当前上下文时间窗终点（毫秒）")
+          .option("--lookbackDays <days>", "当前上下文滚动回看天数（2-30），自动转 custom-range")
+          .action(async (
+            scopeOrDate?: string,
+            options?: {
+              question?: string;
+              type?: string;
+              focus?: string;
+              deviceId?: string;
+              modality?: string;
+              startAt?: string;
+              endAt?: string;
+              lookbackDays?: string;
+            },
+          ) => {
+            const rawParams: ClawSenseContextToolParams = {
+              focus: coerceContextFocus(options?.focus),
+              question: options?.question,
+              deviceId: options?.deviceId,
+              modality: coerceModality(options?.modality),
+              startAt: parseOptionalFiniteNumber(options?.startAt),
+              endAt: parseOptionalFiniteNumber(options?.endAt),
+              lookbackDays: parseOptionalFiniteNumber(options?.lookbackDays),
+            };
+            if (scopeOrDate === "today" || scopeOrDate === "last-hour") {
+              rawParams.scope = scopeOrDate;
+            } else if (scopeOrDate?.trim()) {
+              rawParams.date = reviewEngine.normalizeDateInput(scopeOrDate.trim());
+            }
+            const resolved = await resolveClawSenseContext(
+              {
+                reviewEngine,
+                artifactUrlBase,
+              },
+              rawParams,
+            );
+            if (!resolved.ok) {
+              process.stdout.write(`${safeJsonStringify(resolved.details)}\n`);
+              return;
+            }
+            const type = coerceHistoryType(options?.type);
+            const details = resolved.details as {
+              date: string;
+              scope: "today" | "last-hour" | "custom-range";
+              startAt?: number;
+              endAt?: number;
+              question?: string;
+              identityHistory?: unknown[];
+              projectHistory?: unknown[];
+              responseHints?: {
+                historyFollowUps?: unknown;
+                evidenceFollowUpTargets?: unknown;
+                identityHistory?: unknown[];
+                projectHistory?: unknown[];
+              };
+              evidenceBundle?: {
+                identityHistory?: unknown[];
+                projectHistory?: unknown[];
+              };
+            };
+            const identityHistory = type === "project"
+              ? []
+              : Array.isArray(details.responseHints?.identityHistory)
+                ? details.responseHints.identityHistory
+                : Array.isArray(details.evidenceBundle?.identityHistory)
+                  ? details.evidenceBundle.identityHistory
+                  : Array.isArray(details.identityHistory)
+                    ? details.identityHistory
+                    : [];
+            const projectHistory = type === "identity"
+              ? []
+              : Array.isArray(details.responseHints?.projectHistory)
+                ? details.responseHints.projectHistory
+                : Array.isArray(details.evidenceBundle?.projectHistory)
+                  ? details.evidenceBundle.projectHistory
+                  : Array.isArray(details.projectHistory)
+                    ? details.projectHistory
+                    : [];
+            process.stdout.write(
+              `${safeJsonStringify({
+                ok: true,
+                source: "refreshed-context",
+                scope: details.scope,
+                date: details.date,
+                startAt: details.startAt ?? null,
+                endAt: details.endAt ?? null,
+                question: options?.question ?? details.question ?? null,
+                type,
+                summary: summarizeHistoryCliPayload(identityHistory, projectHistory),
+                historyFollowUps: details.responseHints?.historyFollowUps ?? [],
+                evidenceFollowUpTargets: details.responseHints?.evidenceFollowUpTargets ?? [],
+                identityHistory,
+                projectHistory,
+              })}\n`,
+            );
+          });
+
+        clawsense
+          .command("refresh-semantics [date]")
+          .description("重算历史事件的 projectRefs/tags 语义索引；默认 dry-run，使用 --apply 写回")
+          .option("--apply", "写回 state，并清理受影响日期的 review/consolidation 缓存")
+          .option("--max-samples <count>", "最多输出多少条变化样例", "12")
+          .action(async (date?: string, options?: { apply?: boolean; maxSamples?: string }) => {
+            const normalizedDate = date?.trim()
+              ? date.trim() === "today"
+                ? reviewEngine.normalizeDateInput(undefined)
+                : reviewEngine.normalizeDateInput(date.trim())
+              : undefined;
+            const maxSamples = Number.parseInt(options?.maxSamples ?? "12", 10);
+            const result = await stateStore.refreshEventSemanticSignals({
+              date: normalizedDate,
+              apply: Boolean(options?.apply),
+              maxSamples: Number.isFinite(maxSamples) ? maxSamples : 12,
+            });
+            process.stdout.write(`${safeJsonStringify(result)}\n`);
+          });
+
+        clawsense
+          .command("digests [scopeOrDate]")
+          .description("输出持久化长对话 rolling digest 索引，便于验证长会议/跨小时追问")
+          .option("--question <question>", "原始用户问题；默认先按聊天工具同款逻辑刷新并定位 digest")
+          .option("--focus <focus>", "general | what_happened | watch_for", "what_happened")
+          .option("--deviceId <deviceId>", "按设备过滤")
+          .option("--modality <modality>", "audio | image | video")
+          .option("--startAt <ms>", "自定义时间窗起点（毫秒）")
+          .option("--endAt <ms>", "自定义时间窗终点（毫秒）")
+          .option("--lookbackDays <days>", "滚动回看天数（2-30），自动转 custom-range")
+          .option("--storedOnly", "只读取已写入 state 的 digest，不先刷新生成")
+          .action(async (
+            scopeOrDate?: string,
+            options?: {
+              question?: string;
+              focus?: string;
+              deviceId?: string;
+              modality?: string;
+              startAt?: string;
+              endAt?: string;
+              lookbackDays?: string;
+              storedOnly?: boolean;
+            },
+          ) => {
+            const explicitStartAt = parseOptionalFiniteNumber(options?.startAt);
+            const explicitEndAt = parseOptionalFiniteNumber(options?.endAt);
+            const lookbackDays = parseOptionalFiniteNumber(options?.lookbackDays);
+            if (!options?.storedOnly) {
+              const rawParams: ClawSenseContextToolParams = {
+                focus: coerceContextFocus(options?.focus),
+                question: options?.question,
+                deviceId: options?.deviceId,
+                modality: coerceModality(options?.modality),
+                startAt: explicitStartAt,
+                endAt: explicitEndAt,
+                lookbackDays,
+              };
+              if (scopeOrDate === "today" || scopeOrDate === "last-hour") {
+                rawParams.scope = scopeOrDate;
+              } else if (scopeOrDate?.trim()) {
+                rawParams.date = reviewEngine.normalizeDateInput(scopeOrDate.trim());
+              }
+              const resolved = await resolveClawSenseContext(
+                {
+                  reviewEngine,
+                  artifactUrlBase,
+                },
+                rawParams,
+              );
+              if (!resolved.ok) {
+                process.stdout.write(`${safeJsonStringify(resolved.details)}\n`);
+                return;
+              }
+              const details = resolved.details as {
+                date: string;
+                scope: "today" | "last-hour" | "custom-range";
+                startAt?: number;
+                endAt?: number;
+                rollingDigests?: unknown;
+                responseHints?: {
+                  rollingDigests?: unknown;
+                };
+                evidenceBundle?: {
+                  rollingDigests?: unknown;
+                };
+              };
+              const digests = Array.isArray(details.responseHints?.rollingDigests)
+                ? details.responseHints.rollingDigests
+                : Array.isArray(details.evidenceBundle?.rollingDigests)
+                  ? details.evidenceBundle.rollingDigests
+                  : Array.isArray(details.rollingDigests)
+                    ? details.rollingDigests
+                    : [];
+              process.stdout.write(
+                `${safeJsonStringify({
+                  ok: true,
+                  source: "refreshed-context",
+                  scope: details.scope,
+                  date: details.date,
+                  startAt: details.startAt ?? null,
+                  endAt: details.endAt ?? null,
+                  question: options?.question,
+                  count: digests.length,
+                  summary: summarizeConversationDigests(digests),
+                  digests,
+                })}\n`,
+              );
+              return;
+            }
+
+            const now = Date.now();
+            const endAt = explicitEndAt ?? now;
+            const startAt = explicitStartAt ?? (lookbackDays ? endAt - lookbackDays * ONE_DAY_MS : undefined);
+            const scope =
+              scopeOrDate === "last-hour" || scopeOrDate === "custom-range" || scopeOrDate === "today"
+                ? scopeOrDate
+                : undefined;
+            const date =
+              scopeOrDate && scopeOrDate !== "last-hour" && scopeOrDate !== "custom-range"
+                ? reviewEngine.normalizeDateInput(scopeOrDate === "today" ? undefined : scopeOrDate)
+                : undefined;
+            const digests = await stateStore.listConversationDigests({
+              date,
+              scope,
+              startAt,
+              endAt,
+            });
+            process.stdout.write(
+              `${safeJsonStringify({
+                ok: true,
+                source: "stored-state",
+                scope: scope ?? null,
+                date: date ?? null,
+                startAt: startAt ?? null,
+                endAt,
+                count: digests.length,
+                summary: summarizeConversationDigests(digests),
+                digests,
+              })}\n`,
+            );
+          });
+
+        clawsense
+          .command("memory-cards [scopeOrDate]")
+          .description("输出长期记忆卡片（任务/话题/注意/学习），用于验证全天记忆沉淀层")
+          .option("--question <question>", "原始用户问题；默认先刷新 context 并按问题匹配卡片")
+          .option("--focus <focus>", "general | what_happened | watch_for", "what_happened")
+          .option("--kind <kind>", "task | topic | attention | learning")
+          .option("--format <format>", "json | markdown", "json")
+          .option("--title <title>", "markdown / 草稿标题")
+          .option("--includeMarkdown", "JSON 输出里同时包含 markdown 报告")
+          .option("--writeDraft", "把记忆卡片报告写入 ClawSense drafts 目录")
+          .option("--deviceId <deviceId>", "按设备过滤")
+          .option("--modality <modality>", "audio | image | video")
+          .option("--startAt <ms>", "自定义时间窗起点（毫秒）")
+          .option("--endAt <ms>", "自定义时间窗终点（毫秒）")
+          .option("--lookbackDays <days>", "滚动回看天数（2-30），自动转 custom-range")
+          .option("--storedOnly", "只读取已写入 state 的卡片，不先刷新生成")
+          .action(async (
+            scopeOrDate?: string,
+            options?: {
+              question?: string;
+              focus?: string;
+              kind?: string;
+              format?: string;
+              title?: string;
+              includeMarkdown?: boolean;
+              writeDraft?: boolean;
+              deviceId?: string;
+              modality?: string;
+              startAt?: string;
+              endAt?: string;
+              lookbackDays?: string;
+              storedOnly?: boolean;
+            },
+          ) => {
+            const explicitStartAt = parseOptionalFiniteNumber(options?.startAt);
+            const explicitEndAt = parseOptionalFiniteNumber(options?.endAt);
+            const lookbackDays = parseOptionalFiniteNumber(options?.lookbackDays);
+            const kind = coerceMemoryCardKind(options?.kind);
+            const format = coerceMemoryCardsOutputFormat(options?.format);
+            if (!options?.storedOnly) {
+              const rawParams: ClawSenseContextToolParams = {
+                focus: coerceContextFocus(options?.focus),
+                question: options?.question,
+                deviceId: options?.deviceId,
+                modality: coerceModality(options?.modality),
+                startAt: explicitStartAt,
+                endAt: explicitEndAt,
+                lookbackDays,
+              };
+              if (scopeOrDate === "today" || scopeOrDate === "last-hour") {
+                rawParams.scope = scopeOrDate;
+              } else if (scopeOrDate?.trim()) {
+                rawParams.date = reviewEngine.normalizeDateInput(scopeOrDate.trim());
+              }
+              const resolved = await resolveClawSenseContext(
+                {
+                  reviewEngine,
+                  artifactUrlBase,
+                },
+                rawParams,
+              );
+              if (!resolved.ok) {
+                process.stdout.write(`${safeJsonStringify(resolved.details)}\n`);
+                return;
+              }
+              const details = resolved.details as {
+                date: string;
+                scope: "today" | "last-hour" | "custom-range";
+                startAt?: number;
+                endAt?: number;
+                memoryCards?: unknown;
+                memoryCardMatches?: unknown;
+                responseHints?: {
+                  memoryCards?: unknown;
+                  memoryCardMatches?: unknown;
+                };
+                evidenceBundle?: {
+                  memoryCards?: unknown;
+                  memoryCardMatches?: unknown;
+                };
+              };
+              const cards = normalizeMemoryCardsForCli(
+                Array.isArray(details.responseHints?.memoryCards)
+                  ? details.responseHints.memoryCards
+                  : Array.isArray(details.evidenceBundle?.memoryCards)
+                    ? details.evidenceBundle.memoryCards
+                    : Array.isArray(details.memoryCards)
+                      ? details.memoryCards
+                      : [],
+                kind,
+              );
+              const matches = normalizeMemoryCardsForCli(
+                Array.isArray(details.responseHints?.memoryCardMatches)
+                  ? details.responseHints.memoryCardMatches
+                  : Array.isArray(details.evidenceBundle?.memoryCardMatches)
+                    ? details.evidenceBundle.memoryCardMatches
+                    : Array.isArray(details.memoryCardMatches)
+                      ? details.memoryCardMatches
+                      : [],
+                kind,
+              );
+              const markdown = buildMemoryCardsMarkdownReport({
+                title: options?.title,
+                source: "refreshed-context",
+                scope: details.scope,
+                date: details.date,
+                startAt: details.startAt,
+                endAt: details.endAt,
+                question: options?.question,
+                kind,
+                cards,
+                matches,
+                generatedAt: Date.now(),
+              });
+              const draft = options?.writeDraft
+                ? await writeMemoryCardsMarkdownDraft({
+                    stateDir: api.runtime.state.resolveStateDir(),
+                    title: markdown.title,
+                    markdown: markdown.markdown,
+                    createdAt: markdown.generatedAt,
+                  })
+                : null;
+              if (format === "markdown") {
+                process.stdout.write(`${appendDraftPathToMarkdown(markdown.markdown, draft)}\n`);
+                return;
+              }
+              process.stdout.write(
+                `${safeJsonStringify({
+                  ok: true,
+                  source: "refreshed-context",
+                  scope: details.scope,
+                  date: details.date,
+                  startAt: details.startAt ?? null,
+                  endAt: details.endAt ?? null,
+                  question: options?.question,
+                  kind: kind ?? null,
+                  count: cards.length,
+                  matchCount: matches.length,
+                  summary: summarizeMemoryCards(cards),
+                  markdown: options?.includeMarkdown ? markdown.markdown : undefined,
+                  draft,
+                  matches,
+                  cards,
+                })}\n`,
+              );
+              return;
+            }
+
+            const now = Date.now();
+            const endAt = explicitEndAt ?? now;
+            const startAt = explicitStartAt ?? (lookbackDays ? endAt - lookbackDays * ONE_DAY_MS : undefined);
+            const scope =
+              scopeOrDate === "last-hour" || scopeOrDate === "custom-range" || scopeOrDate === "today"
+                ? scopeOrDate
+                : undefined;
+            const date =
+              scopeOrDate && scopeOrDate !== "last-hour" && scopeOrDate !== "custom-range"
+                ? reviewEngine.normalizeDateInput(scopeOrDate === "today" ? undefined : scopeOrDate)
+                : undefined;
+            const cards = await stateStore.listMemoryCards({
+              date,
+              scope,
+              startAt,
+              endAt,
+              kind,
+            });
+            const markdown = buildMemoryCardsMarkdownReport({
+              title: options?.title,
+              source: "stored-state",
+              scope,
+              date,
+              startAt,
+              endAt,
+              kind,
+              cards,
+              matches: [],
+              generatedAt: Date.now(),
+            });
+            const draft = options?.writeDraft
+              ? await writeMemoryCardsMarkdownDraft({
+                  stateDir: api.runtime.state.resolveStateDir(),
+                  title: markdown.title,
+                  markdown: markdown.markdown,
+                  createdAt: markdown.generatedAt,
+                })
+              : null;
+            if (format === "markdown") {
+              process.stdout.write(`${appendDraftPathToMarkdown(markdown.markdown, draft)}\n`);
+              return;
+            }
+            process.stdout.write(
+              `${safeJsonStringify({
+                ok: true,
+                source: "stored-state",
+                scope: scope ?? null,
+                date: date ?? null,
+                startAt: startAt ?? null,
+                endAt,
+                kind: kind ?? null,
+                count: cards.length,
+                summary: summarizeMemoryCards(cards),
+                markdown: options?.includeMarkdown ? markdown.markdown : undefined,
+                draft,
+                cards,
+              })}\n`,
+            );
+          });
+
+        clawsense
+          .command("speaker-slots [scopeOrDate]")
+          .description("输出 speaker 待标注槽位、任务归属缺口和可复制标注命令")
+          .option("--question <question>", "原始问题（用于相关性排序）")
+          .option("--focus <focus>", "general | what_happened | watch_for", "what_happened")
+          .option("--deviceId <deviceId>", "可选设备筛选")
+          .option("--modality <modality>", "audio | image | video")
+          .option("--startAt <ms>", "自定义时间窗起点（毫秒）")
+          .option("--endAt <ms>", "自定义时间窗终点（毫秒）")
+          .option("--lookbackDays <days>", "滚动回看天数（2-30）")
+          .action(async (
+            scopeOrDate?: string,
+            options?: {
+              question?: string;
+              focus?: string;
+              deviceId?: string;
+              modality?: string;
+              startAt?: string;
+              endAt?: string;
+              lookbackDays?: string;
+            },
+          ) => {
+            const rawParams: ClawSenseContextToolParams = {
+              focus: coerceContextFocus(options?.focus),
+              question: options?.question,
+              deviceId: options?.deviceId,
+              modality: coerceModality(options?.modality),
+              startAt: parseOptionalFiniteNumber(options?.startAt),
+              endAt: parseOptionalFiniteNumber(options?.endAt),
+              lookbackDays: parseOptionalFiniteNumber(options?.lookbackDays),
+            };
+            if (scopeOrDate === "today" || scopeOrDate === "last-hour") {
+              rawParams.scope = scopeOrDate;
+            } else if (scopeOrDate?.trim()) {
+              rawParams.date = reviewEngine.normalizeDateInput(scopeOrDate.trim());
+            }
+            const resolved = await resolveClawSenseContext(
+              {
+                reviewEngine,
+                artifactUrlBase,
+              },
+              rawParams,
+            );
+            if (!resolved.ok) {
+              process.stdout.write(`${safeJsonStringify(resolved.details)}\n`);
+              return;
+            }
+            const details = resolved.details as {
+              date: string;
+              scope: "today" | "last-hour" | "custom-range";
+              responseHints?: {
+                speakerResolutionPrompts?: unknown;
+                taskAttribution?: unknown;
+                taskAttributionBuckets?: unknown;
+              };
+              evidenceBundle?: {
+                speakerLayer?: unknown;
+                taskAttribution?: unknown;
+                annotationSuggestions?: unknown;
+              };
+            };
+            const suggestions = normalizeCliAnnotationSuggestions(details.evidenceBundle?.annotationSuggestions);
+            const speakerAnnotations = await stateStore.listSpeakers();
+            const payload = buildSpeakerSlotsPayload({
+              date: details.date,
+              scope: details.scope,
+              question: options?.question,
+              speakerLayer: details.evidenceBundle?.speakerLayer,
+              taskAttribution: details.evidenceBundle?.taskAttribution ?? details.responseHints?.taskAttribution,
+              taskAttributionBuckets: details.responseHints?.taskAttributionBuckets,
+              speakerResolutionPrompts: details.responseHints?.speakerResolutionPrompts,
+              speakerSuggestions: suggestions.speakers,
+              speakerAnnotations,
+            });
+            process.stdout.write(`${safeJsonStringify(payload)}\n`);
           });
 
         clawsense
@@ -2636,15 +3254,74 @@ const plugin = {
           });
 
         clawsense
+          .command("asr-status")
+          .description("输出本地 ASR 配置与可运行性诊断")
+          .action(async () => {
+            const inspection = await inspectLocalAsrConfig({
+              cfg,
+              resolveStateDir: api.runtime.state.resolveStateDir,
+            });
+            process.stdout.write(`${safeJsonStringify({ ok: true, localAsr: inspection })}\n`);
+          });
+
+        clawsense
+          .command("audio-diagnostics [date]")
+          .description("输出某天音频/ASR/diarization 健康度和下一步回填建议（只读）")
+          .option("--max-samples <count>", "最多输出多少个候选样例", "6")
+          .action(async (date?: string, options?: { maxSamples?: string }) => {
+            const normalizedDate = reviewEngine.normalizeDateInput(date === "today" ? undefined : date);
+            const maxSamplesRaw = Number.parseInt(options?.maxSamples ?? "6", 10);
+            const [events, artifacts, localAsr, worker] = await Promise.all([
+              stateStore.listEventsByDate(normalizedDate),
+              stateStore.listArtifacts(),
+              inspectLocalAsrConfig({
+                cfg,
+                resolveStateDir: api.runtime.state.resolveStateDir,
+              }),
+              reviewEngine.getAudioBackfillWorkerStatus(),
+            ]);
+            const payload = buildAudioDiagnosticsPayload({
+              date: normalizedDate,
+              events,
+              artifacts,
+              localAsr,
+              worker,
+              maxSamples: Number.isFinite(maxSamplesRaw) ? maxSamplesRaw : 6,
+            });
+            process.stdout.write(`${safeJsonStringify(payload)}\n`);
+          });
+
+        clawsense
           .command("backfill-audio [date]")
           .description("对某一天的降级音频做一轮轻量 transcript backfill")
           .option("--max <count>", "最多处理多少段音频", "3")
-          .action(async (date?: string, options?: { max?: string }) => {
+          .option("--provider <provider>", "ASR provider: auto/local-asr/compatible-asr", "auto")
+          .option("--diarization-provider <provider>", "可选 speaker diarization provider: whisperx/pyannote/funasr/hybrid/local-asr")
+          .option("--speaker-model <model>", "可选 speaker 模型，例如 pyannote/speaker-diarization 或 cam++")
+          .option("--dry-run", "只运行 ASR 诊断并输出结果，不写回状态")
+          .option("--include-transcribed", "允许处理已有 transcript 但缺 transcriptSegments 的音频")
+          .action(async (
+            date?: string,
+            options?: {
+              max?: string;
+              provider?: string;
+              diarizationProvider?: string;
+              speakerModel?: string;
+              dryRun?: boolean;
+              includeTranscribed?: boolean;
+            },
+          ) => {
             const normalizedDate = date ? reviewEngine.normalizeDateInput(date) : reviewEngine.normalizeDateInput(undefined);
             const maxArtifacts = Number.parseInt(options?.max ?? "3", 10);
+            const provider = normalizeAudioBackfillProvider(options?.provider);
             const result = await reviewEngine.runAudioBackfillTick({
               dates: [normalizedDate],
               maxArtifacts: Number.isFinite(maxArtifacts) ? maxArtifacts : 3,
+              provider,
+              diarizationProvider: options?.diarizationProvider,
+              speakerModel: options?.speakerModel,
+              dryRun: Boolean(options?.dryRun),
+              includeTranscribed: Boolean(options?.includeTranscribed),
             });
             process.stdout.write(
               `${safeJsonStringify({
@@ -2653,6 +3330,153 @@ const plugin = {
                 ...result,
               })}\n`,
             );
+          });
+
+        const asrQueue = clawsense
+          .command("asr-queue")
+          .description("管理本地 ASR 回填队列（plan/run/status）");
+
+        asrQueue
+          .command("plan [date]")
+          .description("把某一天待补强音频规划为可恢复的 ASR 队列")
+          .option("--max <count>", "最多规划多少段音频", "24")
+          .option("--provider <provider>", "ASR provider: auto/local-asr/compatible-asr", "local-asr")
+          .option("--diarization-provider <provider>", "可选 speaker diarization provider: whisperx/pyannote/funasr/hybrid/local-asr")
+          .option("--speaker-model <model>", "可选 speaker 模型，例如 pyannote/speaker-diarization 或 cam++")
+          .option("--dry-run", "队列运行时只做 ASR 诊断，不写回状态")
+          .option("--include-transcribed", "允许处理已有 transcript 但缺 transcriptSegments 的音频", true)
+          .action(async (
+            date?: string,
+            options?: {
+              max?: string;
+              provider?: string;
+              diarizationProvider?: string;
+              speakerModel?: string;
+              dryRun?: boolean;
+              includeTranscribed?: boolean;
+            },
+          ) => {
+            const normalizedDate = date ? reviewEngine.normalizeDateInput(date) : reviewEngine.normalizeDateInput(undefined);
+            const maxArtifacts = Number.parseInt(options?.max ?? "24", 10);
+            const provider = normalizeAudioBackfillProvider(options?.provider ?? "local-asr");
+            const queue = await reviewEngine.planAudioBackfillQueue({
+              dates: [normalizedDate],
+              maxArtifacts: Number.isFinite(maxArtifacts) ? maxArtifacts : 24,
+              provider,
+              diarizationProvider: options?.diarizationProvider,
+              speakerModel: options?.speakerModel,
+              dryRun: Boolean(options?.dryRun),
+              includeTranscribed: options?.includeTranscribed !== false,
+            });
+            process.stdout.write(`${safeJsonStringify({ ok: true, queue })}\n`);
+          });
+
+        asrQueue
+          .command("run [queueId]")
+          .description("运行一批 ASR 队列任务")
+          .option("--batch <count>", "本次最多运行多少个队列任务", "6")
+          .option("--dry-run", "只做 ASR 诊断，不写回状态")
+          .action(async (
+            queueId?: string,
+            options?: {
+              batch?: string;
+              dryRun?: boolean;
+            },
+          ) => {
+            const batchSize = Number.parseInt(options?.batch ?? "6", 10);
+            const result = await reviewEngine.runAudioBackfillQueue({
+              queueId,
+              batchSize: Number.isFinite(batchSize) ? batchSize : 6,
+              dryRun: options?.dryRun,
+            });
+            process.stdout.write(`${safeJsonStringify({ ok: Boolean(result), result })}\n`);
+          });
+
+        asrQueue
+          .command("status [queueId]")
+          .description("输出 ASR 队列状态")
+          .action(async (queueId?: string) => {
+            const queue = await reviewEngine.getAudioBackfillQueueStatus(queueId);
+            process.stdout.write(`${safeJsonStringify({ ok: Boolean(queue), queue })}\n`);
+          });
+
+        const asrWorker = clawsense
+          .command("asr-worker")
+          .description("运行/查看 ASR 后台 worker（自动规划队列并按批次补强音频）");
+
+        asrWorker
+          .command("status")
+          .description("输出 ASR worker 与最近队列状态")
+          .action(async () => {
+            const status = await reviewEngine.getAudioBackfillWorkerStatus();
+            process.stdout.write(`${safeJsonStringify({ ok: true, worker: status })}\n`);
+          });
+
+        asrWorker
+          .command("run-once [date]")
+          .description("手动运行一次 ASR worker tick")
+          .option("--lookback-days <days>", "未指定 date 时向前规划多少天", String(cfg.asrWorkerLookbackDays))
+          .option("--max <count>", "没有活动队列时最多规划多少个 job", String(cfg.asrWorkerMaxJobs))
+          .option("--batch <count>", "本次最多运行多少个 job", String(cfg.asrWorkerBatchSize))
+          .option("--provider <provider>", "ASR provider: auto/local-asr/compatible-asr", cfg.asrWorkerProvider)
+          .option("--diarization-provider <provider>", "可选 speaker diarization provider: whisperx/pyannote/funasr/hybrid/local-asr")
+          .option("--speaker-model <model>", "可选 speaker 模型，例如 pyannote/speaker-diarization 或 cam++")
+          .option("--dry-run", "只运行 ASR 诊断，不写回事件")
+          .option("--include-transcribed", "允许补强已有 transcript 但缺 transcriptSegments 的音频", cfg.asrWorkerIncludeTranscribed)
+          .action(async (
+            date?: string,
+            options?: {
+              lookbackDays?: string;
+              max?: string;
+              batch?: string;
+              provider?: string;
+              diarizationProvider?: string;
+              speakerModel?: string;
+              dryRun?: boolean;
+              includeTranscribed?: boolean;
+            },
+          ) => {
+            const lookbackDays = Number.parseInt(options?.lookbackDays ?? String(cfg.asrWorkerLookbackDays), 10);
+            const maxJobs = Number.parseInt(options?.max ?? String(cfg.asrWorkerMaxJobs), 10);
+            const batchSize = Number.parseInt(options?.batch ?? String(cfg.asrWorkerBatchSize), 10);
+            const provider = normalizeAudioBackfillProvider(options?.provider ?? cfg.asrWorkerProvider);
+            const result = await reviewEngine.runAudioBackfillWorkerTick({
+              dates: date ? [reviewEngine.normalizeDateInput(date)] : undefined,
+              lookbackDays: Number.isFinite(lookbackDays) ? lookbackDays : cfg.asrWorkerLookbackDays,
+              maxJobs: Number.isFinite(maxJobs) ? maxJobs : cfg.asrWorkerMaxJobs,
+              batchSize: Number.isFinite(batchSize) ? batchSize : cfg.asrWorkerBatchSize,
+              provider,
+              diarizationProvider: options?.diarizationProvider,
+              speakerModel: options?.speakerModel,
+              dryRun: Boolean(options?.dryRun),
+              includeTranscribed: options?.includeTranscribed !== false,
+            });
+            process.stdout.write(`${safeJsonStringify({ ok: true, worker: result })}\n`);
+          });
+
+        clawsense
+          .command("diarization-probe [date]")
+          .description("用本地 ASR 的 speaker 模型做只读说话人分离探针")
+          .option("--max <count>", "最多探测多少段音频", "3")
+          .option("--provider <provider>", "diarization provider: funasr/whisperx/pyannote/hybrid/local-asr", "funasr")
+          .option("--speaker-model <model>", "FunASR speaker model，例如 cam++", "cam++")
+          .action(async (
+            date?: string,
+            options?: {
+              max?: string;
+              provider?: string;
+              speakerModel?: string;
+            },
+          ) => {
+            const normalizedDate = date ? reviewEngine.normalizeDateInput(date) : reviewEngine.normalizeDateInput(undefined);
+            const maxArtifacts = Number.parseInt(options?.max ?? "3", 10);
+            const result = await reviewEngine.runDiarizationProbe({
+              dates: [normalizedDate],
+              maxArtifacts: Number.isFinite(maxArtifacts) ? maxArtifacts : 3,
+              provider: options?.provider,
+              speakerModel: options?.speakerModel,
+            });
+            process.stdout.write(`${safeJsonStringify({ ok: true, date: normalizedDate, ...result })}\n`);
           });
       },
       { commands: ["clawsense"] },
@@ -2670,6 +3494,12 @@ const plugin = {
             api.logger.warn(`[clawsense] maintenance tick failed: ${String(error)}`);
           });
         }, 5 * 60 * 1000);
+        if (cfg.asrWorkerEnabled) {
+          void runAsrWorkerSafely("startup");
+          asrWorkerTimer = setInterval(() => {
+            void runAsrWorkerSafely("interval");
+          }, cfg.asrWorkerIntervalSeconds * 1000);
+        }
         analysisRecoveryTimer = setInterval(() => {
           void requeuePendingAnalysis(12).catch((error) => {
             api.logger.warn(`[clawsense] pending analysis recovery tick failed: ${String(error)}`);
@@ -2685,6 +3515,10 @@ const plugin = {
         if (analysisRecoveryTimer) {
           clearInterval(analysisRecoveryTimer);
           analysisRecoveryTimer = null;
+        }
+        if (asrWorkerTimer) {
+          clearInterval(asrWorkerTimer);
+          asrWorkerTimer = null;
         }
         api.logger.info("[clawsense] service stopped");
       },
@@ -2751,6 +3585,27 @@ function coerceContextScope(value: string | undefined): "last-hour" | "today" | 
   return "today";
 }
 
+function coerceHistoryType(value: string | undefined): "all" | "identity" | "project" {
+  if (value === "identity" || value === "person" || value === "speaker") {
+    return "identity";
+  }
+  if (value === "project" || value === "topic") {
+    return "project";
+  }
+  return "all";
+}
+
+function coerceMemoryCardKind(value: string | undefined): ClawSenseMemoryCard["kind"] | undefined {
+  if (value === "task" || value === "topic" || value === "attention" || value === "learning") {
+    return value;
+  }
+  return undefined;
+}
+
+function coerceMemoryCardsOutputFormat(value: string | undefined): "json" | "markdown" {
+  return value === "markdown" ? "markdown" : "json";
+}
+
 function coerceTimestampRange(
   startAtRaw: string | undefined,
   endAtRaw: string | undefined,
@@ -2790,7 +3645,12 @@ function buildFollowupsPayload(
   audioFollowUpTargets: unknown[];
   videoFollowUps: string[];
   videoFollowUpTargets: unknown[];
+  topicFollowUps: string[];
+  topicFollowUpTargets: unknown[];
   historyFollowUps: string[];
+  conversationDigest?: unknown;
+  conversationDigestFollowUps: string[];
+  conversationDigestFollowUpTargets: unknown[];
   evidenceFollowUpTargets: unknown[];
   topPrompts: string[];
 } {
@@ -2800,7 +3660,10 @@ function buildFollowupsPayload(
       audioFollowUpTargets?: unknown;
       videoFollowUps?: unknown;
       videoFollowUpTargets?: unknown;
+      topicFollowUps?: unknown;
+      topicFollowUpTargets?: unknown;
       historyFollowUps?: unknown;
+      conversationDigest?: unknown;
       evidenceFollowUpTargets?: unknown;
     }
     : {};
@@ -2816,16 +3679,41 @@ function buildFollowupsPayload(
   const videoFollowUpTargets = Array.isArray(responseHints.videoFollowUpTargets)
     ? responseHints.videoFollowUpTargets
     : [];
+  const topicFollowUps = Array.isArray(responseHints.topicFollowUps)
+    ? responseHints.topicFollowUps.filter((item): item is string => typeof item === "string")
+    : [];
+  const topicFollowUpTargets = Array.isArray(responseHints.topicFollowUpTargets)
+    ? responseHints.topicFollowUpTargets
+    : [];
   const historyFollowUps = Array.isArray(responseHints.historyFollowUps)
     ? responseHints.historyFollowUps.filter((item): item is string => typeof item === "string")
+    : [];
+  const conversationDigest = responseHints.conversationDigest;
+  const conversationDigestObject =
+    conversationDigest && typeof conversationDigest === "object"
+      ? conversationDigest as {
+        followupPrompts?: unknown;
+        topicIndex?: unknown;
+      }
+      : undefined;
+  const conversationDigestFollowUps = Array.isArray(conversationDigestObject?.followupPrompts)
+    ? conversationDigestObject.followupPrompts.filter((item): item is string => typeof item === "string")
+    : [];
+  const conversationDigestFollowUpTargets = Array.isArray(conversationDigestObject?.topicIndex)
+    ? conversationDigestObject.topicIndex
+        .slice(0, 6)
+        .map((item, index) => normalizeConversationDigestFollowUpTarget(item, conversationDigestFollowUps[index], index))
+        .filter((item): item is NonNullable<ReturnType<typeof normalizeConversationDigestFollowUpTarget>> => Boolean(item))
     : [];
   const evidenceFollowUpTargets = Array.isArray(responseHints.evidenceFollowUpTargets)
     ? responseHints.evidenceFollowUpTargets
     : [];
-  const topPrompts = evidenceFollowUpTargets
-    .map((item) => (item && typeof item === "object" && "prompt" in item ? (item as { prompt?: unknown }).prompt : undefined))
-    .filter((prompt): prompt is string => typeof prompt === "string" && prompt.trim().length > 0)
-    .slice(0, 5);
+  const topPrompts = dedupeStrings(
+    evidenceFollowUpTargets
+      .map((item) => (item && typeof item === "object" && "prompt" in item ? (item as { prompt?: unknown }).prompt : undefined))
+      .filter((prompt): prompt is string => typeof prompt === "string" && prompt.trim().length > 0)
+      .concat(conversationDigestFollowUps),
+  ).slice(0, 5);
   return {
     scope: details.scope,
     date: details.date,
@@ -2834,10 +3722,1227 @@ function buildFollowupsPayload(
     audioFollowUpTargets,
     videoFollowUps,
     videoFollowUpTargets,
+    topicFollowUps,
+    topicFollowUpTargets,
     historyFollowUps,
+    conversationDigest,
+    conversationDigestFollowUps,
+    conversationDigestFollowUpTargets,
     evidenceFollowUpTargets,
     topPrompts,
   };
+}
+
+function summarizeConversationDigests(digests: unknown[]): {
+  digestCount: number;
+  topicCount: number;
+  transcriptWindowCount: number;
+  keywordCount: number;
+  taskHintCount: number;
+  firstTopicTitle?: string;
+} {
+  let topicCount = 0;
+  let transcriptWindowCount = 0;
+  let keywordCount = 0;
+  let taskHintCount = 0;
+  let firstTopicTitle: string | undefined;
+  for (const item of digests) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const digest = item as {
+      transcriptWindowCount?: unknown;
+      topicIndex?: unknown;
+      keywordIndex?: unknown;
+    };
+    if (typeof digest.transcriptWindowCount === "number" && Number.isFinite(digest.transcriptWindowCount)) {
+      transcriptWindowCount += digest.transcriptWindowCount;
+    }
+    const topicIndex = Array.isArray(digest.topicIndex) ? digest.topicIndex : [];
+    topicCount += topicIndex.length;
+    for (const topic of topicIndex) {
+      if (!firstTopicTitle && topic && typeof topic === "object") {
+        const title = (topic as { title?: unknown }).title;
+        if (typeof title === "string" && title.trim()) {
+          firstTopicTitle = title;
+        }
+      }
+      const taskHints = topic && typeof topic === "object" ? (topic as { taskHints?: unknown }).taskHints : undefined;
+      if (Array.isArray(taskHints)) {
+        taskHintCount += taskHints.length;
+      }
+    }
+    const keywordIndex = Array.isArray(digest.keywordIndex) ? digest.keywordIndex : [];
+    keywordCount += keywordIndex.length;
+  }
+  return {
+    digestCount: digests.length,
+    topicCount,
+    transcriptWindowCount,
+    keywordCount,
+    taskHintCount,
+    firstTopicTitle,
+  };
+}
+
+function summarizeHistoryCliPayload(
+  identityHistory: unknown[],
+  projectHistory: unknown[],
+): {
+  identityCount: number;
+  projectCount: number;
+  identityMemoryCardCount: number;
+  projectMemoryCardCount: number;
+  recentMomentCount: number;
+} {
+  const identityMemoryCardCount = countNestedArrayItems(identityHistory, "memoryCards");
+  const projectMemoryCardCount = countNestedArrayItems(projectHistory, "memoryCards");
+  return {
+    identityCount: identityHistory.length,
+    projectCount: projectHistory.length,
+    identityMemoryCardCount,
+    projectMemoryCardCount,
+    recentMomentCount:
+      countNestedArrayItems(identityHistory, "recentMoments") +
+      countNestedArrayItems(projectHistory, "recentMoments"),
+  };
+}
+
+function countNestedArrayItems(items: unknown[], key: string): number {
+  return items.reduce<number>((count, item) => {
+    if (!item || typeof item !== "object") {
+      return count;
+    }
+    const value = (item as Record<string, unknown>)[key];
+    return count + (Array.isArray(value) ? value.length : 0);
+  }, 0);
+}
+
+function normalizeMemoryCardsForCli(cards: unknown[], kind?: ClawSenseMemoryCard["kind"]): ClawSenseMemoryCard[] {
+  return cards
+    .filter((item): item is ClawSenseMemoryCard => {
+      if (!item || typeof item !== "object") {
+        return false;
+      }
+      const card = item as { cardId?: unknown; kind?: unknown; title?: unknown };
+      return typeof card.cardId === "string" && typeof card.kind === "string" && typeof card.title === "string";
+    })
+    .filter((card) => !kind || card.kind === kind);
+}
+
+function summarizeMemoryCards(cards: unknown[]): {
+  cardCount: number;
+  taskCount: number;
+  topicCount: number;
+  attentionCount: number;
+  learningCount: number;
+  keywordCount: number;
+  firstCardTitle?: string;
+} {
+  let taskCount = 0;
+  let topicCount = 0;
+  let attentionCount = 0;
+  let learningCount = 0;
+  let keywordCount = 0;
+  let firstCardTitle: string | undefined;
+  for (const item of cards) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const card = item as {
+      kind?: unknown;
+      title?: unknown;
+      keywords?: unknown;
+    };
+    if (!firstCardTitle && typeof card.title === "string" && card.title.trim()) {
+      firstCardTitle = card.title;
+    }
+    if (card.kind === "task") {
+      taskCount += 1;
+    } else if (card.kind === "topic") {
+      topicCount += 1;
+    } else if (card.kind === "attention") {
+      attentionCount += 1;
+    } else if (card.kind === "learning") {
+      learningCount += 1;
+    }
+    if (Array.isArray(card.keywords)) {
+      keywordCount += card.keywords.length;
+    }
+  }
+  return {
+    cardCount: cards.length,
+    taskCount,
+    topicCount,
+    attentionCount,
+    learningCount,
+    keywordCount,
+    firstCardTitle,
+  };
+}
+
+function buildMemoryCardsMarkdownReport(params: {
+  title?: string;
+  source: "refreshed-context" | "stored-state";
+  scope?: "today" | "last-hour" | "custom-range";
+  date?: string;
+  startAt?: number | null;
+  endAt?: number | null;
+  question?: string;
+  kind?: ClawSenseMemoryCard["kind"];
+  cards: ClawSenseMemoryCard[];
+  matches: ClawSenseMemoryCard[];
+  generatedAt: number;
+}): {
+  title: string;
+  markdown: string;
+  generatedAt: number;
+} {
+  const summary = summarizeMemoryCards(params.cards);
+  const title = normalizeMarkdownTitle(
+    params.title ||
+      [
+        "ClawSense 长期记忆卡片报告",
+        params.date ? `(${params.date})` : "",
+        params.kind ? `-${formatMemoryCardKindForCli(params.kind)}` : "",
+      ].filter(Boolean).join(" "),
+  );
+  const range = formatMemoryCardsReportRange(params.startAt, params.endAt);
+  const matchedIds = new Set(params.matches.map((card) => card.cardId));
+  const unmatchedCards = params.cards.filter((card) => !matchedIds.has(card.cardId));
+  const taskCards = params.cards.filter((card) => card.kind === "task");
+  const attentionCards = params.cards.filter((card) => card.kind === "attention");
+  const learningCards = params.cards.filter((card) => card.kind === "learning");
+  const topicCards = params.cards.filter((card) => card.kind === "topic");
+  const lines = [
+    `# ${title}`,
+    "",
+    `- 生成时间：${new Date(params.generatedAt).toISOString()}`,
+    `- 来源：${params.source}`,
+    params.date ? `- 日期：${params.date}` : "",
+    params.scope ? `- 范围：${params.scope}` : "",
+    range ? `- 时间窗：${range}` : "",
+    params.question ? `- 问题：${memoryCardMarkdownText(params.question)}` : "",
+    params.kind ? `- 类型过滤：${formatMemoryCardKindForCli(params.kind)}` : "",
+    "",
+    "## 总览",
+    "",
+    `- 卡片总数：${summary.cardCount}`,
+    `- 任务：${summary.taskCount}`,
+    `- 话题：${summary.topicCount}`,
+    `- 注意事项：${summary.attentionCount}`,
+    `- 学习点：${summary.learningCount}`,
+    `- 问题匹配卡片：${params.matches.length}`,
+    "",
+    ...buildMemoryCardMarkdownSection("## 与当前问题最相关", params.matches),
+    ...buildMemoryCardMarkdownSection("## 行动项 / 待跟进", taskCards),
+    ...buildMemoryCardMarkdownSection("## 值得注意", attentionCards),
+    ...buildMemoryCardMarkdownSection("## 学习点", learningCards),
+    ...buildMemoryCardMarkdownSection("## 话题索引", topicCards),
+    unmatchedCards.length > 0 && params.matches.length > 0 ? "## 其他卡片" : "",
+    unmatchedCards.length > 0 && params.matches.length > 0 ? "" : "",
+    ...(params.matches.length > 0 ? buildMemoryCardMarkdownItems(unmatchedCards.slice(0, 12)) : []),
+    params.cards.length === 0 ? "## 暂无卡片" : "",
+    params.cards.length === 0 ? "" : "",
+    params.cards.length === 0 ? "- 当前时间范围还没有可沉淀的长期记忆卡片。" : "",
+    "",
+  ].filter((line, index, all) => line !== "" || all[index - 1] !== "");
+  return {
+    title,
+    markdown: lines.join("\n").trimEnd() + "\n",
+    generatedAt: params.generatedAt,
+  };
+}
+
+function buildMemoryCardMarkdownSection(title: string, cards: ClawSenseMemoryCard[]): string[] {
+  if (cards.length === 0) {
+    return [];
+  }
+  return [title, "", ...buildMemoryCardMarkdownItems(cards), ""];
+}
+
+function buildMemoryCardMarkdownItems(cards: ClawSenseMemoryCard[]): string[] {
+  return cards.flatMap((card) => {
+    const metadata = [
+      formatMemoryCardKindForCli(card.kind),
+      card.confidence ? `置信度：${card.confidence}` : "",
+      card.status ? `状态：${card.status}` : "",
+    ].filter(Boolean).join(" / ");
+    const lines = [
+      `- **${memoryCardMarkdownText(card.title)}**${metadata ? ` (${metadata})` : ""}`,
+      `  - 摘要：${memoryCardMarkdownText(card.summary)}`,
+    ];
+    const retrieval = formatMemoryCardRetrievalMetadata(card);
+    if (retrieval) {
+      lines.push(`  - 检索排序：${retrieval}`);
+    }
+    if (card.keywords.length > 0) {
+      lines.push(`  - 关键词：${card.keywords.slice(0, 8).map(memoryCardMarkdownText).join("、")}`);
+    }
+    const evidence = formatMemoryCardEvidence(card);
+    if (evidence.length > 0) {
+      lines.push(...evidence.map((item) => `  - ${item}`));
+    }
+    return lines;
+  });
+}
+
+function formatMemoryCardRetrievalMetadata(card: ClawSenseMemoryCard): string {
+  const match = card as ClawSenseMemoryCard & {
+    matchedTerms?: unknown;
+    matchReasons?: unknown;
+    retrievalRank?: unknown;
+    score?: unknown;
+  };
+  const parts: string[] = [];
+  if (typeof match.retrievalRank === "number" && Number.isFinite(match.retrievalRank)) {
+    parts.push(`#${match.retrievalRank}`);
+  }
+  if (typeof match.score === "number" && Number.isFinite(match.score)) {
+    parts.push(`score=${match.score}`);
+  }
+  if (Array.isArray(match.matchedTerms) && match.matchedTerms.length > 0) {
+    parts.push(`命中：${match.matchedTerms.filter((term): term is string => typeof term === "string").join("、")}`);
+  }
+  if (Array.isArray(match.matchReasons) && match.matchReasons.length > 0) {
+    parts.push(`理由：${match.matchReasons.filter((reason): reason is string => typeof reason === "string").join("、")}`);
+  }
+  return parts.join("；");
+}
+
+function formatMemoryCardEvidence(card: ClawSenseMemoryCard): string[] {
+  const evidence = card.evidence;
+  const lines: string[] = [];
+  if (evidence.timeRanges.length > 0) {
+    lines.push(`证据时间：${evidence.timeRanges.map(memoryCardMarkdownText).join("、")}`);
+  } else {
+    const range = formatMemoryCardsReportRange(card.startAt, card.endAt);
+    if (range) {
+      lines.push(`证据时间：${range}`);
+    }
+  }
+  if (evidence.windowIds.length > 0) {
+    lines.push(`窗口：${evidence.windowIds.slice(0, 4).map(memoryCardMarkdownText).join("、")}`);
+  }
+  if (evidence.taskHints.length > 0) {
+    lines.push(`任务线索：${evidence.taskHints.slice(0, 3).map(memoryCardMarkdownText).join("；")}`);
+  }
+  if (evidence.transcriptExcerpts.length > 0) {
+    lines.push(`转写摘录：${evidence.transcriptExcerpts.slice(0, 2).map(memoryCardMarkdownText).join(" / ")}`);
+  }
+  return lines;
+}
+
+async function writeMemoryCardsMarkdownDraft(params: {
+  stateDir: string;
+  title: string;
+  markdown: string;
+  createdAt: number;
+}): Promise<{
+  fileName: string;
+  filePath: string;
+}> {
+  const draftDir = path.join(params.stateDir, "plugins", "clawsense", "drafts");
+  await fs.mkdir(draftDir, { recursive: true });
+  const timestamp = new Date(params.createdAt).toISOString().replace(/[:.]/g, "-");
+  const fileName = `${timestamp}-${toSafeSlug(params.title) || "clawsense-memory-cards"}.md`;
+  const filePath = path.join(draftDir, fileName);
+  await fs.writeFile(filePath, params.markdown, "utf8");
+  return { fileName, filePath };
+}
+
+function appendDraftPathToMarkdown(
+  markdown: string,
+  draft: { fileName: string; filePath: string } | null,
+): string {
+  if (!draft) {
+    return markdown.trimEnd();
+  }
+  return `${markdown.trimEnd()}\n\n---\n\n草稿文件：${draft.filePath}`;
+}
+
+function formatMemoryCardsReportRange(startAt?: number | null, endAt?: number | null): string {
+  if (typeof startAt === "number" && Number.isFinite(startAt) && typeof endAt === "number" && Number.isFinite(endAt)) {
+    return `${new Date(startAt).toISOString()} - ${new Date(endAt).toISOString()}`;
+  }
+  if (typeof startAt === "number" && Number.isFinite(startAt)) {
+    return `from ${new Date(startAt).toISOString()}`;
+  }
+  if (typeof endAt === "number" && Number.isFinite(endAt)) {
+    return `until ${new Date(endAt).toISOString()}`;
+  }
+  return "";
+}
+
+function normalizeMarkdownTitle(value: string): string {
+  const normalized = memoryCardMarkdownText(value).replace(/^#+\s*/u, "").trim();
+  return normalized || "ClawSense 长期记忆卡片报告";
+}
+
+function memoryCardMarkdownText(value: string): string {
+  return value.replace(/\s+/gu, " ").trim();
+}
+
+function formatMemoryCardKindForCli(kind: ClawSenseMemoryCard["kind"]): string {
+  if (kind === "task") {
+    return "任务";
+  }
+  if (kind === "attention") {
+    return "注意";
+  }
+  if (kind === "learning") {
+    return "学习点";
+  }
+  return "话题";
+}
+
+function buildSpeakerSlotsPayload(params: {
+  date: string;
+  scope: "today" | "last-hour" | "custom-range";
+  question?: string;
+  speakerLayer?: unknown;
+  taskAttribution?: unknown;
+  taskAttributionBuckets?: unknown;
+  speakerResolutionPrompts?: unknown;
+  speakerSuggestions: Array<{
+    suggestionId: string;
+    speakerRef: string;
+    slotLabel: string;
+    windowId: string;
+    timeRange: string;
+    confidence: "medium";
+    sentenceTemplate: string;
+    commandTemplate: string;
+    selfSentenceTemplate?: string;
+    selfCommandTemplate?: string;
+  }>;
+  speakerAnnotations: Array<{
+    speakerRef: string;
+    displayName: string;
+    relationship?: string;
+    windowId?: string;
+    updatedAt?: number;
+  }>;
+}): {
+  ok: true;
+  date: string;
+  scope: "today" | "last-hour" | "custom-range";
+  question?: string;
+  status: "ready" | "needs-speaker-labels" | "missing-speaker-evidence";
+  summary: {
+    suggestedSlotCount: number;
+    unresolvedSlotCount: number;
+    promptCount: number;
+    knownSpeakerCount: number;
+    taskNeedsSpeakerLabelCount: number;
+    impactedSlotCount: number;
+    diarizationRequiredPromptCount: number;
+  };
+  knownSpeakers: Array<{
+    speakerRef: string;
+    displayName: string;
+    relationship?: string;
+    windowId?: string;
+    updatedAt?: number;
+  }>;
+  suggestedSlots: unknown[];
+  taskAttribution: unknown;
+  taskAttributionBuckets: unknown;
+  speakerResolutionPrompts: unknown[];
+  speakerSuggestions: typeof params.speakerSuggestions;
+  slotTaskImpacts: Array<{
+    speakerRef: string;
+    slotLabel: string;
+    windowId: string;
+    timeRange: string;
+    displayName?: string;
+    relationship?: string;
+    impactLevel: "exact-task-owner" | "window-context-only";
+    requiresDiarization: boolean;
+    unresolvedTaskCount: number;
+    sampleTasks: string[];
+    naturalLanguageHints: string[];
+    commands: {
+      markAsMe: string;
+      markAsColleague: string;
+    };
+  }>;
+  quickCommands: string[];
+  naturalLanguageHints: string[];
+} {
+  const speakerLayer = params.speakerLayer && typeof params.speakerLayer === "object"
+    ? params.speakerLayer as { suggestedSlots?: unknown; status?: unknown }
+    : {};
+  const suggestedSlots = Array.isArray(speakerLayer.suggestedSlots) ? speakerLayer.suggestedSlots : [];
+  const speakerResolutionPrompts = Array.isArray(params.speakerResolutionPrompts)
+    ? params.speakerResolutionPrompts
+    : params.taskAttribution && typeof params.taskAttribution === "object" &&
+        Array.isArray((params.taskAttribution as { speakerResolutionPrompts?: unknown }).speakerResolutionPrompts)
+      ? (params.taskAttribution as { speakerResolutionPrompts: unknown[] }).speakerResolutionPrompts
+      : [];
+  const taskAttributionObject = params.taskAttribution && typeof params.taskAttribution === "object"
+    ? params.taskAttribution as { buckets?: unknown; status?: unknown }
+    : undefined;
+  const taskAttributionBuckets = params.taskAttributionBuckets ?? taskAttributionObject?.buckets;
+  const needsSpeakerBucket =
+    taskAttributionBuckets && typeof taskAttributionBuckets === "object"
+      ? (taskAttributionBuckets as { needsSpeakerLabel?: unknown }).needsSpeakerLabel
+      : undefined;
+  const taskNeedsSpeakerLabelCount = Array.isArray(needsSpeakerBucket) ? needsSpeakerBucket.length : 0;
+  const knownRefs = new Set(params.speakerAnnotations.map((item) => item.speakerRef));
+  const unresolvedSlotCount = suggestedSlots.filter((slot) => {
+    if (!slot || typeof slot !== "object") {
+      return true;
+    }
+    const speakerRef = (slot as { speakerRef?: unknown }).speakerRef;
+    const displayName = (slot as { displayName?: unknown }).displayName;
+    if (typeof speakerRef === "string" && knownRefs.has(speakerRef)) {
+      return false;
+    }
+    return typeof displayName !== "string" || looksPendingIdentityLabelForCli(displayName);
+  }).length;
+  const slotTaskImpacts = buildSpeakerSlotTaskImpacts({
+    speakerResolutionPrompts,
+    speakerSuggestions: params.speakerSuggestions,
+  });
+  const promptCommands = speakerResolutionPrompts
+    .flatMap((item) => {
+      if (!item || typeof item !== "object") {
+        return [];
+      }
+      const command = (item as { selfCommandTemplate?: unknown; commandTemplate?: unknown }).selfCommandTemplate ??
+        (item as { commandTemplate?: unknown }).commandTemplate;
+      return typeof command === "string" && command.trim() ? [command] : [];
+    });
+  const impactCommands = slotTaskImpacts.flatMap((item) => [item.commands.markAsMe, item.commands.markAsColleague]);
+  const suggestionCommands = params.speakerSuggestions
+    .slice(0, 4)
+    .flatMap((item) => [item.selfCommandTemplate, item.commandTemplate])
+    .filter((item): item is string => typeof item === "string")
+    .filter((item) => item.trim().length > 0);
+  const quickCommands = dedupeStrings(impactCommands.concat(promptCommands, suggestionCommands)).slice(0, 8);
+  const naturalLanguageHints = speakerResolutionPrompts
+    .flatMap((item) => {
+      if (!item || typeof item !== "object") {
+        return [];
+      }
+      const prompt = (item as { prompt?: unknown }).prompt;
+      const selfSentenceTemplate = (item as { selfSentenceTemplate?: unknown }).selfSentenceTemplate;
+      const sentenceTemplate = (item as { sentenceTemplate?: unknown }).sentenceTemplate;
+      return [prompt, selfSentenceTemplate, sentenceTemplate]
+        .filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+    })
+    .slice(0, 8);
+  const status =
+    suggestedSlots.length === 0 && params.speakerSuggestions.length === 0 && speakerResolutionPrompts.length === 0
+      ? "missing-speaker-evidence"
+      : unresolvedSlotCount > 0 || speakerResolutionPrompts.length > 0 || taskNeedsSpeakerLabelCount > 0
+        ? "needs-speaker-labels"
+        : "ready";
+  return {
+    ok: true,
+    date: params.date,
+    scope: params.scope,
+    question: params.question,
+    status,
+    summary: {
+      suggestedSlotCount: suggestedSlots.length,
+      unresolvedSlotCount,
+      promptCount: speakerResolutionPrompts.length,
+      knownSpeakerCount: params.speakerAnnotations.length,
+      taskNeedsSpeakerLabelCount,
+      impactedSlotCount: slotTaskImpacts.length,
+      diarizationRequiredPromptCount: speakerResolutionPrompts.filter((item) =>
+        item && typeof item === "object" && (item as { requiresDiarization?: unknown }).requiresDiarization === true
+      ).length,
+    },
+    knownSpeakers: params.speakerAnnotations
+      .map((item) => ({
+        speakerRef: item.speakerRef,
+        displayName: item.displayName,
+        relationship: item.relationship,
+        windowId: item.windowId,
+        updatedAt: item.updatedAt,
+      }))
+      .slice(0, 20),
+    suggestedSlots,
+    taskAttribution: params.taskAttribution,
+    taskAttributionBuckets,
+    speakerResolutionPrompts,
+    speakerSuggestions: params.speakerSuggestions,
+    slotTaskImpacts,
+    quickCommands,
+    naturalLanguageHints,
+  };
+}
+
+function buildSpeakerSlotTaskImpacts(params: {
+  speakerResolutionPrompts: unknown[];
+  speakerSuggestions: Array<{
+    speakerRef: string;
+    slotLabel: string;
+    windowId: string;
+    timeRange: string;
+    displayName?: string;
+    relationship?: string;
+    sentenceTemplate: string;
+    commandTemplate: string;
+    selfSentenceTemplate?: string;
+    selfCommandTemplate?: string;
+  }>;
+}): Array<{
+  speakerRef: string;
+  slotLabel: string;
+  windowId: string;
+  timeRange: string;
+  displayName?: string;
+  relationship?: string;
+  impactLevel: "exact-task-owner" | "window-context-only";
+  requiresDiarization: boolean;
+  unresolvedTaskCount: number;
+  sampleTasks: string[];
+  naturalLanguageHints: string[];
+  commands: {
+    markAsMe: string;
+    markAsColleague: string;
+  };
+}> {
+  const byRef = new Map<string, {
+    speakerRef: string;
+    slotLabel: string;
+    windowId: string;
+    timeRange: string;
+    displayName?: string;
+    relationship?: string;
+    impactLevel: "exact-task-owner" | "window-context-only";
+    requiresDiarization: boolean;
+    unresolvedTaskCount: number;
+    sampleTasks: string[];
+    naturalLanguageHints: string[];
+    commands: {
+      markAsMe: string;
+      markAsColleague: string;
+    };
+  }>();
+
+  const upsert = (slot: {
+    speakerRef: string;
+    slotLabel: string;
+    windowId: string;
+    timeRange: string;
+    displayName?: string;
+    relationship?: string;
+    selfSentenceTemplate?: string;
+    sentenceTemplate?: string;
+    selfCommandTemplate?: string;
+    commandTemplate?: string;
+  }, prompt: {
+    taskCount: number;
+    sampleTasks: string[];
+    requiresDiarization: boolean;
+    naturalLanguageHints: string[];
+  }) => {
+    const current = byRef.get(slot.speakerRef) ?? {
+      speakerRef: slot.speakerRef,
+      slotLabel: slot.slotLabel,
+      windowId: slot.windowId,
+      timeRange: slot.timeRange,
+      ...(slot.displayName ? { displayName: slot.displayName } : {}),
+      ...(slot.relationship ? { relationship: slot.relationship } : {}),
+      impactLevel: prompt.requiresDiarization ? "window-context-only" as const : "exact-task-owner" as const,
+      requiresDiarization: prompt.requiresDiarization,
+      unresolvedTaskCount: 0,
+      sampleTasks: [],
+      naturalLanguageHints: [],
+      commands: {
+        markAsMe:
+          slot.selfCommandTemplate ??
+          `openclaw clawsense annotate-speaker ${JSON.stringify(slot.speakerRef)} "我" --relationship "本人" --windowId ${JSON.stringify(slot.windowId)}`,
+        markAsColleague:
+          slot.commandTemplate ??
+          `openclaw clawsense annotate-speaker ${JSON.stringify(slot.speakerRef)} "李三" --relationship "同事" --windowId ${JSON.stringify(slot.windowId)}`,
+      },
+    };
+    current.unresolvedTaskCount += prompt.taskCount;
+    current.requiresDiarization = current.requiresDiarization || prompt.requiresDiarization;
+    current.impactLevel = current.requiresDiarization ? "window-context-only" : "exact-task-owner";
+    current.sampleTasks = dedupeStrings(current.sampleTasks.concat(prompt.sampleTasks)).slice(0, 4);
+    current.naturalLanguageHints = dedupeStrings(current.naturalLanguageHints.concat(prompt.naturalLanguageHints)).slice(0, 4);
+    byRef.set(slot.speakerRef, current);
+  };
+
+  for (const rawPrompt of params.speakerResolutionPrompts) {
+    if (!rawPrompt || typeof rawPrompt !== "object") {
+      continue;
+    }
+    const prompt = rawPrompt as {
+      taskCount?: unknown;
+      sampleTasks?: unknown;
+      requiresDiarization?: unknown;
+      selfSentenceTemplate?: unknown;
+      sentenceTemplate?: unknown;
+      candidateSpeakerSlots?: unknown;
+    };
+    const taskCount = typeof prompt.taskCount === "number" && Number.isFinite(prompt.taskCount) ? prompt.taskCount : 0;
+    const sampleTasks = Array.isArray(prompt.sampleTasks)
+      ? prompt.sampleTasks.filter((item): item is string => typeof item === "string")
+      : [];
+    const naturalLanguageHints = [prompt.selfSentenceTemplate, prompt.sentenceTemplate].filter(
+      (item): item is string => typeof item === "string" && item.trim().length > 0,
+    );
+    const candidateSlots = Array.isArray(prompt.candidateSpeakerSlots) ? prompt.candidateSpeakerSlots : [];
+    for (const rawSlot of candidateSlots) {
+      if (!rawSlot || typeof rawSlot !== "object") {
+        continue;
+      }
+      const slot = rawSlot as {
+        speakerRef?: unknown;
+        slotLabel?: unknown;
+        windowId?: unknown;
+        timeRange?: unknown;
+        displayName?: unknown;
+        relationship?: unknown;
+        selfSentenceTemplate?: unknown;
+        sentenceTemplate?: unknown;
+        selfCommandTemplate?: unknown;
+        commandTemplate?: unknown;
+      };
+      if (
+        typeof slot.speakerRef !== "string" ||
+        typeof slot.slotLabel !== "string" ||
+        typeof slot.windowId !== "string" ||
+        typeof slot.timeRange !== "string"
+      ) {
+        continue;
+      }
+      upsert(
+        {
+          speakerRef: slot.speakerRef,
+          slotLabel: slot.slotLabel,
+          windowId: slot.windowId,
+          timeRange: slot.timeRange,
+          ...(typeof slot.displayName === "string" ? { displayName: slot.displayName } : {}),
+          ...(typeof slot.relationship === "string" ? { relationship: slot.relationship } : {}),
+          ...(typeof slot.selfSentenceTemplate === "string" ? { selfSentenceTemplate: slot.selfSentenceTemplate } : {}),
+          ...(typeof slot.sentenceTemplate === "string" ? { sentenceTemplate: slot.sentenceTemplate } : {}),
+          ...(typeof slot.selfCommandTemplate === "string" ? { selfCommandTemplate: slot.selfCommandTemplate } : {}),
+          ...(typeof slot.commandTemplate === "string" ? { commandTemplate: slot.commandTemplate } : {}),
+        },
+        {
+          taskCount,
+          sampleTasks,
+          requiresDiarization: prompt.requiresDiarization === true,
+          naturalLanguageHints,
+        },
+      );
+    }
+  }
+
+  for (const suggestion of params.speakerSuggestions) {
+    if (!byRef.has(suggestion.speakerRef)) {
+      byRef.set(suggestion.speakerRef, {
+        speakerRef: suggestion.speakerRef,
+        slotLabel: suggestion.slotLabel,
+        windowId: suggestion.windowId,
+        timeRange: suggestion.timeRange,
+        impactLevel: "window-context-only",
+        requiresDiarization: true,
+        unresolvedTaskCount: 0,
+        sampleTasks: [],
+        naturalLanguageHints: dedupeStrings([
+          suggestion.selfSentenceTemplate ?? "",
+          suggestion.sentenceTemplate,
+        ].filter(Boolean)),
+        commands: {
+          markAsMe:
+            suggestion.selfCommandTemplate ??
+            `openclaw clawsense annotate-speaker ${JSON.stringify(suggestion.speakerRef)} "我" --relationship "本人" --windowId ${JSON.stringify(suggestion.windowId)}`,
+          markAsColleague: suggestion.commandTemplate,
+        },
+      });
+    }
+  }
+
+  return Array.from(byRef.values())
+    .sort((left, right) => right.unresolvedTaskCount - left.unresolvedTaskCount || left.slotLabel.localeCompare(right.slotLabel))
+    .slice(0, 8);
+}
+
+function buildAudioDiagnosticsPayload(params: {
+  date: string;
+  events: ClawSenseCaptureEvent[];
+  artifacts: ClawSenseArtifactRecord[];
+  localAsr: unknown;
+  worker: unknown;
+  maxSamples: number;
+}): {
+  ok: true;
+  date: string;
+  counts: {
+    totalEvents: number;
+    audioEvents: number;
+    audioArtifacts: number;
+    audioArtifactRecords: number;
+    activeAudioArtifactRecords: number;
+    deletedAudioArtifactRecords: number;
+    missingAudioArtifactRecords: number;
+    transcriptReadyEvents: number;
+    transcriptSegmentReadyEvents: number;
+    speakerTimelineReadyEvents: number;
+    degradedAudioEvents: number;
+    pendingAnalysisEvents: number;
+    backfillNeededEvents: number;
+    backfillRunnableEvents: number;
+    diarizationNeededEvents: number;
+    diarizationRunnableEvents: number;
+  };
+  coverage: {
+    transcriptCoverage: number;
+    transcriptSegmentCoverage: number;
+    speakerTimelineCoverage: number;
+  };
+  verdict: {
+    transcriptLayer: "ready" | "partial" | "missing";
+    diarizationLayer: "ready" | "partial" | "missing";
+    needsBackfill: boolean;
+    needsDiarization: boolean;
+    rawAudioArtifacts: "available" | "deleted" | "missing-record";
+  };
+  blockers: Array<{
+    id: string;
+    severity: "info" | "warning" | "blocked";
+    message: string;
+  }>;
+  nextActions: string[];
+  retention: {
+    earliestRetentionExpiresAt?: number;
+    earliestRetentionExpiresAtIso?: string;
+    latestRetentionExpiresAt?: number;
+    latestRetentionExpiresAtIso?: string;
+    firstDeletedAt?: number;
+    firstDeletedAtIso?: string;
+    lastDeletedAt?: number;
+    lastDeletedAtIso?: string;
+  };
+  topFailureReasons: Array<{ reason: string; count: number }>;
+  sampleBackfillCandidates: Array<{
+    eventId: string;
+    artifactId: string;
+    capturedAt: number;
+    capturedAtIso: string;
+    fileName?: string;
+    transcriptReady: boolean;
+    transcriptSegmentCount: number;
+    speakerTimelineSegmentCount: number;
+    rawArtifactAvailable: boolean;
+    rawArtifactDeletedAt?: number;
+    rawArtifactRetentionExpiresAt?: number;
+    analysisStatus?: string;
+    analysisFailureReason?: string;
+    audioBackfillAttemptCount?: number;
+  }>;
+  localAsr: unknown;
+  worker: unknown;
+  recommendedCommands: string[];
+} {
+  const audioEvents = params.events.filter((event) => event.modality === "audio");
+  const artifactsById = new Map(params.artifacts.map((artifact) => [artifact.artifactId, artifact]));
+  const audioArtifactIds = new Set(audioEvents.map((event) => event.artifactId));
+  const audioArtifacts = params.artifacts.filter(
+    (artifact) =>
+      artifact.modality === "audio" &&
+      !artifact.deletedAt &&
+      audioArtifactIds.has(artifact.artifactId),
+  );
+  const transcriptReadyEvents = audioEvents.filter(hasAudioTranscriptReady);
+  const transcriptSegmentReadyEvents = audioEvents.filter((event) => countSegments(event.transcriptSegments) > 0);
+  const speakerTimelineReadyEvents = audioEvents.filter((event) => countSegments(event.speakerTimelineSegments) > 0);
+  const degradedAudioEvents = audioEvents.filter((event) => event.analysisStatus === "degraded");
+  const pendingAnalysisEvents = audioEvents.filter((event) =>
+    typeof event.analysisFailureReason === "string" && event.analysisFailureReason.includes("analysis_pending"),
+  );
+  const backfillNeededEvents = audioEvents.filter((event) =>
+    !hasAudioTranscriptReady(event) ||
+      countSegments(event.transcriptSegments) === 0 ||
+      event.analysisStatus === "degraded"
+  );
+  const backfillRunnableEvents = backfillNeededEvents.filter((event) => {
+    const artifact = artifactsById.get(event.artifactId);
+    return Boolean(artifact && !artifact.deletedAt);
+  });
+  const diarizationNeededEvents = audioEvents.filter((event) =>
+    hasAudioTranscriptReady(event) && countSegments(event.speakerTimelineSegments) === 0
+  );
+  const diarizationRunnableEvents = diarizationNeededEvents.filter((event) => {
+    const artifact = artifactsById.get(event.artifactId);
+    return Boolean(artifact && !artifact.deletedAt);
+  });
+  const topFailureReasons = summarizeAudioFailureReasons(audioEvents).slice(0, 10);
+  const sampleBackfillCandidates = backfillNeededEvents
+    .slice()
+    .sort((left, right) => left.capturedAt - right.capturedAt)
+    .slice(0, Math.max(1, Math.min(20, params.maxSamples)))
+    .map((event) => {
+      const artifact = artifactsById.get(event.artifactId);
+      return {
+        eventId: event.eventId,
+        artifactId: event.artifactId,
+        capturedAt: event.capturedAt,
+        capturedAtIso: new Date(event.capturedAt).toISOString(),
+        fileName: artifact?.fileName,
+        transcriptReady: hasAudioTranscriptReady(event),
+        transcriptSegmentCount: countSegments(event.transcriptSegments),
+        speakerTimelineSegmentCount: countSegments(event.speakerTimelineSegments),
+        rawArtifactAvailable: Boolean(artifact && !artifact.deletedAt),
+        ...(artifact?.deletedAt ? { rawArtifactDeletedAt: artifact.deletedAt } : {}),
+        ...(artifact?.retentionExpiresAt ? { rawArtifactRetentionExpiresAt: artifact.retentionExpiresAt } : {}),
+        analysisStatus: event.analysisStatus,
+        analysisFailureReason: event.analysisFailureReason,
+        audioBackfillAttemptCount: event.audioBackfillAttemptCount,
+      };
+    });
+  const transcriptCoverage = ratio(transcriptReadyEvents.length, audioEvents.length);
+  const transcriptSegmentCoverage = ratio(transcriptSegmentReadyEvents.length, audioEvents.length);
+  const speakerTimelineCoverage = ratio(speakerTimelineReadyEvents.length, audioEvents.length);
+  const audioArtifactRecords = audioEvents
+    .map((event) => artifactsById.get(event.artifactId))
+    .filter((artifact): artifact is ClawSenseArtifactRecord => Boolean(artifact && artifact.modality === "audio"));
+  const activeAudioArtifactRecords = audioArtifactRecords.filter((artifact) => !artifact.deletedAt);
+  const deletedAudioArtifactRecords = audioArtifactRecords.filter((artifact) => artifact.deletedAt);
+  const missingAudioArtifactRecords = Math.max(0, audioEvents.length - audioArtifactRecords.length);
+  const retention = summarizeRetention(audioArtifactRecords);
+  const rawAudioArtifacts =
+    activeAudioArtifactRecords.length > 0
+      ? "available"
+      : deletedAudioArtifactRecords.length > 0
+        ? "deleted"
+        : "missing-record";
+  const countsForDiagnosis = {
+    audioEvents: audioEvents.length,
+    backfillNeededEvents: backfillNeededEvents.length,
+    backfillRunnableEvents: backfillRunnableEvents.length,
+    diarizationNeededEvents: diarizationNeededEvents.length,
+    diarizationRunnableEvents: diarizationRunnableEvents.length,
+  };
+  const blockers = buildAudioDiagnosticsBlockers(countsForDiagnosis, rawAudioArtifacts);
+  return {
+    ok: true,
+    date: params.date,
+    counts: {
+      totalEvents: params.events.length,
+      audioEvents: audioEvents.length,
+      audioArtifacts: audioArtifacts.length,
+      audioArtifactRecords: audioArtifactRecords.length,
+      activeAudioArtifactRecords: activeAudioArtifactRecords.length,
+      deletedAudioArtifactRecords: deletedAudioArtifactRecords.length,
+      missingAudioArtifactRecords,
+      transcriptReadyEvents: transcriptReadyEvents.length,
+      transcriptSegmentReadyEvents: transcriptSegmentReadyEvents.length,
+      speakerTimelineReadyEvents: speakerTimelineReadyEvents.length,
+      degradedAudioEvents: degradedAudioEvents.length,
+      pendingAnalysisEvents: pendingAnalysisEvents.length,
+      backfillNeededEvents: backfillNeededEvents.length,
+      backfillRunnableEvents: backfillRunnableEvents.length,
+      diarizationNeededEvents: diarizationNeededEvents.length,
+      diarizationRunnableEvents: diarizationRunnableEvents.length,
+    },
+    coverage: {
+      transcriptCoverage,
+      transcriptSegmentCoverage,
+      speakerTimelineCoverage,
+    },
+    verdict: {
+      transcriptLayer: coverageStatus(transcriptCoverage),
+      diarizationLayer: coverageStatus(speakerTimelineCoverage),
+      needsBackfill: backfillNeededEvents.length > 0,
+      needsDiarization: diarizationNeededEvents.length > 0,
+      rawAudioArtifacts,
+    },
+    blockers,
+    nextActions: buildAudioDiagnosticsNextActions({
+      date: params.date,
+      rawAudioArtifacts,
+      blockers,
+      counts: countsForDiagnosis,
+    }),
+    retention,
+    topFailureReasons,
+    sampleBackfillCandidates,
+    localAsr: params.localAsr,
+    worker: params.worker,
+    recommendedCommands: buildAudioDiagnosticsRecommendedCommands(params.date, rawAudioArtifacts),
+  };
+}
+
+function buildAudioDiagnosticsBlockers(
+  counts: {
+    audioEvents: number;
+    backfillNeededEvents: number;
+    backfillRunnableEvents: number;
+    diarizationNeededEvents: number;
+    diarizationRunnableEvents: number;
+  },
+  rawAudioArtifacts: "available" | "deleted" | "missing-record",
+): Array<{ id: string; severity: "info" | "warning" | "blocked"; message: string }> {
+  const blockers: Array<{ id: string; severity: "info" | "warning" | "blocked"; message: string }> = [];
+  if (counts.audioEvents === 0) {
+    blockers.push({
+      id: "no-audio-events",
+      severity: "blocked",
+      message: "这个日期没有音频事件，无法做 ASR 或 speaker diarization。",
+    });
+    return blockers;
+  }
+  if (rawAudioArtifacts === "deleted") {
+    blockers.push({
+      id: "raw-audio-retention-deleted",
+      severity: "blocked",
+      message: "这个日期的原始音频 artifact 已被 retention 清理；已有 transcript 仍可用于回顾，但不能直接补跑本地 ASR / diarization。",
+    });
+  } else if (rawAudioArtifacts === "missing-record") {
+    blockers.push({
+      id: "raw-audio-artifact-record-missing",
+      severity: "blocked",
+      message: "音频事件没有可用 artifact 记录；需要先确认 ingest state/runtime 是否选对。",
+    });
+  }
+  if (counts.diarizationNeededEvents > 0 && counts.diarizationRunnableEvents === 0) {
+    blockers.push({
+      id: "diarization-not-runnable",
+      severity: rawAudioArtifacts === "available" ? "warning" : "blocked",
+      message: "存在需要 speaker timeline 的音频，但当前没有可补跑 diarization 的原始音频候选。",
+    });
+  }
+  if (counts.backfillNeededEvents > 0 && counts.backfillRunnableEvents === 0) {
+    blockers.push({
+      id: "backfill-not-runnable",
+      severity: rawAudioArtifacts === "available" ? "warning" : "blocked",
+      message: "存在需要 ASR backfill 的音频，但当前没有可补跑的原始音频候选。",
+    });
+  }
+  if (blockers.length === 0) {
+    blockers.push({
+      id: "audio-backfill-runnable",
+      severity: "info",
+      message: "当前有可用原始音频；可以 dry-run 本地 ASR / diarization 计划。",
+    });
+  }
+  return blockers;
+}
+
+function buildAudioDiagnosticsNextActions(params: {
+  date: string;
+  rawAudioArtifacts: "available" | "deleted" | "missing-record";
+  blockers: Array<{ id: string; severity: "info" | "warning" | "blocked"; message: string }>;
+  counts: {
+    backfillNeededEvents: number;
+    diarizationNeededEvents: number;
+  };
+}): string[] {
+  if (params.rawAudioArtifacts === "available") {
+    return [
+      `先 dry-run：openclaw clawsense asr-queue plan ${params.date} --provider local-asr --include-transcribed --dry-run`,
+      params.counts.diarizationNeededEvents > 0
+        ? `如需 speaker：openclaw clawsense diarization-probe ${params.date} --provider hybrid --max 1`
+        : "speaker timeline 已有覆盖；优先检查 task attribution / speaker 标注。",
+      params.counts.backfillNeededEvents > 0
+        ? `如需写回：openclaw clawsense backfill-audio ${params.date} --provider local-asr --include-transcribed --dry-run --max 3`
+        : "ASR transcript 覆盖已经较好；除非发现缺口，否则先不要重复补跑。",
+    ];
+  }
+  if (params.rawAudioArtifacts === "deleted") {
+    return [
+      "这一天只能继续使用已保存 transcript / summary 回顾；不能直接从当前 state 补跑本地 ASR 或 diarization。",
+      "如果要验证 speaker diarization，请重新导入当天 raw wav，或用新的真机/公开样例录一段仍在 retention 窗口内的音频。",
+      "后续采集前把 artifactRetentionDays 设到足够长，并在 retention 到期前运行 audio-diagnostics / diarization-probe。",
+    ];
+  }
+  return [
+    "先确认当前命令使用的是正确的 repo-local 或服务器 state。",
+    `检查媒体库：openclaw clawsense media ${params.date}`,
+    "如果确实没有 artifact 记录，需要重新采集或导入 raw wav 后再跑 ASR / diarization。",
+  ];
+}
+
+function hasAudioTranscriptReady(event: ClawSenseCaptureEvent): boolean {
+  const directTranscript = normalizeSemanticText(event.transcript ?? "");
+  if (directTranscript) {
+    return true;
+  }
+  return (event.transcriptSegments ?? []).some((segment) => normalizeSemanticText(segment.text ?? ""));
+}
+
+function summarizeRetention(artifacts: ClawSenseArtifactRecord[]): {
+  earliestRetentionExpiresAt?: number;
+  earliestRetentionExpiresAtIso?: string;
+  latestRetentionExpiresAt?: number;
+  latestRetentionExpiresAtIso?: string;
+  firstDeletedAt?: number;
+  firstDeletedAtIso?: string;
+  lastDeletedAt?: number;
+  lastDeletedAtIso?: string;
+} {
+  const retentionValues = artifacts
+    .map((artifact) => artifact.retentionExpiresAt)
+    .filter((value) => Number.isFinite(value))
+    .sort((left, right) => left - right);
+  const deletedValues = artifacts
+    .map((artifact) => artifact.deletedAt)
+    .filter((value): value is number => Number.isFinite(value))
+    .sort((left, right) => left - right);
+  const earliestRetentionExpiresAt = retentionValues[0];
+  const latestRetentionExpiresAt = retentionValues.at(-1);
+  const firstDeletedAt = deletedValues[0];
+  const lastDeletedAt = deletedValues.at(-1);
+  return {
+    ...(earliestRetentionExpiresAt
+      ? {
+          earliestRetentionExpiresAt,
+          earliestRetentionExpiresAtIso: new Date(earliestRetentionExpiresAt).toISOString(),
+        }
+      : {}),
+    ...(latestRetentionExpiresAt
+      ? {
+          latestRetentionExpiresAt,
+          latestRetentionExpiresAtIso: new Date(latestRetentionExpiresAt).toISOString(),
+        }
+      : {}),
+    ...(firstDeletedAt
+      ? {
+          firstDeletedAt,
+          firstDeletedAtIso: new Date(firstDeletedAt).toISOString(),
+        }
+      : {}),
+    ...(lastDeletedAt
+      ? {
+          lastDeletedAt,
+          lastDeletedAtIso: new Date(lastDeletedAt).toISOString(),
+        }
+      : {}),
+  };
+}
+
+function buildAudioDiagnosticsRecommendedCommands(
+  date: string,
+  rawAudioArtifacts: "available" | "deleted" | "missing-record",
+): string[] {
+  const base = [
+    "openclaw clawsense asr-status",
+    `openclaw clawsense media ${date}`,
+  ];
+  if (rawAudioArtifacts === "available") {
+    return base.concat([
+      `openclaw clawsense asr-queue plan ${date} --provider local-asr --include-transcribed --dry-run`,
+      `openclaw clawsense backfill-audio ${date} --provider local-asr --include-transcribed --dry-run --max 3`,
+      `openclaw clawsense diarization-probe ${date} --provider whisperx --max 1`,
+    ]);
+  }
+  if (rawAudioArtifacts === "deleted") {
+    return base.concat([
+      "Raw audio artifacts for this date were already pruned by retention; collect new audio or re-import raw wav files before diarization/backfill.",
+      "For future tests, run audio-diagnostics within the retention window or increase plugins.entries.clawsense.config.artifactRetentionDays.",
+    ]);
+  }
+  return base.concat([
+    "No audio artifact records are linked to this date; confirm ingest state/runtime selection before attempting ASR backfill.",
+  ]);
+}
+
+function countSegments(segments: unknown): number {
+  return Array.isArray(segments) ? segments.length : 0;
+}
+
+function ratio(value: number, total: number): number {
+  if (total <= 0) {
+    return 0;
+  }
+  return Number((value / total).toFixed(4));
+}
+
+function coverageStatus(value: number): "ready" | "partial" | "missing" {
+  if (value >= 0.8) {
+    return "ready";
+  }
+  if (value > 0) {
+    return "partial";
+  }
+  return "missing";
+}
+
+function summarizeAudioFailureReasons(events: ClawSenseCaptureEvent[]): Array<{ reason: string; count: number }> {
+  const counts = new Map<string, number>();
+  for (const event of events) {
+    const raw = event.analysisFailureReason;
+    if (!raw) {
+      continue;
+    }
+    for (const reason of raw.split("|").map((item) => item.trim()).filter(Boolean)) {
+      counts.set(reason, (counts.get(reason) ?? 0) + 1);
+    }
+  }
+  return Array.from(counts.entries())
+    .map(([reason, count]) => ({ reason, count }))
+    .sort((left, right) => right.count - left.count || left.reason.localeCompare(right.reason));
+}
+
+function looksPendingIdentityLabelForCli(value: string): boolean {
+  return /^(speaker[_\-\s]?\d+|说话人\s*\d+|未知|待确认|unknown|pending)$/iu.test(value.trim());
+}
+
+function normalizeConversationDigestFollowUpTarget(
+  item: unknown,
+  prompt: string | undefined,
+  index: number,
+): {
+  source: "topic";
+  kind: "conversation-digest-topic";
+  prompt: string;
+  segmentId?: string;
+  windowId?: string;
+  timeRange?: string;
+  title?: string;
+  keywordHints?: unknown;
+  taskSignalCount?: unknown;
+} | undefined {
+  if (!item || typeof item !== "object") {
+    return undefined;
+  }
+  const topic = item as {
+    segmentId?: unknown;
+    windowId?: unknown;
+    timeRange?: unknown;
+    title?: unknown;
+    keywordHints?: unknown;
+    taskSignalCount?: unknown;
+  };
+  const timeRange = typeof topic.timeRange === "string" ? topic.timeRange : undefined;
+  const title = typeof topic.title === "string" ? topic.title : undefined;
+  const fallbackPrompt = `你可以继续问：“第 ${index + 1} 段${timeRange ? `（${timeRange}` : ""}${title ? `${timeRange ? "，" : "（"}${title}` : ""}${timeRange || title ? "）" : ""}具体讲了什么？”`;
+  return {
+    source: "topic",
+    kind: "conversation-digest-topic",
+    prompt: typeof prompt === "string" && prompt.trim() ? prompt : fallbackPrompt,
+    segmentId: typeof topic.segmentId === "string" ? topic.segmentId : undefined,
+    windowId: typeof topic.windowId === "string" ? topic.windowId : undefined,
+    timeRange,
+    title,
+    keywordHints: topic.keywordHints,
+    taskSignalCount: topic.taskSignalCount,
+  };
+}
+
+function dedupeStrings(items: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const item of items) {
+    const normalized = item.trim();
+    if (!normalized || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    result.push(normalized);
+  }
+  return result;
 }
 
 function collectCommaSeparatedOptionValues(
@@ -2849,6 +4954,22 @@ function collectCommaSeparatedOptionValues(
     .map((item) => item.trim())
     .filter(Boolean);
   return previous.concat(next);
+}
+
+function normalizeAudioBackfillProvider(value?: string): "auto" | "local-asr" | "compatible-asr" {
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === "local-asr" || normalized === "local" || normalized === "funasr" || normalized === "whisper") {
+    return "local-asr";
+  }
+  if (
+    normalized === "compatible-asr" ||
+    normalized === "compatible" ||
+    normalized === "cloud" ||
+    normalized === "stt"
+  ) {
+    return "compatible-asr";
+  }
+  return "auto";
 }
 
 function readHeaderValue(value: string | string[] | undefined): string | undefined {

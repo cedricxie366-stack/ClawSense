@@ -27,6 +27,11 @@
 - [docs/当前阶段交付收口清单.md](/Users/cedric/Documents/ClawSense/docs/当前阶段交付收口清单.md)
 - [docs/当前阶段分批提交计划.md](/Users/cedric/Documents/ClawSense/docs/当前阶段分批提交计划.md)
 - [docs/dev/开发日志.md](/Users/cedric/Documents/ClawSense/docs/dev/开发日志.md)
+- [docs/validation/README.md](/Users/cedric/Documents/ClawSense/docs/validation/README.md)
+- [docs/validation/evidence-v2-smoke-validation.md](/Users/cedric/Documents/ClawSense/docs/validation/evidence-v2-smoke-validation.md)
+- [docs/validation/conversation-evidence-routing-validation.md](/Users/cedric/Documents/ClawSense/docs/validation/conversation-evidence-routing-validation.md)
+- [docs/validation/non-device-product-quality-gate.md](/Users/cedric/Documents/ClawSense/docs/validation/non-device-product-quality-gate.md)
+- [docs/validation/local-openclaw-evidence-cli-validation.md](/Users/cedric/Documents/ClawSense/docs/validation/local-openclaw-evidence-cli-validation.md)
 
 如果本轮重点是视频 M2 / keyframe evidence，再额外重点看：
 
@@ -85,6 +90,7 @@ cd /Users/cedric/Documents/ClawSense
 npm run check
 npm test
 npm run check:release
+npm run check:non-device-product-gate
 npm run check:phase
 npm run check:stage-final:doctor
 ```
@@ -94,6 +100,7 @@ npm run check:stage-final:doctor
 - `check` 成功
 - `test` 全绿
 - `check:release` 成功，npm 包边界不包含 `.codex` / `docs` / `android` / `.local` / `test` / `scripts`
+- `check:non-device-product-gate` 成功，说明没有真机时 host 侧 evidence routing、历史回顾、ASR/diarization replay、speaker 标注和自动视频 fixture 仍成立
 - `check:phase` 成功，说明 release gate、Android debug build、公开素材 replay、AMI speaker 标注 smoke、`acceptance 5/5`、`hostModelVideoMode=keyframes` 视频 evidence transcript/keyframes 断言全部通过
 - `check:phase` 默认不要求真机在线；若要把真机也作为硬门槛，用 `REQUIRE_ANDROID_DEVICE=1 npm run check:phase`
 - `check:stage-final:doctor` 用于判断最终缺口。Host/fixture 已 ready 但缺真实设备时，预期状态是 `waiting-for-primary-live`，不能把它当作 host 代码失败。
@@ -103,6 +110,89 @@ npm run check:stage-final:doctor
 - 直接记录失败用例名
 - 不要自己修代码
 - 把失败归类到 `host-code-regression`
+
+### 1.0 非真机产品质量门禁
+
+没有 Android 真机、真人语音或稳定网络时，先跑：
+
+```bash
+cd /Users/cedric/Documents/ClawSense
+npm run check:non-device-product-gate
+```
+
+如果只需要复查最近一次完整结果，不要重跑长门禁，直接运行：
+
+```bash
+cd /Users/cedric/Documents/ClawSense
+npm run report:non-device-product-gate
+```
+
+通过标准：
+
+- 顶层 `summary.passed = 9`
+- 顶层 `summary.failed = 0`
+- `evidence-v2-synthetic.summary.rawAudioArtifacts = "available"`
+- `evidence-v2-synthetic.summary.audioBlockerIds` 包含 `audio-ready`
+- `conversation-routing.summary.publicAmiRawAudioArtifacts = "available"`
+- `conversation-routing.summary.publicAmiAudioBlockerIds` 包含 `audio-ready`
+- `conversation-routing.summary.publicAmiTranscriptReadyEvents >= 10`
+- `conversation-routing.summary.publicAmiSpeakerTimelineReadyEvents >= 10`
+- `historical-real-state.summary.contextAudioMatchesDiagnostics = true`
+- 如果 `historical-real-state.summary.rawAudioArtifacts = "deleted"`，则 `audioBlockerIds` 和 `contextAudioBlockerIds` 都必须包含 `raw-audio-retention-deleted`
+- `active-raw-audio-positive.summary.rawAudioArtifacts = "available"`
+- `speaker-slots-positive.summary.hasSlotTaskImpactCommands = true`
+- `auto-video-trigger-fixture.summary.directiveBackpressureGuard = true`
+- 输出中的 `report.path` 和 `report.latestPath` 必须存在；最终报告里应引用该文件路径，方便主开发线程复查完整 JSON。
+- 如果使用 `npm run report:non-device-product-gate` 复查最近报告，`freshness.isStale` 必须为 `false`；若为 `true`，先重跑 `npm run check:non-device-product-gate`。
+
+解释口径：
+
+- 这组通过表示 host 侧“会议证据进入对话、长历史路由、speaker 标注辅助、音频诊断边界、主动视频规则”没有退化。
+- 这组不能证明 Android 真机麦克风、TTS、弱网、心跳、上传队列已经通过。
+- 如果 `historical-real-state` 显示 `rawAudioArtifacts=deleted`，不要判成模型没听音频；这是 retention 后不能补跑 ASR/diarization，但仍可引用已保存 transcript/digest。
+
+### 1.1 公开素材 ASR / 证据链回放检查
+
+这组检查用于区分“Host 证据链 / ASR / speaker 标注代码成立”和“真实 Android 采集还没补齐”。它们不替代真机验收，但可以在没有真人会议素材时验证会议问答能力。
+
+英文办公会议路线：
+
+```bash
+cd /Users/cedric/Documents/ClawSense
+npm run check:public-wav
+npm run check:public-replay
+```
+
+通过标准：
+
+- `check:public-wav` 能读到公开 AMI WAV / cached ASR 结果。
+- `check:public-replay` 能把 AMI 会议转写回放到 repo-local ClawSense state。
+- context 暴露 transcript spans、topic segments、followups。
+- speaker 标注 smoke 能把 `speaker_2` 标注成 `Sarah` 并在二次 context 里复用。
+
+中文会议路线：
+
+```bash
+cd /Users/cedric/Documents/ClawSense
+npm run check:public-zh-meeting
+CLAWSENSE_PUBLIC_ZH_MEETING_PREPARE_CLIP=1 npm run check:public-zh-meeting
+CLAWSENSE_PUBLIC_ZH_MEETING_RUN_ASR=1 npm run check:public-zh-meeting
+npm run check:public-zh-replay
+```
+
+通过标准：
+
+- 默认 `check:public-zh-meeting` 只做 AliMeeting metadata smoke，不下载完整 500MB 级音频。
+- `PREPARE_CLIP=1` 能生成 120 秒、16kHz、mono、PCM16 远场切片。
+- `RUN_ASR=1` 能跑 FunASR-primary + CAM++ speaker timeline，至少产出 transcript segments 和 speaker labels。
+- `check:public-zh-replay` 能把中文 ASR 结果写入 ClawSense audio captures，并通过真实 CLI 验证 `context`、`followups`、`annotate-speaker`。
+- 标注后 context 的 speakerSlots 能显示中文实名 / 角色，例如 `同事A`。
+
+边界：
+
+- 中文 deep check 会下载/处理公开大音频的开头切片，网络慢时可只跑 metadata smoke。
+- replay 会写入 repo-local fixture 日期，脚本会清理同 fixture 历史记录；不要在用户全局 `~/.openclaw` 上跑。
+- 公开素材通过只说明 host-side 能力成立，不能替代 `check:stage-final` 所需的物理 Android primary live 和 no-arm ambient 报告。
 
 ### 2. repo-local 运行时检查
 

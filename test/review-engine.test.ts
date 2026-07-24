@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as openAiClient from "../src/openai-client.js";
 import { resolveClawSenseConfig } from "../src/config.js";
 import { ClawSenseReviewEngine } from "../src/review-engine.js";
-import { ClawSenseStateStore, toLocalDateKey } from "../src/state-store.js";
+import { ClawSenseStateStore, toLocalDateKey, type ClawSenseMemoryCard } from "../src/state-store.js";
 
 const REVIEW_SECTION_TITLES = [
   "Today at a glance",
@@ -369,6 +369,63 @@ describe("ClawSenseReviewEngine", () => {
     expect(context.highlights.audioCoverage.transcriptReadyWindows).toBe(18);
   });
 
+  it("persists rolling conversation digests while building assistant context", async () => {
+    vi.setSystemTime(new Date(2026, 5, 25, 12, 0, 0));
+
+    const store = createStore(rootDir);
+    const engine = createEngine(rootDir, store);
+    const device = await store.registerDevice({
+      name: "Pixel",
+      platform: "android",
+    });
+    const now = Date.now();
+    const startAt = now - 2 * 60 * 60_000;
+
+    await recordAudioEvent(store, {
+      memoryId: "rolling-digest-audio-1",
+      deviceId: device.deviceId,
+      summary: "讨论 AI 陪练剧本和语料同步。",
+      transcript: "AI陪练可以根据文本生成剧本，产品团队需要确认语料同步方案。",
+      capturedAt: startAt + 5 * 60_000,
+    });
+    await recordAudioEvent(store, {
+      memoryId: "rolling-digest-audio-2",
+      deviceId: device.deviceId,
+      summary: "讨论考核报表和培训安排。",
+      transcript: "后面还要确认考核点通过率，海南物流培训也要区分角色讲解工单流程。",
+      capturedAt: startAt + 45 * 60_000,
+    });
+
+    const context = await engine.buildAssistantContext({
+      scope: "custom-range",
+      startAt,
+      endAt: now,
+      question: "过去2小时会议里有哪些任务？",
+      artifactUrlBase: "/api/clawsense/artifacts",
+      now,
+    });
+    const stored = await store.listConversationDigests({
+      date: context.date,
+      scope: "custom-range",
+      startAt,
+      endAt: now,
+    });
+    const memoryCards = await store.listMemoryCards({
+      date: context.date,
+      scope: "custom-range",
+      startAt,
+      endAt: now,
+    });
+
+    expect(context.rollingDigests).toHaveLength(1);
+    expect(context.rollingDigests[0]?.topicIndex.length).toBeGreaterThanOrEqual(2);
+    expect(context.rollingDigests[0]?.keywordIndex.some((item) => item.keyword === "AI陪练")).toBe(true);
+    expect(context.rollingDigests[0]?.topicIndex.some((topic) => topic.taskHints.length > 0)).toBe(true);
+    expect(stored[0]?.digestId).toBe(context.rollingDigests[0]?.digestId);
+    expect(context.memoryCards.some((card) => card.kind === "task" && card.summary.includes("语料同步"))).toBe(true);
+    expect(memoryCards.some((card) => card.kind === "topic" && card.title === "AI 陪练与剧本")).toBe(true);
+  });
+
   it("removes assistant spoken answers from review-engine windows", async () => {
     vi.setSystemTime(new Date(2026, 2, 10, 23, 30, 0));
 
@@ -581,6 +638,33 @@ describe("ClawSenseReviewEngine", () => {
       nextWatchFor: "确认她这次更关注报价还是开场。",
       eventIds: [first.event.eventId, second.event.eventId],
     });
+    await store.putMemoryCards([
+      {
+        cardId: "memcard-amy-demo-task",
+        date: "2026-03-29",
+        scope: "custom-range",
+        kind: "task",
+        title: "Amy 要求确认报价顺序",
+        summary: "任务线索来自 Amy 参与的演示准备窗口。",
+        status: "active",
+        confidence: "medium",
+        startAt: dayOne,
+        endAt: dayOne + 5 * 60_000,
+        lastSeenAt: dayOne + 5 * 60_000,
+        createdAt: dayOne,
+        updatedAt: dayOne + 5 * 60_000,
+        keywords: ["Amy", "报价", "演示"],
+        source: "rolling-digest",
+        evidence: {
+          digestId: "digest-amy-history",
+          topicIndexes: [1],
+          windowIds: [first.event.windowId],
+          timeRanges: ["09:10-09:15"],
+          taskHints: ["Amy 要求先确认报价顺序。"],
+          transcriptExcerpts: ["先讲价值主张，再讲报价。"],
+        },
+      } satisfies ClawSenseMemoryCard,
+    ]);
 
     const history = await engine.buildIdentityHistory({
       question: "Amy 之前在我的历史记忆里出现过什么？",
@@ -594,6 +678,16 @@ describe("ClawSenseReviewEngine", () => {
     expect(history[0]?.occurrenceCount).toBeGreaterThanOrEqual(2);
     expect(history[0]?.relatedDates).toEqual(expect.arrayContaining(["2026-03-29", "2026-03-30"]));
     expect(history[0]?.recentMoments[0]?.summary).toContain("Amy");
+    expect(history[0]?.memoryCards).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          cardId: "memcard-amy-demo-task",
+          kind: "task",
+          title: "Amy 要求确认报价顺序",
+          taskHints: ["Amy 要求先确认报价顺序。"],
+        }),
+      ]),
+    );
   });
 
   it("matches person history by relationship token when question omits display name", async () => {
@@ -742,6 +836,34 @@ describe("ClawSenseReviewEngine", () => {
       projectRefs: ["demo_prep"],
       tags: ["demo"],
     });
+    const firstEvent = (await store.listEvents()).find((event) => event.eventId === "demo-history-1");
+    await store.putMemoryCards([
+      {
+        cardId: "memcard-demo-prep-topic",
+        date: "2026-03-29",
+        scope: "custom-range",
+        kind: "topic",
+        title: "演示准备与截图顺序",
+        summary: "演示准备相关话题持续出现。",
+        status: "active",
+        confidence: "medium",
+        startAt: dayOne,
+        endAt: dayOne + 5 * 60_000,
+        lastSeenAt: dayOne + 5 * 60_000,
+        createdAt: dayOne,
+        updatedAt: dayOne + 5 * 60_000,
+        keywords: ["演示", "截图", "demo_prep"],
+        source: "rolling-digest",
+        evidence: {
+          digestId: "digest-demo-history",
+          topicIndexes: [1],
+          windowIds: firstEvent ? [firstEvent.windowId] : [],
+          timeRanges: ["09:10-09:15"],
+          taskHints: ["确认演示截图顺序。"],
+          transcriptExcerpts: ["先讲价值主张，再切到关键截图。"],
+        },
+      } satisfies ClawSenseMemoryCard,
+    ]);
 
     const history = await engine.buildProjectHistory({
       question: "演示准备之前在我的历史记忆里出现过什么？",
@@ -754,6 +876,74 @@ describe("ClawSenseReviewEngine", () => {
     expect(history[0]?.occurrenceCount).toBeGreaterThanOrEqual(2);
     expect(history[0]?.relatedDates).toEqual(expect.arrayContaining(["2026-03-29", "2026-03-30"]));
     expect(history[0]?.recentMoments[0]?.summary).toContain("演示");
+    expect(history[0]?.memoryCards).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          cardId: "memcard-demo-prep-topic",
+          kind: "topic",
+          title: "演示准备与截图顺序",
+          taskHints: ["确认演示截图顺序。"],
+        }),
+      ]),
+    );
+  });
+
+  it("matches localized office project aliases in project history questions", async () => {
+    vi.setSystemTime(new Date(2026, 5, 26, 10, 0, 0));
+
+    const store = createStore(rootDir);
+    const engine = createEngine(rootDir, store);
+    const device = await store.registerDevice({
+      name: "Pixel",
+      platform: "android",
+    });
+
+    const dayOne = new Date(2026, 5, 25, 10, 1, 0).getTime();
+    const dayTwo = new Date(2026, 5, 25, 10, 32, 0).getTime();
+    await recordAudioEvent(store, {
+      memoryId: "ai-coaching-history-1",
+      deviceId: device.deviceId,
+      summary: "AI 陪练系统演示，讨论根据聊天记录语料自动生成剧本。",
+      transcript: "AI 陪练要支持聊天记录语料同步，并用文本文档自动生成剧本。",
+      capturedAt: dayOne,
+    });
+    await recordAudioEvent(store, {
+      memoryId: "ai-coaching-history-2",
+      deviceId: device.deviceId,
+      summary: "继续讨论 AI 陪练报告视角、考核点通过率和缺陷项汇总。",
+      transcript: "陪练报告需要把对话记录、考核点通过率和缺陷项放在一起看。",
+      capturedAt: dayTwo,
+    });
+    await store.recordCapture({
+      memoryId: "ai-coaching-later-empty-visual",
+      namespace: "clawsense",
+      deviceId: device.deviceId,
+      modality: "image",
+      summary: "画面完全呈现为黑色，没有任何可见的人物、环境、物品或屏幕内容。",
+      createdAt: dayTwo + 30 * 60_000,
+      capturedAt: dayTwo + 30 * 60_000,
+      sourcePath: "/tmp/ai-coaching-later-empty-visual.jpg",
+      fileName: "ai-coaching-later-empty-visual.jpg",
+      mime: "image/jpeg",
+      sizeBytes: 2048,
+      storageRelPath: "2026/06/25/device/ai-coaching-later-empty-visual.jpg",
+      retentionExpiresAt: dayTwo + 30 * 60_000 + 7 * 24 * 60 * 60 * 1000,
+      analysisMode: "metadata-only",
+      projectRefs: ["ai_coaching"],
+      tags: ["office"],
+    });
+
+    const history = await engine.buildProjectHistory({
+      question: "AI 陪练这个项目之前在我的历史记忆里出现过什么？",
+      artifactUrlBase: "/api/clawsense/artifacts",
+    });
+
+    expect(history).toHaveLength(1);
+    expect(history[0]?.ref).toBe("ai_coaching");
+    expect(history[0]?.label).toBe("AI 陪练");
+    expect(history[0]?.occurrenceCount).toBeGreaterThanOrEqual(1);
+    expect(history[0]?.recentMoments[0]?.transcriptExcerpt).toMatch(/AI 陪练|陪练/);
+    expect(history[0]?.recentMoments[0]?.summary).not.toContain("完全呈现为黑色");
   });
 
   it("keeps same csAudio:v2 session clips grouped into one context window", async () => {
@@ -1158,6 +1348,77 @@ describe("ClawSenseReviewEngine", () => {
     expect(review?.mode).toBe("multimodal");
   });
 
+  it("falls back to chat completions when multimodal daily review responses API is unavailable", async () => {
+    vi.setSystemTime(new Date(2026, 2, 29, 21, 30, 0));
+
+    const store = createStore(rootDir);
+    const compatibleClient = {
+      responses: {
+        create: vi.fn().mockRejectedValue(new Error("responses unsupported")),
+      },
+      chat: {
+        completions: {
+          create: vi.fn().mockResolvedValue({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    summary: "今天重点是复盘了会议里的任务和风险。",
+                    sections: REVIEW_SECTION_TITLES.map((title) => ({
+                      title,
+                      items: ["基于转写整理出一条可用结论。"],
+                    })),
+                    keyWindowIds: [],
+                  }),
+                },
+              },
+            ],
+          }),
+        },
+      },
+    } as any;
+
+    const engine = createEngine(rootDir, store, {
+      cfg: {
+        analysisMode: "multimodal-preferred",
+        reviewModel: "dashscope/qwen3.6-plus",
+      },
+      runtimeConfig: {
+        models: {
+          providers: {
+            dashscope: {
+              apiKey: "dashscope-test-key",
+              baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            },
+          },
+        },
+      },
+    });
+    (engine as unknown as { resolveMultimodalClient: (providerId?: string) => unknown }).resolveMultimodalClient =
+      vi.fn(() => compatibleClient);
+
+    const device = await store.registerDevice({
+      name: "Pixel",
+      platform: "android",
+    });
+    await recordAudioEvent(store, {
+      memoryId: "review-chat-fallback-1",
+      deviceId: device.deviceId,
+      summary: "会议讨论了任务分工。",
+      transcript: "今天会议确认了任务分工和风险清单，下周继续跟进。",
+      capturedAt: Date.now() - 8 * 60_000,
+      tags: ["office", "meeting"],
+    });
+
+    const review = await engine.getOrGenerateDailyReview(toLocalDateKey(Date.now()), { force: true });
+
+    expect(compatibleClient.responses.create).toHaveBeenCalledTimes(1);
+    expect(compatibleClient.chat.completions.create).toHaveBeenCalledTimes(1);
+    expect(compatibleClient.chat.completions.create.mock.calls[0]?.[0]?.model).toBe("qwen3.6-plus");
+    expect(review.mode).toBe("multimodal");
+    expect(review.summary).toContain("任务和风险");
+  });
+
   it("uses ASR fallback during query-time audio recheck when multimodal audio understanding still has no transcript", async () => {
     vi.setSystemTime(new Date(2026, 2, 10, 20, 30, 0));
 
@@ -1218,6 +1479,92 @@ describe("ClawSenseReviewEngine", () => {
     const updatedEvents = await store.listEventsByDate(toLocalDateKey(capturedAt));
     expect(updatedEvents[0]?.transcript).toContain("老板说明天先补会议纪要");
     expect(updatedEvents[0]?.analysisStatus).toBe("succeeded");
+  });
+
+  it("uses local FunASR during query-time audio recheck before compatible ASR fallback", async () => {
+    vi.setSystemTime(new Date(2026, 2, 10, 20, 30, 0));
+
+    const commandPath = await writeExecutableScript(
+      rootDir,
+      "review-funasr-stub.sh",
+      `#!/bin/sh
+printf '%s\\n' '{"sentence_info":[{"start":120,"end":2600,"text":"会议确认我负责同步报表口径。","speaker":"speaker_2"}],"speakerTimelineSegments":[{"startMs":120,"endMs":2600,"text":"会议确认我负责同步报表口径。","speaker":"speaker_2"}]}'
+`,
+    );
+    const store = createStore(rootDir);
+    const engine = createEngine(rootDir, store, {
+      cfg: {
+        localAsrBackend: "funasr",
+        localAsrFunAsrCommand: commandPath,
+        localAsrLanguage: "zh",
+      },
+    });
+    const device = await store.registerDevice({
+      name: "Pixel",
+      platform: "android",
+    });
+    const capturedAt = Date.now() - 5 * 60_000;
+    const sourcePath = path.join(rootDir, "query-time-local-asr.wav");
+    await fs.writeFile(sourcePath, Buffer.from("fake-audio"));
+
+    await store.recordCapture({
+      memoryId: "audio-query-time-local-asr",
+      namespace: "clawsense",
+      deviceId: device.deviceId,
+      modality: "audio",
+      summary: "Audio captured, but primary multimodal audio analysis failed.",
+      transcript: "",
+      note: `csAudio:v2 session=query-local-asr segment=1 sessionStart=${capturedAt} boundary=silence clipMs=12000 voicedMs=8800 continued=0`,
+      createdAt: capturedAt,
+      capturedAt,
+      sourcePath,
+      fileName: "query-time-local-asr.wav",
+      mime: "audio/wav",
+      sizeBytes: 2048,
+      storageRelPath: "2026/03/10/device/query-time-local-asr.wav",
+      retentionExpiresAt: capturedAt + 7 * 24 * 60 * 60 * 1000,
+      analysisMode: "runtime-stt-fallback",
+      analysisStatus: "degraded",
+      analysisFailureReason: "runtime_stt_empty|primary_multimodal_error",
+    });
+
+    const multimodalSpy = vi.spyOn(openAiClient, "understandAudioWithPrimaryModel").mockResolvedValue({
+      analysisProvider: "primary-multimodal:runtime-primary",
+      analysisFailureReason: "primary_multimodal_empty",
+    });
+    const asrSpy = vi.spyOn(openAiClient, "transcribeAudioWithFallbackModel").mockResolvedValue({
+      transcript: "should not run",
+      analysisProvider: "openai-stt:whisper-1",
+    });
+
+    const results = await engine.recheckAudioEvidence({
+      scope: "today",
+      artifactUrlBase: "/api/clawsense/artifacts",
+      question: "今天会议里分给我的任务是什么？",
+    });
+
+    expect(multimodalSpy).toHaveBeenCalled();
+    expect(asrSpy).not.toHaveBeenCalled();
+    expect(results[0]?.transcript).toBe("会议确认我负责同步报表口径。");
+    expect(results[0]?.transcriptSegments).toEqual([
+      { startMs: 120, endMs: 2600, text: "会议确认我负责同步报表口径。", speakerLabel: "speaker_2" },
+    ]);
+    expect(results[0]?.speakerTimelineSegments).toEqual([
+      { startMs: 120, endMs: 2600, text: "会议确认我负责同步报表口径。", speakerLabel: "speaker_2" },
+    ]);
+    expect(results[0]?.analysisProvider).toBe(
+      "primary-multimodal:runtime-primary+local-asr:funasr:zh",
+    );
+
+    const updatedEvents = await store.listEventsByDate(toLocalDateKey(capturedAt));
+    expect(updatedEvents[0]?.transcript).toBe("会议确认我负责同步报表口径。");
+    expect(updatedEvents[0]?.transcriptSegments).toEqual([
+      { startMs: 120, endMs: 2600, text: "会议确认我负责同步报表口径。", speakerLabel: "speaker_2" },
+    ]);
+    expect(updatedEvents[0]?.speakerTimelineSegments).toEqual([
+      { startMs: 120, endMs: 2600, text: "会议确认我负责同步报表口径。", speakerLabel: "speaker_2" },
+    ]);
+    expect(updatedEvents[0]?.sttProvider).toBe("local-asr");
   });
 
   it("injects provider-scoped clients during query-time recheck when primary and fallback providers differ", async () => {
@@ -1464,6 +1811,1005 @@ describe("ClawSenseReviewEngine", () => {
     expect(updated?.analysisStatus).toBe("succeeded");
     expect(updated?.sttProvider).toBe("compatible-fallback");
     expect(updated?.audioBackfillAttemptCount).toBe(1);
+  });
+
+  it("can dry-run local ASR backfill for already transcribed audio missing transcript segments", async () => {
+    vi.setSystemTime(new Date(2026, 2, 27, 23, 35, 0));
+
+    const commandPath = await writeExecutableScript(
+      rootDir,
+      "backfill-local-dry-run.sh",
+      `#!/bin/sh
+printf '%s\\n' '{"sentence_info":[{"start":0,"end":1400,"text":"先确认报表口径。","spk":"speaker_1"}]}'
+`,
+    );
+    const store = createStore(rootDir);
+    const engine = createEngine(rootDir, store, {
+      cfg: {
+        localAsrBackend: "funasr",
+        localAsrFunAsrCommand: commandPath,
+        localAsrLanguage: "zh",
+      },
+    });
+    const device = await store.registerDevice({
+      name: "Pixel",
+      platform: "android",
+    });
+    const capturedAt = Date.now() - 5 * 60_000;
+    const sourcePath = path.join(rootDir, "backfill-local-dry-run.wav");
+    await fs.writeFile(sourcePath, Buffer.from("fake-audio-backfill"));
+
+    const created = await store.recordCapture({
+      memoryId: "audio-backfill-local-dry-run",
+      namespace: "clawsense",
+      deviceId: device.deviceId,
+      modality: "audio",
+      summary: "会议里确认了报表口径。",
+      transcript: "会议里确认了报表口径。",
+      createdAt: capturedAt,
+      capturedAt,
+      sourcePath,
+      fileName: "backfill-local-dry-run.wav",
+      mime: "audio/wav",
+      sizeBytes: 4096,
+      storageRelPath: "2026/03/27/device/backfill-local-dry-run.wav",
+      retentionExpiresAt: capturedAt + 7 * 24 * 60 * 60 * 1000,
+      analysisMode: "runtime-stt",
+      analysisStatus: "succeeded",
+      sttProvider: "runtime",
+    });
+
+    const result = await engine.runAudioBackfillTick({
+      dates: ["2026-03-27"],
+      maxArtifacts: 1,
+      now: Date.now(),
+      provider: "local-asr",
+      dryRun: true,
+      includeTranscribed: true,
+    });
+
+    const updatedEvents = await store.listEventsByDate("2026-03-27");
+    const updated = updatedEvents.find((event) => event.eventId === created.event.eventId);
+
+    expect(result.attempted).toBe(1);
+    expect(result.succeeded).toBe(1);
+    expect(result.dryRun).toBe(true);
+    expect(result.provider).toBe("local-asr");
+    expect(result.items?.[0]).toEqual(
+      expect.objectContaining({
+        eventId: created.event.eventId,
+        provider: "local-asr:funasr:zh",
+        status: "succeeded",
+        dryRun: true,
+        transcriptSegmentCount: 1,
+      }),
+    );
+    expect(updated?.transcriptSegments).toBeUndefined();
+    expect(updated?.audioBackfillAttemptCount).toBe(0);
+  });
+
+  it("honors explicit dry-run maxArtifacts above the maintenance safety cap", async () => {
+    vi.setSystemTime(new Date(2026, 2, 27, 23, 38, 0));
+
+    const commandPath = await writeExecutableScript(
+      rootDir,
+      "backfill-local-dry-run-max.sh",
+      `#!/bin/sh
+printf '%s\\n' '{"text":"补充句段。","segments":[{"startMs":0,"endMs":1000,"text":"补充句段。"}]}'
+`,
+    );
+    const store = createStore(rootDir);
+    const engine = createEngine(rootDir, store, {
+      cfg: {
+        localAsrBackend: "funasr",
+        localAsrFunAsrCommand: commandPath,
+        localAsrLanguage: "zh",
+      },
+    });
+    const device = await store.registerDevice({
+      name: "Pixel",
+      platform: "android",
+    });
+
+    for (let index = 0; index < 8; index += 1) {
+      const capturedAt = Date.now() - (index + 1) * 60_000;
+      const sourcePath = path.join(rootDir, `backfill-local-dry-run-max-${index}.wav`);
+      await fs.writeFile(sourcePath, Buffer.from(`fake-audio-backfill-${index}`));
+      await store.recordCapture({
+        memoryId: `audio-backfill-local-dry-run-max-${index}`,
+        namespace: "clawsense",
+        deviceId: device.deviceId,
+        modality: "audio",
+        summary: "已有转写，缺少句段。",
+        transcript: `已有转写 ${index}`,
+        createdAt: capturedAt,
+        capturedAt,
+        sourcePath,
+        fileName: `backfill-local-dry-run-max-${index}.wav`,
+        mime: "audio/wav",
+        sizeBytes: 4096 + index,
+        storageRelPath: `2026/03/27/device/backfill-local-dry-run-max-${index}.wav`,
+        retentionExpiresAt: capturedAt + 7 * 24 * 60 * 60 * 1000,
+        analysisMode: "runtime-stt",
+        analysisStatus: "succeeded",
+        sttProvider: "runtime",
+      });
+    }
+
+    const result = await engine.runAudioBackfillTick({
+      dates: ["2026-03-27"],
+      maxArtifacts: 8,
+      now: Date.now(),
+      provider: "local-asr",
+      dryRun: true,
+      includeTranscribed: true,
+    });
+
+    expect(result.attempted).toBe(8);
+    expect(result.succeeded).toBe(8);
+    expect(result.items).toHaveLength(8);
+  });
+
+  it("uses one local ASR batch command for strict local backfill candidates", async () => {
+    vi.setSystemTime(new Date(2026, 2, 27, 23, 39, 0));
+
+    const markerPath = path.join(rootDir, "batch-marker.txt");
+    const commandPath = await writeExecutableScript(
+      rootDir,
+      "backfill-local-batch.sh",
+      `#!/bin/sh
+if [ "$1" = "--batch-json" ]; then
+  printf 'batch\\n' >> "${markerPath}"
+  printf '%s\\n' '{"results":[{"transcript":"批量补第一段。","segments":[{"startMs":0,"endMs":1000,"text":"批量补第一段。"}]},{"transcript":"批量补第二段。","segments":[{"startMs":0,"endMs":1000,"text":"批量补第二段。"}]},{"transcript":"批量补第三段。","segments":[{"startMs":0,"endMs":1000,"text":"批量补第三段。"}]}]}'
+  exit 0
+fi
+printf 'single\\n' >> "${markerPath}"
+printf '%s\\n' '{"transcript":"不应走单条。","segments":[{"startMs":0,"endMs":1000,"text":"不应走单条。"}]}'
+`,
+    );
+    const store = createStore(rootDir);
+    const engine = createEngine(rootDir, store, {
+      cfg: {
+        localAsrBackend: "funasr",
+        localAsrFunAsrCommand: commandPath,
+        localAsrLanguage: "zh",
+      },
+    });
+    const device = await store.registerDevice({
+      name: "Pixel",
+      platform: "android",
+    });
+
+    for (let index = 0; index < 3; index += 1) {
+      const capturedAt = Date.now() - (index + 1) * 60_000;
+      const sourcePath = path.join(rootDir, `backfill-local-batch-${index}.wav`);
+      await fs.writeFile(sourcePath, Buffer.from(`fake-audio-batch-${index}`));
+      await store.recordCapture({
+        memoryId: `audio-backfill-local-batch-${index}`,
+        namespace: "clawsense",
+        deviceId: device.deviceId,
+        modality: "audio",
+        summary: "已有转写，缺少句段。",
+        transcript: `已有转写 ${index}`,
+        createdAt: capturedAt,
+        capturedAt,
+        sourcePath,
+        fileName: `backfill-local-batch-${index}.wav`,
+        mime: "audio/wav",
+        sizeBytes: 4096 + index,
+        storageRelPath: `2026/03/27/device/backfill-local-batch-${index}.wav`,
+        retentionExpiresAt: capturedAt + 7 * 24 * 60 * 60 * 1000,
+        analysisMode: "runtime-stt",
+        analysisStatus: "succeeded",
+        sttProvider: "runtime",
+      });
+    }
+
+    const result = await engine.runAudioBackfillTick({
+      dates: ["2026-03-27"],
+      maxArtifacts: 3,
+      now: Date.now(),
+      provider: "local-asr",
+      dryRun: true,
+      includeTranscribed: true,
+    });
+
+    const marker = await fs.readFile(markerPath, "utf8");
+    expect(result.attempted).toBe(3);
+    expect(result.succeeded).toBe(3);
+    expect(result.items?.map((item) => item.transcriptPreview)).toEqual([
+      "批量补第一段。",
+      "批量补第二段。",
+      "批量补第三段。",
+    ]);
+    expect(marker.trim().split(/\r?\n/)).toEqual(["batch"]);
+  });
+
+  it("writes local ASR transcript segments for already transcribed audio when explicitly requested", async () => {
+    vi.setSystemTime(new Date(2026, 2, 27, 23, 40, 0));
+
+    const commandPath = await writeExecutableScript(
+      rootDir,
+      "backfill-local-write.sh",
+      `#!/bin/sh
+printf '%s\\n' '{"sentence_info":[{"start":0,"end":1600,"text":"我负责同步培训安排。","spk":"speaker_2"}],"speakerTimelineSegments":[{"startMs":0,"endMs":1600,"text":"我负责同步培训安排。","speaker":"speaker_2"}]}'
+`,
+    );
+    const store = createStore(rootDir);
+    const engine = createEngine(rootDir, store, {
+      cfg: {
+        localAsrBackend: "funasr",
+        localAsrFunAsrCommand: commandPath,
+        localAsrLanguage: "zh",
+      },
+    });
+    const device = await store.registerDevice({
+      name: "Pixel",
+      platform: "android",
+    });
+    const capturedAt = Date.now() - 5 * 60_000;
+    const sourcePath = path.join(rootDir, "backfill-local-write.wav");
+    await fs.writeFile(sourcePath, Buffer.from("fake-audio-backfill"));
+
+    const created = await store.recordCapture({
+      memoryId: "audio-backfill-local-write",
+      namespace: "clawsense",
+      deviceId: device.deviceId,
+      modality: "audio",
+      summary: "会议里确认了培训安排。",
+      transcript: "已有云端转写保留不覆盖。",
+      createdAt: capturedAt,
+      capturedAt,
+      sourcePath,
+      fileName: "backfill-local-write.wav",
+      mime: "audio/wav",
+      sizeBytes: 4096,
+      storageRelPath: "2026/03/27/device/backfill-local-write.wav",
+      retentionExpiresAt: capturedAt + 7 * 24 * 60 * 60 * 1000,
+      analysisMode: "runtime-stt",
+      analysisStatus: "succeeded",
+      sttProvider: "runtime",
+    });
+
+    const result = await engine.runAudioBackfillTick({
+      dates: ["2026-03-27"],
+      maxArtifacts: 1,
+      now: Date.now(),
+      provider: "local-asr",
+      includeTranscribed: true,
+    });
+
+    const updatedEvents = await store.listEventsByDate("2026-03-27");
+    const updated = updatedEvents.find((event) => event.eventId === created.event.eventId);
+
+    expect(result.attempted).toBe(1);
+    expect(result.succeeded).toBe(1);
+    expect(result.provider).toBe("local-asr");
+    expect(updated?.transcript).toBe("已有云端转写保留不覆盖。");
+    expect(updated?.transcriptSegments).toEqual([
+      { startMs: 0, endMs: 1600, text: "我负责同步培训安排。", speakerLabel: "speaker_2" },
+    ]);
+    expect(updated?.speakerTimelineSegments).toEqual([
+      { startMs: 0, endMs: 1600, text: "我负责同步培训安排。", speakerLabel: "speaker_2" },
+    ]);
+    expect(updated?.analysisProvider).toBe("local-asr:funasr:zh");
+    expect(updated?.sttProvider).toBe("local-asr");
+    expect(updated?.audioBackfillAttemptCount).toBe(1);
+  });
+
+  it("plans and runs a resumable local ASR backfill queue", async () => {
+    vi.setSystemTime(new Date(2026, 2, 27, 23, 42, 0));
+
+    const commandPath = await writeExecutableScript(
+      rootDir,
+      "backfill-local-queue.sh",
+      `#!/bin/sh
+if [ "$1" = "--batch-json" ]; then
+  printf '%s\\n' '{"results":[{"transcript":"队列补第一段。","segments":[{"startMs":0,"endMs":1200,"text":"队列补第一段。","speaker":"speaker_1"}],"speakerTimelineSegments":[{"startMs":0,"endMs":1200,"text":"队列补第一段。","speaker":"speaker_1"}]},{"transcript":"队列补第二段。","segments":[{"startMs":0,"endMs":1400,"text":"队列补第二段。","speaker":"speaker_2"}],"speakerTimelineSegments":[{"startMs":0,"endMs":1400,"text":"队列补第二段。","speaker":"speaker_2"}]}]}'
+  exit 0
+fi
+printf '%s\\n' '{"transcript":"不应走单条。","segments":[{"startMs":0,"endMs":1000,"text":"不应走单条。"}]}'
+`,
+    );
+    const store = createStore(rootDir);
+    const engine = createEngine(rootDir, store, {
+      cfg: {
+        localAsrBackend: "funasr",
+        localAsrFunAsrCommand: commandPath,
+        localAsrLanguage: "zh",
+      },
+    });
+    const device = await store.registerDevice({
+      name: "Pixel",
+      platform: "android",
+    });
+
+    const createdEventIds: string[] = [];
+    for (let index = 0; index < 2; index += 1) {
+      const capturedAt = Date.now() - (index + 1) * 60_000;
+      const sourcePath = path.join(rootDir, `backfill-local-queue-${index}.wav`);
+      await fs.writeFile(sourcePath, Buffer.from(`fake-audio-queue-${index}`));
+      const created = await store.recordCapture({
+        memoryId: `audio-backfill-local-queue-${index}`,
+        namespace: "clawsense",
+        deviceId: device.deviceId,
+        modality: "audio",
+        summary: "已有转写，缺少句段。",
+        transcript: `已有转写 ${index}`,
+        note: `csAudio:v2 session=queue-duration segment=${index + 1} sessionStart=${capturedAt} boundary=silence clipMs=${12_000 + index * 1000} voicedMs=${8_000 + index * 1000} continued=0`,
+        createdAt: capturedAt,
+        capturedAt,
+        sourcePath,
+        fileName: `backfill-local-queue-${index}.wav`,
+        mime: "audio/wav",
+        sizeBytes: 4096 + index,
+        storageRelPath: `2026/03/27/device/backfill-local-queue-${index}.wav`,
+        retentionExpiresAt: capturedAt + 7 * 24 * 60 * 60 * 1000,
+        analysisMode: "runtime-stt",
+        analysisStatus: "succeeded",
+        sttProvider: "runtime",
+      });
+      createdEventIds.push(created.event.eventId);
+    }
+
+    const planned = await engine.planAudioBackfillQueue({
+      dates: ["2026-03-27"],
+      maxArtifacts: 2,
+      provider: "local-asr",
+      includeTranscribed: true,
+    });
+
+    expect(planned.stats).toEqual({
+      pending: 2,
+      running: 0,
+      succeeded: 0,
+      failed: 0,
+      skipped: 0,
+      total: 2,
+      remaining: 2,
+    });
+    expect(planned.audio).toEqual({
+      totalClipMs: 25_000,
+      remainingClipMs: 25_000,
+      totalVoicedMs: 17_000,
+      remainingVoicedMs: 17_000,
+    });
+    expect(planned.recentJobs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          status: "pending",
+          attempts: 0,
+          fileName: expect.stringContaining("backfill-local-queue"),
+          clipMs: expect.any(Number),
+          voicedMs: expect.any(Number),
+        }),
+      ]),
+    );
+
+    const run = await engine.runAudioBackfillQueue({
+      queueId: planned.queueId,
+      batchSize: 2,
+    });
+
+    expect(run?.attempted).toBe(2);
+    expect(run?.succeeded).toBe(2);
+    expect(run?.queue.stats.succeeded).toBe(2);
+    expect(run?.queue.stats.remaining).toBe(0);
+    expect(run?.queue.audio).toEqual({
+      totalClipMs: 25_000,
+      remainingClipMs: 0,
+      totalVoicedMs: 17_000,
+      remainingVoicedMs: 0,
+    });
+    expect(run?.queue.recentJobs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          status: "succeeded",
+          attempts: 1,
+          provider: "local-asr:funasr:zh",
+          clipMs: expect.any(Number),
+          voicedMs: expect.any(Number),
+          transcriptSegmentCount: 1,
+          speakerTimelineSegmentCount: 1,
+          transcriptPreview: expect.stringMatching(/队列补第[一二]段/),
+        }),
+      ]),
+    );
+
+    const status = await engine.getAudioBackfillQueueStatus(planned.queueId);
+    expect(status?.stats.succeeded).toBe(2);
+    expect(status?.stats.remaining).toBe(0);
+    expect(status?.recentJobs[0]?.status).toBe("succeeded");
+
+    const updatedEvents = await store.listEventsByDate("2026-03-27");
+    const updatedTargets = createdEventIds.map((eventId) => updatedEvents.find((event) => event.eventId === eventId));
+    expect(updatedTargets.every((event) => event?.sttProvider === "local-asr")).toBe(true);
+    expect(updatedTargets.flatMap((event) => event?.transcriptSegments ?? []).map((segment) => segment.speakerLabel)).toEqual(
+      expect.arrayContaining(["speaker_1", "speaker_2"]),
+    );
+    expect(updatedTargets.flatMap((event) => event?.speakerTimelineSegments ?? []).map((segment) => segment.speakerLabel)).toEqual(
+      expect.arrayContaining(["speaker_1", "speaker_2"]),
+    );
+  });
+
+  it("plans and runs one ASR worker tick with a resumable queue", async () => {
+    vi.setSystemTime(new Date(2026, 2, 27, 23, 50, 0));
+
+    const commandPath = await writeExecutableScript(
+      rootDir,
+      "asr-worker-run-once.sh",
+      `#!/bin/sh
+printf '%s\\n' '{"transcript":"worker 自动补强会议转写。","segments":[{"startMs":0,"endMs":1800,"text":"worker 自动补强会议转写。","speaker":"speaker_1"}]}'
+`,
+    );
+    const store = createStore(rootDir);
+    const engine = createEngine(rootDir, store, {
+      cfg: {
+        localAsrBackend: "funasr",
+        localAsrFunAsrCommand: commandPath,
+        localAsrLanguage: "zh",
+        asrWorkerEnabled: true,
+        asrWorkerProvider: "local-asr",
+        asrWorkerBatchSize: 1,
+        asrWorkerMaxJobs: 4,
+        asrWorkerLookbackDays: 2,
+      },
+    });
+    const device = await store.registerDevice({
+      name: "Pixel",
+      platform: "android",
+    });
+    const capturedAt = Date.now() - 6 * 60_000;
+    const sourcePath = path.join(rootDir, "asr-worker-meeting.wav");
+    await fs.writeFile(sourcePath, Buffer.from("fake-asr-worker-audio"));
+    const created = await store.recordCapture({
+      memoryId: "audio-asr-worker-meeting",
+      namespace: "clawsense",
+      deviceId: device.deviceId,
+      modality: "audio",
+      summary: "会议音频等待 worker 补强。",
+      transcript: "",
+      note: `csAudio:v2 session=asr-worker segment=1 sessionStart=${capturedAt} boundary=silence clipMs=7200 voicedMs=5200 continued=0`,
+      createdAt: capturedAt,
+      capturedAt,
+      sourcePath,
+      fileName: "asr-worker-meeting.wav",
+      mime: "audio/wav",
+      sizeBytes: 4096,
+      storageRelPath: "2026/03/27/device/asr-worker-meeting.wav",
+      retentionExpiresAt: capturedAt + 7 * 24 * 60 * 60 * 1000,
+      analysisMode: "runtime-stt-fallback",
+      analysisStatus: "degraded",
+      analysisFailureReason: "runtime_stt_empty",
+    });
+
+    const result = await engine.runAudioBackfillWorkerTick({
+      dates: ["2026-03-27"],
+    });
+
+    expect(result.planned).toBe(true);
+    expect(result.reason).toBe("planned-new-queue");
+    expect(result.run?.attempted).toBe(1);
+    expect(result.run?.succeeded).toBe(1);
+    expect(result.queue?.stats.remaining).toBe(0);
+    expect(result.status.enabled).toBe(true);
+    expect(result.status.stats.remainingJobs).toBe(0);
+
+    const updatedEvents = await store.listEventsByDate("2026-03-27");
+    const updated = updatedEvents.find((event) => event.eventId === created.event.eventId);
+    expect(updated?.transcript).toBe("worker 自动补强会议转写。");
+    expect(updated?.transcriptSegments?.[0]).toEqual(
+      expect.objectContaining({
+        speakerLabel: "speaker_1",
+      }),
+    );
+  });
+
+  it("does not resume stale dry-run queues during a real ASR worker tick", async () => {
+    vi.setSystemTime(new Date(2026, 2, 27, 23, 52, 0));
+
+    const commandPath = await writeExecutableScript(
+      rootDir,
+      "asr-worker-skip-dry-run.sh",
+      `#!/bin/sh
+printf '%s\\n' '{"transcript":"真实 worker 不续 dry-run 队列。","segments":[{"startMs":0,"endMs":1600,"text":"真实 worker 不续 dry-run 队列。"}]}'
+`,
+    );
+    const store = createStore(rootDir);
+    const engine = createEngine(rootDir, store, {
+      cfg: {
+        localAsrBackend: "funasr",
+        localAsrFunAsrCommand: commandPath,
+        localAsrLanguage: "zh",
+      },
+    });
+    const device = await store.registerDevice({
+      name: "Pixel",
+      platform: "android",
+    });
+    const capturedAt = Date.now() - 5 * 60_000;
+    const sourcePath = path.join(rootDir, "asr-worker-real.wav");
+    await fs.writeFile(sourcePath, Buffer.from("fake-asr-worker-real-audio"));
+    await store.recordCapture({
+      memoryId: "audio-asr-worker-real",
+      namespace: "clawsense",
+      deviceId: device.deviceId,
+      modality: "audio",
+      summary: "音频等待真实 worker 补强。",
+      transcript: "",
+      note: `csAudio:v2 session=asr-worker-real segment=1 sessionStart=${capturedAt} boundary=silence clipMs=6400 voicedMs=4200 continued=0`,
+      createdAt: capturedAt,
+      capturedAt,
+      sourcePath,
+      fileName: "asr-worker-real.wav",
+      mime: "audio/wav",
+      sizeBytes: 4096,
+      storageRelPath: "2026/03/27/device/asr-worker-real.wav",
+      retentionExpiresAt: capturedAt + 7 * 24 * 60 * 60 * 1000,
+      analysisMode: "runtime-stt-fallback",
+      analysisStatus: "degraded",
+      analysisFailureReason: "runtime_stt_empty",
+    });
+    const dryRunQueue = await engine.planAudioBackfillQueue({
+      dates: ["2026-03-27"],
+      maxArtifacts: 1,
+      provider: "local-asr",
+      dryRun: true,
+    });
+
+    const result = await engine.runAudioBackfillWorkerTick({
+      dates: ["2026-03-27"],
+      provider: "local-asr",
+    });
+
+    expect(dryRunQueue.dryRun).toBe(true);
+    expect(dryRunQueue.stats.pending).toBe(1);
+    expect(result.reason).toBe("planned-new-queue");
+    expect(result.queue?.dryRun).toBe(false);
+    expect(result.run?.succeeded).toBe(1);
+    expect(result.status.activeQueue).toBeNull();
+    expect(result.status.stats.remainingJobs).toBe(0);
+    expect(result.status.latestQueues.some((queue) => queue.dryRun)).toBe(true);
+  });
+
+  it("does not resume failed-only dry-run queues during ASR worker dry-run", async () => {
+    vi.setSystemTime(new Date(2026, 2, 27, 23, 54, 0));
+
+    const commandPath = await writeExecutableScript(
+      rootDir,
+      "asr-worker-failed-only-dry-run.sh",
+      `#!/bin/sh
+printf '%s\\n' '{}'
+`,
+    );
+    const store = createStore(rootDir);
+    const engine = createEngine(rootDir, store, {
+      cfg: {
+        localAsrBackend: "funasr",
+        localAsrFunAsrCommand: commandPath,
+        localAsrLanguage: "zh",
+      },
+    });
+    const device = await store.registerDevice({
+      name: "Pixel",
+      platform: "android",
+    });
+    const capturedAt = Date.now() - 4 * 60_000;
+    const sourcePath = path.join(rootDir, "asr-worker-failed-only.wav");
+    await fs.writeFile(sourcePath, Buffer.from("fake-asr-worker-failed-only"));
+    await store.recordCapture({
+      memoryId: "audio-asr-worker-failed-only",
+      namespace: "clawsense",
+      deviceId: device.deviceId,
+      modality: "audio",
+      summary: "音频等待 dry-run 补强。",
+      transcript: "",
+      note: `csAudio:v2 session=asr-worker-failed-only segment=1 sessionStart=${capturedAt} boundary=silence clipMs=6400 voicedMs=4200 continued=0`,
+      createdAt: capturedAt,
+      capturedAt,
+      sourcePath,
+      fileName: "asr-worker-failed-only.wav",
+      mime: "audio/wav",
+      sizeBytes: 4096,
+      storageRelPath: "2026/03/27/device/asr-worker-failed-only.wav",
+      retentionExpiresAt: capturedAt + 7 * 24 * 60 * 60 * 1000,
+      analysisMode: "runtime-stt-fallback",
+      analysisStatus: "degraded",
+      analysisFailureReason: "runtime_stt_empty",
+    });
+    const failedQueue = await engine.planAudioBackfillQueue({
+      dates: ["2026-03-27"],
+      maxArtifacts: 1,
+      provider: "local-asr",
+      dryRun: true,
+    });
+    const failedRun = await engine.runAudioBackfillQueue({
+      queueId: failedQueue.queueId,
+      dryRun: true,
+    });
+
+    const result = await engine.runAudioBackfillWorkerTick({
+      dates: ["2026-03-27"],
+      provider: "local-asr",
+      dryRun: true,
+      maxJobs: 1,
+    });
+
+    expect(failedRun?.failed).toBe(1);
+    expect(result.reason).toBe("planned-new-queue");
+    expect(result.queue?.queueId).not.toBe(failedQueue.queueId);
+  });
+
+  it("passes queued diarization settings into local ASR writeback", async () => {
+    vi.setSystemTime(new Date(2026, 2, 27, 23, 56, 0));
+
+    const commandPath = await writeExecutableScript(
+      rootDir,
+      "asr-queue-whisperx-diarization.sh",
+      `#!/bin/sh
+if [ "$CLAWSENSE_DIARIZATION_PROVIDER" != "whisperx" ]; then
+  echo "missing diarization provider" >&2
+  exit 3
+fi
+if [ "$CLAWSENSE_DIARIZATION_SPEAKER_MODEL" != "pyannote/speaker-diarization" ]; then
+  echo "missing speaker model" >&2
+  exit 4
+fi
+printf '%s\\n' '{"transcript":"Amy 说我负责整理任务。","segments":[{"startMs":0,"endMs":1800,"text":"Amy 说我负责整理任务。","speaker":"SPEAKER_00"}],"speakerTimelineSegments":[{"startMs":0,"endMs":1800,"text":"Amy 说我负责整理任务。","speaker":"SPEAKER_00"}]}'
+`,
+    );
+    const store = createStore(rootDir);
+    const engine = createEngine(rootDir, store, {
+      cfg: {
+        localAsrBackend: "whisper",
+        localAsrWhisperCommand: commandPath,
+        localAsrLanguage: "zh",
+      },
+    });
+    const device = await store.registerDevice({
+      name: "Pixel",
+      platform: "android",
+    });
+    const capturedAt = Date.now() - 3 * 60_000;
+    const sourcePath = path.join(rootDir, "asr-queue-whisperx.wav");
+    await fs.writeFile(sourcePath, Buffer.from("fake-asr-queue-whisperx-audio"));
+    const created = await store.recordCapture({
+      memoryId: "audio-asr-queue-whisperx",
+      namespace: "clawsense",
+      deviceId: device.deviceId,
+      modality: "audio",
+      summary: "音频等待 WhisperX speaker 写回。",
+      transcript: "",
+      note: `csAudio:v2 session=asr-queue-whisperx segment=1 sessionStart=${capturedAt} boundary=silence clipMs=7200 voicedMs=5200 continued=0`,
+      createdAt: capturedAt,
+      capturedAt,
+      sourcePath,
+      fileName: "asr-queue-whisperx.wav",
+      mime: "audio/wav",
+      sizeBytes: 4096,
+      storageRelPath: "2026/03/27/device/asr-queue-whisperx.wav",
+      retentionExpiresAt: capturedAt + 7 * 24 * 60 * 60 * 1000,
+      analysisMode: "runtime-stt-fallback",
+      analysisStatus: "degraded",
+      analysisFailureReason: "runtime_stt_empty",
+    });
+
+    const queue = await engine.planAudioBackfillQueue({
+      dates: ["2026-03-27"],
+      maxArtifacts: 1,
+      provider: "local-asr",
+      diarizationProvider: "whisperx",
+    });
+    const result = await engine.runAudioBackfillQueue({
+      queueId: queue.queueId,
+      batchSize: 1,
+    });
+
+    expect(queue.diarizationProvider).toBe("whisperx");
+    expect(queue.speakerModel).toBe("pyannote/speaker-diarization");
+    expect(result?.succeeded).toBe(1);
+
+    const updatedEvents = await store.listEventsByDate("2026-03-27");
+    const updated = updatedEvents.find((event) => event.eventId === created.event.eventId);
+    expect(updated?.transcript).toBe("Amy 说我负责整理任务。");
+    expect(updated?.transcriptSegments).toEqual([
+      { startMs: 0, endMs: 1800, text: "Amy 说我负责整理任务。", speakerLabel: "SPEAKER_00" },
+    ]);
+    expect(updated?.speakerTimelineSegments).toEqual([
+      { startMs: 0, endMs: 1800, text: "Amy 说我负责整理任务。", speakerLabel: "SPEAKER_00" },
+    ]);
+  });
+
+  it("runs a read-only diarization probe with a speaker model override", async () => {
+    vi.setSystemTime(new Date(2026, 2, 27, 23, 44, 0));
+
+    const commandPath = await writeExecutableScript(
+      rootDir,
+      "diarization-probe.sh",
+      `#!/bin/sh
+if [ "$CLAWSENSE_FUNASR_SPK_MODEL" != "cam++" ]; then
+  echo "missing speaker model" >&2
+  exit 3
+fi
+if [ "$1" != "--batch-json" ]; then
+  printf '%s\\n' '{"transcript":"Amy 确认我负责同步口径。","segments":[{"startMs":0,"endMs":1200,"text":"Amy 确认我负责同步口径。","speaker":"speaker_1"}],"speakerTimelineSegments":[{"startMs":0,"endMs":1200,"text":"Amy 确认我负责同步口径。","speaker":"speaker_1"}]}'
+  exit 0
+fi
+printf '%s\\n' '{"results":[{"transcript":"Amy 确认我负责同步口径。","segments":[{"startMs":0,"endMs":1200,"text":"Amy 确认我负责同步口径。","speaker":"speaker_1"}],"speakerTimelineSegments":[{"startMs":0,"endMs":1200,"text":"Amy 确认我负责同步口径。","speaker":"speaker_1"}]}]}'
+`,
+    );
+    const store = createStore(rootDir);
+    const engine = createEngine(rootDir, store, {
+      cfg: {
+        localAsrBackend: "funasr",
+        localAsrFunAsrCommand: commandPath,
+        localAsrLanguage: "zh",
+      },
+    });
+    const device = await store.registerDevice({
+      name: "Pixel",
+      platform: "android",
+    });
+    const capturedAt = Date.now() - 5 * 60_000;
+    const sourcePath = path.join(rootDir, "diarization-probe.wav");
+    await fs.writeFile(sourcePath, Buffer.from("fake-audio-diarization"));
+    const created = await store.recordCapture({
+      memoryId: "audio-diarization-probe",
+      namespace: "clawsense",
+      deviceId: device.deviceId,
+      modality: "audio",
+      summary: "已有转写，缺少句段。",
+      transcript: "已有转写。",
+      createdAt: capturedAt,
+      capturedAt,
+      sourcePath,
+      fileName: "diarization-probe.wav",
+      mime: "audio/wav",
+      sizeBytes: 4096,
+      storageRelPath: "2026/03/27/device/diarization-probe.wav",
+      retentionExpiresAt: capturedAt + 7 * 24 * 60 * 60 * 1000,
+      analysisMode: "runtime-stt",
+      analysisStatus: "succeeded",
+      sttProvider: "runtime",
+    });
+
+    const probe = await engine.runDiarizationProbe({
+      dates: ["2026-03-27"],
+      maxArtifacts: 1,
+      speakerModel: "cam++",
+    });
+
+    expect(probe.attempted).toBe(1);
+    expect(probe.speakerReady).toBe(true);
+    expect(probe.diagnosis).toBe("speaker-ready");
+    expect(probe.diarizationProvider).toBe("funasr");
+    expect(probe.nextActions).toEqual(expect.arrayContaining([expect.stringContaining("speakerLabel")]));
+    expect(probe.items[0]).toEqual(
+      expect.objectContaining({
+        eventId: created.event.eventId,
+        diarizationProvider: "funasr",
+        status: "succeeded",
+        speakerTimelineSegmentCount: 1,
+        speakerSegmentCount: 1,
+        speakerLabels: ["speaker_1"],
+      }),
+    );
+    const updatedEvents = await store.listEventsByDate("2026-03-27");
+    expect(updatedEvents.find((event) => event.eventId === created.event.eventId)?.transcriptSegments).toBeUndefined();
+  });
+
+  it("passes diarization provider metadata to pluggable local probes", async () => {
+    vi.setSystemTime(new Date(2026, 2, 27, 23, 44, 30));
+
+    const commandPath = await writeExecutableScript(
+      rootDir,
+      "diarization-probe-whisperx.sh",
+      `#!/bin/sh
+if [ "$CLAWSENSE_DIARIZATION_PROVIDER" != "whisperx" ]; then
+  echo "missing diarization provider" >&2
+  exit 3
+fi
+if [ "$CLAWSENSE_DIARIZATION_SPEAKER_MODEL" != "pyannote/test" ]; then
+  echo "missing diarization speaker model" >&2
+  exit 4
+fi
+printf '%s\\n' '{"transcript":"Amy 确认我负责同步口径。","segments":[{"startMs":0,"endMs":1200,"text":"Amy 确认我负责同步口径。","speaker":"speaker_1"}]}'
+`,
+    );
+    const store = createStore(rootDir);
+    const engine = createEngine(rootDir, store, {
+      cfg: {
+        localAsrBackend: "funasr",
+        localAsrFunAsrCommand: commandPath,
+        localAsrLanguage: "zh",
+      },
+    });
+    const device = await store.registerDevice({
+      name: "Pixel",
+      platform: "android",
+    });
+    const capturedAt = Date.now() - 4 * 60_000;
+    const sourcePath = path.join(rootDir, "diarization-probe-whisperx.wav");
+    await fs.writeFile(sourcePath, Buffer.from("fake-audio-diarization-whisperx"));
+    await store.recordCapture({
+      memoryId: "audio-diarization-probe-whisperx",
+      namespace: "clawsense",
+      deviceId: device.deviceId,
+      modality: "audio",
+      summary: "已有转写，缺少 speaker。",
+      transcript: "已有转写。",
+      createdAt: capturedAt,
+      capturedAt,
+      sourcePath,
+      fileName: "diarization-probe-whisperx.wav",
+      mime: "audio/wav",
+      sizeBytes: 4096,
+      storageRelPath: "2026/03/27/device/diarization-probe-whisperx.wav",
+      retentionExpiresAt: capturedAt + 7 * 24 * 60 * 60 * 1000,
+      analysisMode: "runtime-stt",
+      analysisStatus: "succeeded",
+      sttProvider: "runtime",
+    });
+
+    const probe = await engine.runDiarizationProbe({
+      dates: ["2026-03-27"],
+      maxArtifacts: 1,
+      provider: "whisperx",
+      speakerModel: "pyannote/test",
+    });
+
+    expect(probe.diarizationProvider).toBe("whisperx");
+    expect(probe.speakerModel).toBe("pyannote/test");
+    expect(probe.speakerReady).toBe(true);
+    expect(probe.items[0]).toEqual(
+      expect.objectContaining({
+        diarizationProvider: "whisperx",
+        speakerLabels: ["speaker_1"],
+      }),
+    );
+  });
+
+  it("passes hybrid diarization metadata to local ASR probes", async () => {
+    vi.setSystemTime(new Date(2026, 2, 27, 23, 44, 45));
+
+    const commandPath = await writeExecutableScript(
+      rootDir,
+      "diarization-probe-hybrid.sh",
+      `#!/bin/sh
+if [ "$CLAWSENSE_DIARIZATION_PROVIDER" != "hybrid" ]; then
+  echo "missing hybrid provider" >&2
+  exit 3
+fi
+if [ "$CLAWSENSE_HYBRID_SPEAKER_MODEL" != "cam++" ]; then
+  echo "missing hybrid speaker model" >&2
+  exit 4
+fi
+printf '%s\\n' '{"transcript":"Amy 确认我负责同步口径。","segments":[{"startMs":0,"endMs":1200,"text":"Amy 确认我负责同步口径。","speaker":"speaker_1"}]}'
+`,
+    );
+    const store = createStore(rootDir);
+    const engine = createEngine(rootDir, store, {
+      cfg: {
+        localAsrBackend: "whisper",
+        localAsrWhisperCommand: commandPath,
+        localAsrLanguage: "zh",
+      },
+    });
+    const device = await store.registerDevice({
+      name: "Pixel",
+      platform: "android",
+    });
+    const capturedAt = Date.now() - 4 * 60_000;
+    const sourcePath = path.join(rootDir, "diarization-probe-hybrid.wav");
+    await fs.writeFile(sourcePath, Buffer.from("fake-audio-diarization-hybrid"));
+    await store.recordCapture({
+      memoryId: "audio-diarization-probe-hybrid",
+      namespace: "clawsense",
+      deviceId: device.deviceId,
+      modality: "audio",
+      summary: "已有转写，等待 hybrid speaker。",
+      transcript: "已有转写。",
+      createdAt: capturedAt,
+      capturedAt,
+      sourcePath,
+      fileName: "diarization-probe-hybrid.wav",
+      mime: "audio/wav",
+      sizeBytes: 4096,
+      storageRelPath: "2026/03/27/device/diarization-probe-hybrid.wav",
+      retentionExpiresAt: capturedAt + 7 * 24 * 60 * 60 * 1000,
+      analysisMode: "runtime-stt",
+      analysisStatus: "succeeded",
+      sttProvider: "runtime",
+    });
+
+    const probe = await engine.runDiarizationProbe({
+      dates: ["2026-03-27"],
+      maxArtifacts: 1,
+      provider: "hybrid",
+    });
+
+    expect(probe.diarizationProvider).toBe("hybrid");
+    expect(probe.speakerModel).toBe("whisperx+funasr:cam++");
+    expect(probe.speakerReady).toBe(true);
+    expect(probe.items[0]).toEqual(
+      expect.objectContaining({
+        diarizationProvider: "hybrid",
+        speakerLabels: ["speaker_1"],
+      }),
+    );
+  });
+
+  it("diagnoses read-only diarization probes when ASR works but speaker labels are missing", async () => {
+    vi.setSystemTime(new Date(2026, 2, 27, 23, 45, 0));
+
+    const commandPath = await writeExecutableScript(
+      rootDir,
+      "diarization-probe-no-speaker.sh",
+      `#!/bin/sh
+if [ "$1" != "--batch-json" ]; then
+  printf '%s\\n' '{"transcript":"会议确认我负责同步口径。","segments":[{"startMs":0,"endMs":1200,"text":"会议确认我负责同步口径。"}]}'
+  exit 0
+fi
+printf '%s\\n' '{"results":[{"transcript":"会议确认我负责同步口径。","segments":[{"startMs":0,"endMs":1200,"text":"会议确认我负责同步口径。"}]}]}'
+`,
+    );
+    const store = createStore(rootDir);
+    const engine = createEngine(rootDir, store, {
+      cfg: {
+        localAsrBackend: "funasr",
+        localAsrFunAsrCommand: commandPath,
+        localAsrLanguage: "zh",
+      },
+    });
+    const device = await store.registerDevice({
+      name: "Pixel",
+      platform: "android",
+    });
+    const capturedAt = Date.now() - 5 * 60_000;
+    const sourcePath = path.join(rootDir, "diarization-probe-no-speaker.wav");
+    await fs.writeFile(sourcePath, Buffer.from("fake-audio-diarization-no-speaker"));
+    const created = await store.recordCapture({
+      memoryId: "audio-diarization-probe-no-speaker",
+      namespace: "clawsense",
+      deviceId: device.deviceId,
+      modality: "audio",
+      summary: "已有转写，缺少句段。",
+      transcript: "已有转写。",
+      createdAt: capturedAt,
+      capturedAt,
+      sourcePath,
+      fileName: "diarization-probe-no-speaker.wav",
+      mime: "audio/wav",
+      sizeBytes: 4096,
+      storageRelPath: "2026/03/27/device/diarization-probe-no-speaker.wav",
+      retentionExpiresAt: capturedAt + 7 * 24 * 60 * 60 * 1000,
+      analysisMode: "runtime-stt",
+      analysisStatus: "succeeded",
+      sttProvider: "runtime",
+    });
+
+    const probe = await engine.runDiarizationProbe({
+      dates: ["2026-03-27"],
+      maxArtifacts: 1,
+      speakerModel: "cam++",
+    });
+
+    expect(probe.attempted).toBe(1);
+    expect(probe.succeeded).toBe(1);
+    expect(probe.speakerReady).toBe(false);
+    expect(probe.diagnosis).toBe("asr-ok-speaker-missing");
+    expect(probe.nextActions).toEqual(expect.arrayContaining([expect.stringContaining("WhisperX")]));
+    expect(probe.items[0]).toEqual(
+      expect.objectContaining({
+        eventId: created.event.eventId,
+        status: "succeeded",
+        transcriptSegmentCount: 1,
+        speakerSegmentCount: 0,
+        speakerLabels: [],
+      }),
+    );
+    const updatedEvents = await store.listEventsByDate("2026-03-27");
+    expect(updatedEvents.find((event) => event.eventId === created.event.eventId)?.transcriptSegments).toBeUndefined();
   });
 
   it("uses adaptive maintenance backfill batch size when pending audio backlog is high", async () => {
@@ -2463,6 +3809,13 @@ function createEngine(
     stateStore,
     memorySearch: options?.memorySearch as any,
   });
+}
+
+async function writeExecutableScript(rootDir: string, fileName: string, body: string): Promise<string> {
+  const filePath = path.join(rootDir, fileName);
+  await fs.writeFile(filePath, body, "utf8");
+  await fs.chmod(filePath, 0o755);
+  return filePath;
 }
 
 async function recordAudioEvent(

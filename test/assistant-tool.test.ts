@@ -55,6 +55,57 @@ describe("ClawSense assistant tool", () => {
     expect(text).toContain("今天主要在准备明天的产品演示。");
   });
 
+  it("surfaces raw audio retention boundaries in context evidence", async () => {
+    const base = createPayload();
+    const audioWindow = (base.windows as any[])[0];
+    const audioEvent = audioWindow.events[0];
+    const payload = createPayload({
+      windows: [
+        {
+          ...audioWindow,
+          events: [
+            {
+              ...audioEvent,
+              artifact: {
+                ...audioEvent.artifact,
+                available: false,
+              },
+            },
+          ],
+        },
+      ],
+    });
+    const tool = createClawSenseContextTool({
+      reviewEngine: {
+        normalizeDateInput: vi.fn(() => "2026-03-19"),
+        buildAssistantContext: vi.fn(async () => payload),
+        recheckAudioEvidence: vi.fn(async () => []),
+      } as any,
+      artifactUrlBase: () => "http://claw/api/clawsense/artifacts",
+    });
+
+    const result = await tool.execute("tool-audio-diagnostics", {
+      scope: "today",
+      question: "昨天发生了什么？",
+    });
+
+    expect(result.content[0]?.text).toContain("音频诊断：");
+    expect(result.content[0]?.text).toContain("原始音频已被 retention 清理");
+    expect(result.content[0]?.text).toContain("不能直接补跑本地 ASR / diarization");
+    expect(result.content[0]?.text).not.toContain("原始音频：http://claw/api/clawsense/artifacts?id=audio-clip-1");
+    expect((result.details as any).evidenceBundle.audioDiagnostics.verdict.rawAudioArtifacts).toBe("deleted");
+    expect((result.details as any).responseHints.audioDiagnostics.blockerIds).toEqual(
+      expect.arrayContaining(["raw-audio-retention-deleted", "diarization-not-runnable"]),
+    );
+    expect((result.details as any).evidenceBundle.artifactRefs).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          artifactId: "audio-clip-1",
+        }),
+      ]),
+    );
+  });
+
   it("falls back to recent highlights when no daily review exists", () => {
     const text = buildClawSenseContextToolText(
       createPayload({
@@ -255,6 +306,410 @@ describe("ClawSense assistant tool", () => {
     vi.useRealTimers();
   });
 
+  it("infers month-day questions without requiring explicit tool params", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-30T09:00:00+08:00"));
+    const payload = createPayload({
+      date: "2026-06-25",
+      summary: "6 月 25 日记录到一次会议和一段访谈视频。",
+    });
+    const normalizeDateInput = vi.fn((input?: string) => input ?? "2026-06-30");
+    const buildAssistantContext = vi.fn(async () => payload);
+
+    const resolved = await resolveClawSenseContext(
+      {
+        reviewEngine: {
+          normalizeDateInput,
+          buildAssistantContext,
+          recheckAudioEvidence: vi.fn(async () => []),
+        } as any,
+        artifactUrlBase: () => "http://claw/api/clawsense/artifacts",
+      },
+      {
+        question: "6月25日发生了什么？",
+      },
+    );
+
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) {
+      return;
+    }
+    expect(resolved.focus).toBe("what_happened");
+    expect(normalizeDateInput).toHaveBeenCalledWith("2026-06-25");
+    expect(buildAssistantContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: "today",
+        date: "2026-06-25",
+        question: "6月25日发生了什么？",
+      }),
+    );
+    expect(resolved.text).toContain("ClawSense 2026-06-25 这一天证据包");
+    vi.useRealTimers();
+  });
+
+  it("infers spaced month-day questions without requiring explicit tool params", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-30T09:00:00+08:00"));
+    const payload = createPayload({
+      date: "2026-06-25",
+      summary: "6 月 25 日记录到一次会议和一段访谈视频。",
+    });
+    const normalizeDateInput = vi.fn((input?: string) => input ?? "2026-06-30");
+    const buildAssistantContext = vi.fn(async () => payload);
+
+    const resolved = await resolveClawSenseContext(
+      {
+        reviewEngine: {
+          normalizeDateInput,
+          buildAssistantContext,
+          recheckAudioEvidence: vi.fn(async () => []),
+        } as any,
+        artifactUrlBase: () => "http://claw/api/clawsense/artifacts",
+      },
+      {
+        question: "请问 6 月 25 日会议里发生了什么？",
+      },
+    );
+
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) {
+      return;
+    }
+    expect(normalizeDateInput).toHaveBeenCalledWith("2026-06-25");
+    expect(buildAssistantContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: "today",
+        date: "2026-06-25",
+        question: "请问 6 月 25 日会议里发生了什么？",
+      }),
+    );
+    vi.useRealTimers();
+  });
+
+  it("infers anchored past-hour windows from natural-language questions", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-30T09:00:00+08:00"));
+    const startAt = new Date("2026-06-25T07:16:00+08:00").getTime();
+    const endAt = new Date("2026-06-25T11:16:00+08:00").getTime();
+    const payload = createPayload({
+      scope: "custom-range",
+      startAt,
+      endAt,
+      summary: "这个 4 小时窗口里有多段会议音频。",
+    });
+    const buildAssistantContext = vi.fn(async () => payload);
+    const tool = createClawSenseContextTool({
+      reviewEngine: {
+        normalizeDateInput: vi.fn(() => "2026-06-30"),
+        buildAssistantContext,
+        recheckAudioEvidence: vi.fn(async () => []),
+      } as any,
+      artifactUrlBase: () => "http://claw/api/clawsense/artifacts",
+    });
+
+    const result = await tool.execute("tool-anchored-4h", {
+      question: "以 2026-06-25 11:16 为结束时间，之前4小时我们聊了什么？",
+    });
+
+    expect(buildAssistantContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: "custom-range",
+        startAt,
+        endAt,
+        question: "以 2026-06-25 11:16 为结束时间，之前4小时我们聊了什么？",
+      }),
+    );
+    expect(result.content[0]?.text).toContain("音频转写证据（对话/会议/过去几小时类问题优先引用）：");
+    vi.useRealTimers();
+  });
+
+  it("keeps more transcript windows and range boundaries for broad conversation questions", async () => {
+    const base = createPayload();
+    const startAt = new Date("2026-06-25T08:00:00+08:00").getTime();
+    const windows = Array.from({ length: 9 }, (_, index) => {
+      const startedAt = startAt + index * 25 * 60_000;
+      const endedAt = startedAt + 8 * 60_000;
+      const windowId = `audio-session::range-window-${index + 1}`;
+      return {
+        ...base.windows[0],
+        windowId,
+        startedAt,
+        endedAt,
+        primarySummary: `第 ${index + 1} 段会议窗口`,
+        transcriptText:
+          index === 0
+            ? "第1段讨论会议开头的数据口径和指标定义。"
+            : index === 8
+              ? "第9段讨论会议收尾的行动项和明天跟进人。"
+              : `第${index + 1}段讨论项目排期和风险处理。`,
+        imageCount: 0,
+        audioCount: 1,
+        events: [
+          {
+            ...base.windows[0].events[0],
+            eventId: `range-audio-${index + 1}`,
+            capturedAt: startedAt,
+            transcript:
+              index === 0
+                ? "第1段讨论会议开头的数据口径和指标定义。"
+                : index === 8
+                  ? "第9段讨论会议收尾的行动项和明天跟进人。"
+                  : `第${index + 1}段讨论项目排期和风险处理。`,
+          },
+        ],
+      };
+    });
+    const payload = createPayload({
+      scope: "custom-range",
+      startAt,
+      endAt: startAt + 4 * 60 * 60_000,
+      windows,
+      highlights: {
+        ...base.highlights,
+        keyWindowIds: [],
+        recentImages: [],
+        audioCoverage: {
+          totalAudioWindows: 9,
+          transcriptReadyWindows: 9,
+          pendingAudioWindows: 0,
+          degradedAudioEvents: 0,
+        },
+      },
+    });
+    const resolved = await resolveClawSenseContext(
+      {
+        reviewEngine: {
+          normalizeDateInput: vi.fn(() => "2026-06-25"),
+          buildAssistantContext: vi.fn(async () => payload),
+          recheckAudioEvidence: vi.fn(async () => []),
+        } as any,
+        artifactUrlBase: () => "http://claw/api/clawsense/artifacts",
+      },
+      { question: "过去4小时我们聊了什么，行动项和明天跟进人是什么？" },
+    );
+
+    const selectedWindowIds = resolved.details.evidenceBundle.windows.map((window) => window.windowId);
+    expect(selectedWindowIds).toHaveLength(8);
+    expect(selectedWindowIds).toContain("audio-session::range-window-1");
+    expect(selectedWindowIds).toContain("audio-session::range-window-9");
+    expect(resolved.details.evidenceBundle.conversationDigest?.coverage.windowCount).toBe(9);
+    expect(resolved.details.evidenceBundle.conversationDigest?.coverage.topicSegmentCount).toBeGreaterThanOrEqual(9);
+    expect(resolved.details.evidenceBundle.conversationDigest?.topicIndex[0]).toEqual(
+      expect.objectContaining({
+        index: 1,
+        title: expect.any(String),
+        summary: expect.any(String),
+      }),
+    );
+    expect((resolved.details.responseHints as any).conversationDigest.followupPrompts[0]).toContain("第 1 段");
+    expect((resolved.details.responseHints as any).conversationDigest.queryMatches[0]).toEqual(
+      expect.objectContaining({
+        index: 9,
+        matchedTerms: expect.arrayContaining(["行动项", "跟进"]),
+      }),
+    );
+    expect(resolved.text).toContain("第1段讨论会议开头的数据口径");
+    expect(resolved.text).toContain("第9段讨论会议收尾的行动项");
+    expect(resolved.text).toContain("长对话索引");
+    expect(resolved.text).toContain("与当前问题最相关的话题段");
+  });
+
+  it("surfaces persisted rolling digests as a reusable long-conversation index", async () => {
+    const payload = createPayload({
+      rollingDigests: [
+        {
+          digestId: "digest-fixture",
+          date: "2026-06-25",
+          scope: "custom-range",
+          startAt: new Date("2026-06-25T09:00:00+08:00").getTime(),
+          endAt: new Date("2026-06-25T12:00:00+08:00").getTime(),
+          generatedAt: new Date("2026-06-25T12:00:00+08:00").getTime(),
+          sourceEventCount: 24,
+          sourceWindowCount: 3,
+          transcriptWindowCount: 3,
+          summary: "2026-06-25 09:00-12:00 持久化索引：3 个窗口，3 个含转写窗口，3 个可检索话题。",
+          topicIndex: [
+            {
+              index: 1,
+              windowId: "audio-session::rolling-1",
+              timeRange: "09:58-10:15",
+              title: "AI 陪练与剧本",
+              summary: "讨论 AI 陪练剧本生成。",
+              keywordHints: ["AI陪练", "剧本"],
+              taskHints: ["产品团队需要确认语料同步方案。"],
+              transcriptExcerpt: "AI陪练可以根据文本生成剧本。",
+            },
+          ],
+          keywordIndex: [
+            {
+              keyword: "AI陪练",
+              topicIndexes: [1],
+            },
+          ],
+        },
+      ],
+      memoryCards: [
+        {
+          cardId: "memcard-fixture-task",
+          date: "2026-06-25",
+          scope: "custom-range",
+          kind: "task",
+          title: "产品团队需要确认语料同步方案",
+          summary: "任务线索来自第 1 段（09:58-10:15）：产品团队需要确认语料同步方案。",
+          status: "active",
+          confidence: "medium",
+          startAt: new Date("2026-06-25T09:00:00+08:00").getTime(),
+          endAt: new Date("2026-06-25T12:00:00+08:00").getTime(),
+          lastSeenAt: new Date("2026-06-25T12:00:00+08:00").getTime(),
+          createdAt: new Date("2026-06-25T12:00:00+08:00").getTime(),
+          updatedAt: new Date("2026-06-25T12:00:00+08:00").getTime(),
+          keywords: ["任务", "AI陪练", "语料"],
+          source: "rolling-digest",
+          evidence: {
+            digestId: "digest-fixture",
+            topicIndexes: [1],
+            windowIds: ["audio-session::rolling-1"],
+            timeRanges: ["09:58-10:15"],
+            taskHints: ["产品团队需要确认语料同步方案。"],
+            transcriptExcerpts: ["AI陪练可以根据文本生成剧本。"],
+          },
+        },
+      ],
+    });
+    const resolved = await resolveClawSenseContext(
+      {
+        reviewEngine: {
+          normalizeDateInput: vi.fn(() => "2026-06-25"),
+          buildAssistantContext: vi.fn(async () => payload),
+          recheckAudioEvidence: vi.fn(async () => []),
+        } as any,
+        artifactUrlBase: () => "http://claw/api/clawsense/artifacts",
+      },
+      { question: "6 月 25 日上午 AI 陪练和语料同步任务讲了什么？" },
+    );
+
+    expect(resolved.text).toContain("持久化长对话索引");
+    expect(resolved.text).toContain("与当前问题最相关的持久索引段");
+    expect(resolved.text).toContain("AI 陪练与剧本");
+    expect(resolved.text).toContain("持久关键词索引");
+    expect(resolved.text).toContain("长期记忆卡片");
+    expect(resolved.text).toContain("产品团队需要确认语料同步方案");
+    expect(resolved.text).toContain("排序理由");
+    expect((resolved.details.responseHints as any).rollingDigestMatches[0]).toEqual(
+      expect.objectContaining({
+        digestId: "digest-fixture",
+        title: "AI 陪练与剧本",
+        matchedTerms: expect.arrayContaining(["陪练"]),
+        taskHints: expect.arrayContaining(["产品团队需要确认语料同步方案。"]),
+      }),
+    );
+    expect((resolved.details.responseHints as any).rollingDigests[0]).toEqual(
+      expect.objectContaining({
+        digestId: "digest-fixture",
+        topicIndex: expect.arrayContaining([
+          expect.objectContaining({
+            title: "AI 陪练与剧本",
+          }),
+        ]),
+      }),
+    );
+    expect((resolved.details.responseHints as any).memoryCardMatches[0]).toEqual(
+      expect.objectContaining({
+        cardId: "memcard-fixture-task",
+        kind: "task",
+        matchedTerms: expect.arrayContaining(["陪练", "语料"]),
+        matchReasons: expect.arrayContaining(["keyword-match", "task-intent", "task-evidence"]),
+        retrievalRank: 1,
+        score: expect.any(Number),
+      }),
+    );
+  });
+
+  it("ranks memory cards by intent before embeddings are available", async () => {
+    const startAt = new Date("2026-06-25T09:00:00+08:00").getTime();
+    const endAt = new Date("2026-06-25T12:00:00+08:00").getTime();
+    const payload = createPayload({
+      scope: "custom-range",
+      startAt,
+      endAt,
+      memoryCards: [
+        {
+          cardId: "memcard-topic-only",
+          date: "2026-06-25",
+          scope: "custom-range",
+          kind: "topic",
+          title: "AI 陪练整体演示",
+          summary: "话题索引第 1 段：讨论系统演示流程。",
+          status: "active",
+          confidence: "medium",
+          startAt,
+          endAt,
+          lastSeenAt: endAt,
+          createdAt: endAt,
+          updatedAt: endAt,
+          keywords: ["演示"],
+          source: "rolling-digest",
+          evidence: {
+            digestId: "digest-intent",
+            topicIndexes: [1],
+            windowIds: ["audio-session::intent-1"],
+            timeRanges: ["09:58-10:15"],
+            taskHints: [],
+            transcriptExcerpts: ["这里主要演示系统流程。"],
+          },
+        },
+        {
+          cardId: "memcard-task-intent",
+          date: "2026-06-25",
+          scope: "custom-range",
+          kind: "task",
+          title: "产品团队确认语料同步方案",
+          summary: "任务线索来自第 2 段：产品团队确认语料同步方案。",
+          status: "active",
+          confidence: "medium",
+          startAt,
+          endAt,
+          lastSeenAt: endAt - 1,
+          createdAt: endAt,
+          updatedAt: endAt,
+          keywords: ["语料", "同步"],
+          source: "rolling-digest",
+          evidence: {
+            digestId: "digest-intent",
+            topicIndexes: [2],
+            windowIds: ["audio-session::intent-2"],
+            timeRanges: ["10:15-10:30"],
+            taskHints: ["产品团队确认语料同步方案。"],
+            transcriptExcerpts: ["后续产品团队要确认语料同步方案。"],
+          },
+        },
+      ],
+    });
+    const resolved = await resolveClawSenseContext(
+      {
+        reviewEngine: {
+          normalizeDateInput: vi.fn(() => "2026-06-25"),
+          buildAssistantContext: vi.fn(async () => payload),
+          recheckAudioEvidence: vi.fn(async () => []),
+        } as any,
+        artifactUrlBase: () => "http://claw/api/clawsense/artifacts",
+      },
+      { question: "今天有哪些待办需要我后续处理？" },
+    );
+
+    const matches = (resolved.details.responseHints as any).memoryCardMatches;
+    expect(matches[0]).toEqual(
+      expect.objectContaining({
+        cardId: "memcard-task-intent",
+        kind: "task",
+        retrievalRank: 1,
+        matchReasons: expect.arrayContaining(["task-intent", "task-evidence", "transcript-evidence"]),
+      }),
+    );
+    expect(resolved.text).toContain("#1 score=");
+    expect(resolved.text).toContain("排序理由：task-intent");
+  });
+
   it("infers a custom 7-day range from natural-language questions", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-14T10:00:00+08:00"));
@@ -289,6 +744,639 @@ describe("ClawSense assistant tool", () => {
     vi.useRealTimers();
   });
 
+  it("prioritizes transcript windows over high-volume image windows for meeting questions", async () => {
+    const imageWindow = {
+      ...createPayload().windows[0],
+      windowId: "image-window::static",
+      startedAt: 1000,
+      endedAt: 2000,
+      primarySummary: "屏幕静态画面显示一张访谈视频截图。",
+      transcriptText: "",
+      imageCount: 260,
+      audioCount: 0,
+      videoCount: 0,
+      tags: ["video"],
+      events: [
+        {
+          eventId: "image-static-1",
+          modality: "image",
+          capturedAt: 1000,
+          summary: "访谈视频截图里能看到主讲人和字幕。",
+          captureContext: "active-window",
+          analysisMode: "multimodal-preview",
+          analysisProvider: "primary-multimodal:runtime-primary",
+          analysisStatus: "succeeded",
+        },
+      ],
+    };
+    const audioWindow = {
+      ...createPayload().windows[0],
+      windowId: "audio-session::meeting",
+      startedAt: 3000,
+      endedAt: 4000,
+      primarySummary: "讨论数据同步复盘和下一步排查计划。",
+      transcriptText: "我们刚才重点讨论了数据同步失败的复盘、排查 owner，以及明天先补告警看板。",
+      imageCount: 1,
+      audioCount: 2,
+      videoCount: 0,
+      tags: ["meeting"],
+      events: [
+        {
+          ...createPayload().windows[0].events[0],
+          eventId: "audio-meeting-1",
+          capturedAt: 3000,
+          summary: "讨论数据同步复盘和下一步排查计划。",
+          transcript: "我们刚才重点讨论了数据同步失败的复盘、排查 owner，以及明天先补告警看板。",
+        },
+      ],
+    };
+    const payload = createPayload({
+      windows: [imageWindow, audioWindow],
+      highlights: {
+        ...createPayload().highlights,
+        keyWindowIds: ["image-window::static"],
+        recentImages: [],
+        recentConversations: [
+          {
+            windowId: "audio-session::meeting",
+            startedAt: 3000,
+            endedAt: 4000,
+            summary: "讨论数据同步复盘和下一步排查计划。",
+            transcriptExcerpt: "我们刚才重点讨论了数据同步失败的复盘、排查 owner，以及明天先补告警看板。",
+          },
+        ],
+      },
+    });
+    const tool = createClawSenseContextTool({
+      reviewEngine: {
+        normalizeDateInput: vi.fn(() => "2026-03-19"),
+        buildAssistantContext: vi.fn(async () => payload),
+        recheckAudioEvidence: vi.fn(async () => []),
+      } as any,
+      artifactUrlBase: () => "http://claw/api/clawsense/artifacts",
+    });
+
+    const result = await tool.execute("tool-meeting-priority", {
+      question: "刚才会议讨论的重点是什么？",
+    });
+
+    expect((result.details as any).evidenceBundle.windows[0].windowId).toBe("audio-session::meeting");
+    expect((result.details as any).evidenceBundle.topEvidence[0].kind).toBe("transcript");
+    expect(result.content[0]?.text).toContain("对话优先说明");
+    expect(result.content[0]?.text).toContain("原始聚合总览（对话问题仅作背景）");
+    expect(result.content[0]?.text).toContain("我们刚才重点讨论了数据同步失败的复盘");
+  });
+
+  it("builds topic segments and conservative task attribution for long meeting audio", async () => {
+    const base = createPayload();
+    const startedAt = new Date("2026-06-25T09:58:00+08:00").getTime();
+    const audioWindow = {
+      ...base.windows[0],
+      windowId: "audio-session::long-meeting",
+      startedAt,
+      endedAt: startedAt + 16 * 60 * 1000,
+      primarySummary: "讨论 AI 陪练系统、数据同步、考核报表和培训安排。",
+      transcriptText: [
+        "我们离线数据好像放在阿里云这边，产品团队需要在7月30日前提供实时语料库同步方案。",
+        "这个我问一下我们数仓吧，然后你们先把文字这块演示好。",
+        "AI陪练可以根据文本文档自动生成剧本，也可以从通话会话明细导出语料。",
+        "后面还要确认考核点通过率与缺陷项汇总逻辑，海南物流培训也要区分角色讲解工单流程。",
+      ].join(" "),
+      imageCount: 0,
+      audioCount: 4,
+      videoCount: 0,
+      tags: ["meeting", "ai-training"],
+      events: [
+        {
+          ...base.windows[0].events[0],
+          eventId: "meeting-audio-1",
+          capturedAt: startedAt,
+          transcript: "我们离线数据好像放在阿里云这边，产品团队需要在7月30日前提供实时语料库同步方案。",
+          summary: "讨论数据源与实时语料库同步方案。",
+        },
+        {
+          ...base.windows[0].events[0],
+          eventId: "meeting-audio-2",
+          capturedAt: startedAt + 4 * 60 * 1000,
+          transcript: "这个我问一下我们数仓吧，然后你们先把文字这块演示好。",
+          summary: "讨论数仓确认与演示文字部分。",
+        },
+        {
+          ...base.windows[0].events[0],
+          eventId: "meeting-audio-3",
+          capturedAt: startedAt + 9 * 60 * 1000,
+          transcript: "AI陪练可以根据文本文档自动生成剧本，也可以从通话会话明细导出语料。",
+          summary: "演示 AI 陪练剧本生成。",
+        },
+        {
+          ...base.windows[0].events[0],
+          eventId: "meeting-audio-4",
+          capturedAt: startedAt + 14 * 60 * 1000,
+          transcript: "后面还要确认考核点通过率与缺陷项汇总逻辑，海南物流培训也要区分角色讲解工单流程。",
+          summary: "讨论考核报表和培训安排。",
+        },
+      ],
+    };
+    const payload = createPayload({
+      date: "2026-06-25",
+      startAt: new Date("2026-06-25T00:00:00+08:00").getTime(),
+      endAt: new Date("2026-06-26T00:00:00+08:00").getTime(),
+      counts: { events: 4, windows: 1, artifacts: 4, devices: 1 },
+      summary: "当天主要围绕 AI 陪练系统的功能演示与优化需求讨论。",
+      windows: [audioWindow],
+      highlights: {
+        ...base.highlights,
+        keyWindowIds: ["audio-session::long-meeting"],
+        recentImages: [],
+        recentConversations: [
+          {
+            windowId: "audio-session::long-meeting",
+            startedAt: audioWindow.startedAt,
+            endedAt: audioWindow.endedAt,
+            summary: audioWindow.primarySummary,
+            transcriptExcerpt: audioWindow.transcriptText,
+          },
+        ],
+        speakers: [
+          {
+            speakerRef: "speaker:audio-session::long-meeting:1",
+            displayName: "speaker_1",
+            windowId: "audio-session::long-meeting",
+            deviceId: "device-1",
+          },
+          {
+            speakerRef: "speaker:audio-session::long-meeting:2",
+            displayName: "speaker_2",
+            windowId: "audio-session::long-meeting",
+            deviceId: "device-1",
+          },
+        ],
+      },
+    });
+    const question = "6 月 25 日会议里，有哪些明确分配给我的任务？哪些只是别人提到但没有落到我身上的？";
+    const resolved = await resolveClawSenseContext(
+      {
+        reviewEngine: {
+          normalizeDateInput: vi.fn(() => "2026-06-25"),
+          buildAssistantContext: vi.fn(async () => payload),
+          recheckAudioEvidence: vi.fn(async () => []),
+        } as any,
+        artifactUrlBase: () => "http://claw/api/clawsense/artifacts",
+      },
+      { question },
+    );
+
+    expect(resolved.text).toContain("会议 / 长音频话题段");
+    expect(resolved.text).toContain("任务归属候选");
+    expect(resolved.details.evidenceBundle.topicSegments.length).toBeGreaterThanOrEqual(2);
+    expect(resolved.details.evidenceBundle.topicSegments[0].keywordHints).toEqual(
+      expect.arrayContaining(["数据", "阿里云"]),
+    );
+    expect(resolved.details.evidenceBundle.taskAttribution.status).toBe("needs-speaker-labels");
+    expect(resolved.details.evidenceBundle.taskAttribution.candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: "named-assignee",
+          assigneeHint: "产品团队",
+          userAssignmentStatus: "not-user-unless-role-matches",
+        }),
+        expect.objectContaining({
+          category: "speaker-dependent",
+          assigneeHint: expect.stringMatching(/我|你们/),
+          userAssignmentStatus: "needs-speaker-label",
+        }),
+      ]),
+    );
+    expect(resolved.details.evidenceBundle.taskAttribution.buckets.assignedToOthersOrTeams).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          assigneeHint: "产品团队",
+          userAssignmentStatus: "not-user-unless-role-matches",
+        }),
+      ]),
+    );
+    expect(resolved.details.evidenceBundle.taskAttribution.buckets.needsSpeakerLabel).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: "speaker-dependent",
+          userAssignmentStatus: "needs-speaker-label",
+        }),
+      ]),
+    );
+    expect(resolved.text).toContain("任务归属分桶");
+    expect((resolved.details.responseHints as any).topicSegments.length).toBeGreaterThanOrEqual(2);
+    expect((resolved.details.responseHints as any).conversationDigest.topicIndex.length).toBeGreaterThanOrEqual(2);
+    expect((resolved.details.responseHints as any).conversationDigest.overview).toContain("可追问话题段");
+    expect((resolved.details.responseHints as any).conversationDigest.taskMatches).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          userAssignmentStatus: "needs-speaker-label",
+        }),
+      ]),
+    );
+    expect((resolved.details.responseHints as any).taskAttribution.status).toBe("needs-speaker-labels");
+    expect((resolved.details.responseHints as any).taskAttributionBuckets.needsSpeakerLabel.length).toBeGreaterThan(0);
+    expect((resolved.details.responseHints as any).speakerResolutionPrompts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          taskCount: expect.any(Number),
+          resolutionMode: expect.stringMatching(/exact-speaker-label|window-context-only/),
+          requiresDiarization: expect.any(Boolean),
+          selfSentenceTemplate: expect.stringContaining("我本人"),
+          candidateSpeakerSlots: expect.any(Array),
+        }),
+      ]),
+    );
+    expect((resolved.details.responseHints as any).topicFollowUpTargets[0]).toEqual(
+      expect.objectContaining({
+        source: "topic",
+        kind: "topic-segment",
+        segmentId: resolved.details.evidenceBundle.topicSegments[0].segmentId,
+        prompt: expect.stringContaining("第 1 段"),
+      }),
+    );
+    expect((resolved.details.responseHints as any).evidenceFollowUpTargets).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: "topic",
+          kind: "topic-segment",
+          prompt: expect.stringContaining("具体讲了什么"),
+        }),
+      ]),
+    );
+    expect(resolved.text).toContain("长对话索引");
+    expect(resolved.text).toContain("与当前问题相关的任务候选");
+    expect(resolved.text).toContain("speaker 归属追问");
+  });
+
+  it("uses finer topic segmentation for dense meeting questions without changing the source window", async () => {
+    const base = createPayload();
+    const startedAt = new Date("2026-06-25T10:00:00+08:00").getTime();
+    const windowId = "audio-session::dense-meeting";
+    const events = Array.from({ length: 13 }, (_, index) => {
+      const capturedAt = startedAt + index * 15_000;
+      return {
+        ...base.windows[0].events[0],
+        eventId: `dense-meeting-audio-${index + 1}`,
+        capturedAt,
+        modality: "audio" as const,
+        transcript:
+          index < 6
+            ? `第${index + 1}段讨论数据同步方案，需要确认接口字段。`
+            : `第${index + 1}段讨论培训安排，我负责整理会议纪要。`,
+        summary: "会议短句转写。",
+      };
+    });
+    const payload = createPayload({
+      scope: "today",
+      date: "2026-06-25",
+      windows: [
+        {
+          ...base.windows[0],
+          windowId,
+          startedAt,
+          endedAt: startedAt + 3 * 60_000,
+          primarySummary: "密集会议讨论数据同步和培训安排。",
+          transcriptText: events.map((event) => event.transcript).join(" "),
+          imageCount: 0,
+          audioCount: events.length,
+          events,
+        },
+      ],
+      highlights: {
+        ...base.highlights,
+        keyWindowIds: [windowId],
+        recentImages: [],
+      },
+    });
+    const resolved = await resolveClawSenseContext(
+      {
+        reviewEngine: {
+          normalizeDateInput: vi.fn(() => "2026-06-25"),
+          buildAssistantContext: vi.fn(async () => payload),
+          recheckAudioEvidence: vi.fn(async () => []),
+        } as any,
+        artifactUrlBase: () => "http://claw/api/clawsense/artifacts",
+      },
+      { question: "刚才会议讨论的重点是什么？" },
+    );
+
+    expect(resolved.details.evidenceBundle.windows).toHaveLength(1);
+    expect(resolved.details.evidenceBundle.topicSegments.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(resolved.details.evidenceBundle.topicSegments.map((segment) => segment.windowId))).toEqual(
+      new Set([windowId]),
+    );
+    expect(resolved.text).toContain("会议 / 长音频话题段");
+  });
+
+  it("uses speaker-labeled transcript segments to avoid assigning another speaker's pronoun task to the user", async () => {
+    const base = createPayload();
+    const startedAt = new Date("2026-06-25T10:12:00+08:00").getTime();
+    const endedAt = new Date("2026-06-25T10:13:00+08:00").getTime();
+    const windowId = "audio-session::speaker-task";
+    const payload = createPayload({
+      scope: "today",
+      date: "2026-06-25",
+      windows: [
+        {
+          ...base.windows[0],
+          windowId,
+          startedAt,
+          endedAt,
+          primarySummary: "会议里确认培训安排由 Amy 跟进。",
+          transcriptText: "我负责同步培训安排。",
+          imageCount: 0,
+          audioCount: 1,
+          events: [
+            {
+              ...base.windows[0].events[0],
+              eventId: "event-speaker-task-1",
+              capturedAt: startedAt,
+              summary: "Amy 说自己负责同步培训安排。",
+              transcript: "我负责同步培训安排。",
+              transcriptSegments: [
+                {
+                  startMs: 0,
+                  endMs: 1800,
+                  text: "我负责同步培训安排。",
+                },
+              ],
+              speakerTimelineSegments: [
+                {
+                  startMs: 0,
+                  endMs: 1800,
+                  text: "我负责同步培训安排。",
+                  speakerLabel: "speaker_2",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      highlights: {
+        ...base.highlights,
+        keyWindowIds: [windowId],
+        speakers: [
+          {
+            speakerRef: `speaker:${windowId}:2`,
+            displayName: "Amy",
+            relationship: "同事",
+            windowId,
+            deviceId: "device-1",
+          },
+        ],
+      },
+    });
+    const resolved = await resolveClawSenseContext(
+      {
+        reviewEngine: {
+          normalizeDateInput: vi.fn(() => "2026-06-25"),
+          buildAssistantContext: vi.fn(async () => payload),
+          recheckAudioEvidence: vi.fn(async () => []),
+        } as any,
+        artifactUrlBase: () => "http://claw/api/clawsense/artifacts",
+      },
+      { question: "会议里哪些任务是分配给我的？" },
+    );
+
+    expect(resolved.details.evidenceBundle.taskAttribution.status).toBe("ready");
+    expect(resolved.details.windows[0]?.events[0]?.speakerTimelineSegments).toEqual([
+      {
+        startMs: 0,
+        endMs: 1800,
+        text: "我负责同步培训安排。",
+        speakerLabel: "speaker_2",
+      },
+    ]);
+    expect(resolved.details.evidenceBundle.taskAttribution.candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: "speaker-dependent",
+          speakerLabel: "speaker_2",
+          speakerDisplayName: "Amy",
+          userAssignmentStatus: "assigned-to-known-speaker",
+        }),
+      ]),
+    );
+    expect(resolved.details.evidenceBundle.taskAttribution.buckets.assignedToOthersOrTeams).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          speakerDisplayName: "Amy",
+          userAssignmentStatus: "assigned-to-known-speaker",
+        }),
+      ]),
+    );
+    expect(resolved.details.evidenceBundle.taskAttribution.buckets.assignedToUser).toHaveLength(0);
+    expect(resolved.text).toContain("说话人：Amy（同事，speaker_2）");
+    expect(resolved.text).toContain("speaker 已标注为其他人物，不能默认算你的任务");
+  });
+
+  it("keeps speaker-labeled pronoun tasks in exact speaker mode before identity annotation", async () => {
+    const base = createPayload();
+    const startedAt = new Date("2026-06-25T10:15:00+08:00").getTime();
+    const endedAt = new Date("2026-06-25T10:16:00+08:00").getTime();
+    const windowId = "audio-session::speaker-unlabeled-task";
+    const payload = createPayload({
+      scope: "today",
+      date: "2026-06-25",
+      windows: [
+        {
+          ...base.windows[0],
+          windowId,
+          startedAt,
+          endedAt,
+          primarySummary: "会议里有人说自己负责同步培训安排。",
+          transcriptText: "我负责同步培训安排。",
+          imageCount: 0,
+          audioCount: 1,
+          events: [
+            {
+              ...base.windows[0].events[0],
+              eventId: "event-speaker-unlabeled-task-1",
+              capturedAt: startedAt,
+              summary: "未标注 speaker 说自己负责同步培训安排。",
+              transcript: "我负责同步培训安排。",
+              speakerTimelineSegments: [
+                {
+                  startMs: 0,
+                  endMs: 1800,
+                  text: "我负责同步培训安排。",
+                  speakerLabel: "speaker_1",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      highlights: {
+        ...base.highlights,
+        keyWindowIds: [windowId],
+      },
+    });
+    const resolved = await resolveClawSenseContext(
+      {
+        reviewEngine: {
+          normalizeDateInput: vi.fn(() => "2026-06-25"),
+          buildAssistantContext: vi.fn(async () => payload),
+          recheckAudioEvidence: vi.fn(async () => []),
+        } as any,
+        artifactUrlBase: () => "http://claw/api/clawsense/artifacts",
+      },
+      { question: "会议里哪些任务是分配给我的？" },
+    );
+
+    expect(resolved.details.evidenceBundle.taskAttribution.status).toBe("needs-speaker-labels");
+    expect(resolved.details.evidenceBundle.taskAttribution.candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: "speaker-dependent",
+          speakerLabel: "speaker_1",
+          speakerRef: `speaker:${windowId}:1`,
+          userAssignmentStatus: "needs-speaker-label",
+          reason: expect.stringContaining("句级转写显示这句话由 speaker_1 说出"),
+        }),
+      ]),
+    );
+    expect((resolved.details.responseHints as any).speakerResolutionPrompts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          speakerLabel: "speaker_1",
+          speakerRef: `speaker:${windowId}:1`,
+          resolutionMode: "exact-speaker-label",
+          requiresDiarization: false,
+          selfCommandTemplate: expect.stringContaining(`speaker:${windowId}:1`),
+        }),
+      ]),
+    );
+    expect((resolved.details.responseHints as any).conversationDigest.taskMatches).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          text: expect.stringContaining("我负责同步培训安排"),
+          speakerLabel: "speaker_1",
+          speakerRef: `speaker:${windowId}:1`,
+          userAssignmentStatus: "needs-speaker-label",
+          resolutionMode: "exact-speaker-label",
+          requiresDiarization: false,
+          selfSentenceTemplate: expect.stringContaining("speaker_1"),
+          selfCommandTemplate: expect.stringContaining(`speaker:${windowId}:1`),
+        }),
+      ]),
+    );
+    expect(resolved.text).toContain("说话人：speaker_1");
+  });
+
+  it("uses speaker relationship labels to recognize the user's own pronoun tasks", async () => {
+    const base = createPayload();
+    const startedAt = new Date("2026-06-25T10:18:00+08:00").getTime();
+    const endedAt = new Date("2026-06-25T10:19:00+08:00").getTime();
+    const windowId = "audio-session::speaker-self-task";
+    const payload = createPayload({
+      scope: "today",
+      date: "2026-06-25",
+      windows: [
+        {
+          ...base.windows[0],
+          windowId,
+          startedAt,
+          endedAt,
+          primarySummary: "会议里确认我负责同步培训安排。",
+          transcriptText: "我负责同步培训安排。",
+          imageCount: 0,
+          audioCount: 1,
+          events: [
+            {
+              ...base.windows[0].events[0],
+              eventId: "event-speaker-self-task-1",
+              capturedAt: startedAt,
+              summary: "用户说自己负责同步培训安排。",
+              transcript: "我负责同步培训安排。",
+              transcriptSegments: [
+                {
+                  startMs: 0,
+                  endMs: 1800,
+                  text: "我负责同步培训安排。",
+                },
+              ],
+              speakerTimelineSegments: [
+                {
+                  startMs: 0,
+                  endMs: 1800,
+                  text: "我负责同步培训安排。",
+                  speakerLabel: "speaker_2",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      highlights: {
+        ...base.highlights,
+        keyWindowIds: [windowId],
+        speakers: [
+          {
+            speakerRef: `speaker:${windowId}:2`,
+            displayName: "Cedric",
+            relationship: "本人",
+            windowId,
+            deviceId: "device-1",
+          },
+        ],
+      },
+    });
+    const resolved = await resolveClawSenseContext(
+      {
+        reviewEngine: {
+          normalizeDateInput: vi.fn(() => "2026-06-25"),
+          buildAssistantContext: vi.fn(async () => payload),
+          recheckAudioEvidence: vi.fn(async () => []),
+        } as any,
+        artifactUrlBase: () => "http://claw/api/clawsense/artifacts",
+      },
+      { question: "会议里哪些任务是分配给我的？" },
+    );
+
+    expect(resolved.details.evidenceBundle.taskAttribution.status).toBe("ready");
+    expect(resolved.details.evidenceBundle.taskAttribution.candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: "speaker-dependent",
+          speakerLabel: "speaker_2",
+          speakerDisplayName: "Cedric",
+          speakerRelationship: "本人",
+          userAssignmentStatus: "assigned-to-user",
+        }),
+      ]),
+    );
+    expect(resolved.details.evidenceBundle.taskAttribution.buckets.assignedToUser).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          speakerDisplayName: "Cedric",
+          speakerRelationship: "本人",
+          userAssignmentStatus: "assigned-to-user",
+        }),
+      ]),
+    );
+    expect((resolved.details.responseHints as any).taskAttributionBuckets.assignedToUser).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          speakerDisplayName: "Cedric",
+          userAssignmentStatus: "assigned-to-user",
+        }),
+      ]),
+    );
+    expect((resolved.details.responseHints as any).conversationDigest.taskMatches).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          speakerDisplayName: "Cedric",
+          userAssignmentStatus: "assigned-to-user",
+        }),
+      ]),
+    );
+    expect((resolved.details.responseHints as any).speakerResolutionPrompts).toHaveLength(0);
+    expect(resolved.text).toContain("说话人：Cedric（本人，speaker_2）");
+    expect(resolved.text).toContain("speaker 已标注为用户本人，可作为你的任务候选");
+  });
+
   it("supports explicit lookbackDays and turns it into a custom-range", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-14T10:00:00+08:00"));
@@ -318,6 +1406,39 @@ describe("ClawSense assistant tool", () => {
         scope: "custom-range",
         startAt: new Date("2026-04-07T10:00:00+08:00").getTime(),
         endAt: new Date("2026-04-14T10:00:00+08:00").getTime(),
+      }),
+    );
+    vi.useRealTimers();
+  });
+
+  it("defaults undated meeting-minutes follow-ups to a recent evidence window", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-01T10:00:00+08:00"));
+    const payload = createPayload({
+      scope: "custom-range",
+      startAt: new Date("2026-06-25T00:00:00+08:00").getTime(),
+      endAt: new Date("2026-07-01T10:00:00+08:00").getTime(),
+      summary: "最近一周有一段可整理成会议纪要的音频会议。",
+    });
+    const buildAssistantContext = vi.fn(async () => payload);
+    const tool = createClawSenseContextTool({
+      reviewEngine: {
+        normalizeDateInput: vi.fn(() => "2026-07-01"),
+        buildAssistantContext,
+        recheckAudioEvidence: vi.fn(async () => []),
+      } as any,
+      artifactUrlBase: () => "http://claw/api/clawsense/artifacts",
+    });
+
+    await tool.execute("tool-recent-meeting-minutes", {
+      question: "那帮我整理成会议纪要",
+    });
+
+    expect(buildAssistantContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: "custom-range",
+        startAt: new Date("2026-06-25T00:00:00+08:00").getTime(),
+        endAt: new Date("2026-07-01T10:00:00+08:00").getTime(),
       }),
     );
     vi.useRealTimers();
@@ -454,7 +1575,7 @@ describe("ClawSense assistant tool", () => {
     if (!resolved.ok) {
       return;
     }
-    expect(resolved.details.evidenceBundle.schemaVersion).toBe("2026-05-30");
+    expect(resolved.details.evidenceBundle.schemaVersion).toBe("2026-07-08");
     expect(resolved.details.evidenceBundle.timeRange.scope).toBe("today");
     expect(resolved.details.evidenceBundle.windows.length).toBeGreaterThan(0);
   });
@@ -508,6 +1629,18 @@ describe("ClawSense assistant tool", () => {
             artifactUrls: ["http://claw/api/clawsense/artifacts?id=amy-1"],
           },
         ],
+        memoryCards: [
+          {
+            cardId: "memcard-amy-task",
+            kind: "task",
+            title: "Amy 要求确认报价顺序",
+            summary: "任务线索来自 Amy 参与的演示准备窗口。",
+            confidence: "medium",
+            timeRanges: ["09:10-09:25"],
+            taskHints: ["Amy 要求先确认报价顺序。"],
+            transcriptExcerpts: ["先讲价值主张，再过一遍报价区间。"],
+          },
+        ],
       },
     ]);
     const tool = createClawSenseContextTool({
@@ -533,6 +1666,8 @@ describe("ClawSense assistant tool", () => {
     expect(result.content[0]?.text).toContain("Amy（老板）");
     expect(result.content[0]?.text).toContain("历史上出现过 3 个时间窗");
     expect(result.content[0]?.text).toContain("2026-03-30 09:10-09:25");
+    expect(result.content[0]?.text).toContain("关联记忆卡片：");
+    expect(result.content[0]?.text).toContain("任务卡 Amy 要求确认报价顺序");
     expect(result.content[0]?.text).toContain("可继续追问：你可以继续问");
     expect(result.content[0]?.text).toContain("快捷追问入口：");
     expect(result.content[0]?.text).toContain("围绕 Amy");
@@ -579,6 +1714,18 @@ describe("ClawSense assistant tool", () => {
             artifactUrls: ["http://claw/api/clawsense/artifacts?id=demo-1"],
           },
         ],
+        memoryCards: [
+          {
+            cardId: "memcard-demo-topic",
+            kind: "topic",
+            title: "演示准备与截图顺序",
+            summary: "演示准备相关话题持续出现。",
+            confidence: "medium",
+            timeRanges: ["09:10-09:25"],
+            taskHints: ["确认演示截图顺序。"],
+            transcriptExcerpts: ["先讲价值主张，再过一遍报价区间。"],
+          },
+        ],
       },
     ]);
     const tool = createClawSenseContextTool({
@@ -604,6 +1751,8 @@ describe("ClawSense assistant tool", () => {
     expect(result.content[0]?.text).toContain("相关项目 / 主题的历史记忆：");
     expect(result.content[0]?.text).toContain("演示准备");
     expect(result.content[0]?.text).toContain("历史上出现过 4 个时间窗");
+    expect(result.content[0]?.text).toContain("关联记忆卡片：");
+    expect(result.content[0]?.text).toContain("话题卡 演示准备与截图顺序");
     expect((result.details as any).projectHistory[0].label).toBe("演示准备");
     expect((result.details as any).evidenceBundle.projectHistory[0].ref).toBe("demo_prep");
   });
@@ -717,7 +1866,7 @@ describe("ClawSense assistant tool", () => {
     expect((result.details as any).evidenceBundle.windows[0].audioArtifacts[0].url).toBe(
       "http://claw/api/clawsense/artifacts?id=audio-clip-1",
     );
-    expect((result.details as any).evidenceBundle.schemaVersion).toBe("2026-05-30");
+    expect((result.details as any).evidenceBundle.schemaVersion).toBe("2026-07-08");
     expect((result.details as any).evidenceBundle.timeRange.scope).toBe("today");
     expect((result.details as any).evidenceBundle.topEvidence[0].kind).toBe("transcript");
     expect((result.details as any).evidenceBundle.transcriptSpans[0].eventId).toBe("event-1");
@@ -769,6 +1918,10 @@ describe("ClawSense assistant tool", () => {
       pendingAudioWindows: 0,
       degradedAudioEvents: 0,
     });
+    expect((result.details as any).responseHints.audioDiagnostics.verdict.rawAudioArtifacts).toBe("available");
+    expect((result.details as any).responseHints.audioDiagnostics.blockerIds).toEqual(
+      expect.arrayContaining(["diarization-runnable"]),
+    );
     expect((result.details as any).responseHints.audioFollowUps[0]).toContain("这段对话里");
     expect((result.details as any).responseHints.audioFollowUpTargets[0]).toEqual(
       expect.objectContaining({
@@ -789,15 +1942,20 @@ describe("ClawSense assistant tool", () => {
       ]),
     );
     expect((result.details as any).responseHints.annotationPrompts[0]).toContain("speaker_2");
+    expect((result.details as any).responseHints.annotationPrompts[0]).toContain("是我本人");
     expect((result.details as any).responseHints.annotationSuggestions.speakers).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           suggestionId: "speaker:speaker:audio-session::1:2",
           speakerRef: "speaker:audio-session::1:2",
           confidence: "medium",
+          selfSentenceTemplate: expect.stringContaining("是我本人"),
+          selfCommandTemplate: expect.stringContaining("--relationship \"本人\""),
         }),
       ]),
     );
+    expect(result.content[0]?.text).toContain("是我本人");
+    expect(result.content[0]?.text).toContain("--relationship \"本人\"");
     expect((result.details as any).question).toBe("今天发生了什么，和演示准备有关吗？");
   });
 
@@ -2247,6 +3405,8 @@ function createPayload(overrides: Record<string, unknown> = {}) {
       keyEventIds: [],
       keyArtifactIds: [],
     },
+    rollingDigests: [],
+    memoryCards: [],
     windows: [
       {
         windowId: "audio-session::1",

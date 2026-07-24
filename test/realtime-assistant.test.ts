@@ -220,6 +220,110 @@ describe("realtime assistant helpers", () => {
     vi.useRealTimers();
   });
 
+  it("uses daily review scope for concrete month-day questions", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-30T18:00:00+08:00"));
+    const buildAssistantContext = vi.fn(async (params) =>
+      createAssistantContextPayload({
+        date: params.date,
+        startAt: params.startAt ?? new Date("2026-06-25T00:00:00+08:00").getTime(),
+        endAt: params.endAt ?? new Date("2026-06-26T00:00:00+08:00").getTime(),
+      }),
+    );
+
+    const result = await buildRecentContextPayload({
+      reviewEngine: {
+        buildAssistantContext,
+      } as any,
+      artifactUrlBase: "/api/clawsense/artifacts",
+      windowHint: "last_60s",
+      question: "6月25日发生了什么？",
+      modeHint: "meeting",
+    });
+
+    expect(buildAssistantContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: "today",
+        date: "2026-06-25",
+      }),
+    );
+    expect(result.recentContext.windowHint).toBe("custom");
+    expect(result.recentContext.timeRange.label).toBe("2026-06-25 全天");
+    expect(result.recentContext.overview?.kind).toBe("day");
+
+    vi.useRealTimers();
+  });
+
+  it("uses daily review scope for spoken month-day questions that contain spaces", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-30T18:00:00+08:00"));
+    const buildAssistantContext = vi.fn(async (params) =>
+      createAssistantContextPayload({
+        date: params.date,
+        startAt: params.startAt ?? new Date("2026-06-25T00:00:00+08:00").getTime(),
+        endAt: params.endAt ?? new Date("2026-06-26T00:00:00+08:00").getTime(),
+      }),
+    );
+
+    const result = await buildRecentContextPayload({
+      reviewEngine: {
+        buildAssistantContext,
+      } as any,
+      artifactUrlBase: "/api/clawsense/artifacts",
+      windowHint: "last_60s",
+      question: "请问 6 月 25 日会议里发生了什么？",
+      modeHint: "meeting",
+    });
+
+    expect(buildAssistantContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: "today",
+        date: "2026-06-25",
+      }),
+    );
+    expect(result.recentContext.windowHint).toBe("custom");
+    expect(result.recentContext.timeRange.label).toBe("2026-06-25 全天");
+    expect(result.recentContext.overview?.kind).toBe("day");
+
+    vi.useRealTimers();
+  });
+
+  it("uses anchored concrete ranges for spoken past-hour recall", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-30T18:00:00+08:00"));
+    const buildAssistantContext = vi.fn(async (params) =>
+      createAssistantContextPayload({
+        startAt: params.startAt,
+        endAt: params.endAt,
+      }),
+    );
+
+    const result = await buildRecentContextPayload({
+      reviewEngine: {
+        buildAssistantContext,
+      } as any,
+      artifactUrlBase: "/api/clawsense/artifacts",
+      windowHint: "last_60s",
+      question: "以 2026-06-25 11:16 为结束时间，之前4小时我们聊了什么？",
+      modeHint: "meeting",
+    });
+
+    const expectedStart = new Date("2026-06-25T07:16:00+08:00").getTime();
+    const expectedEnd = new Date("2026-06-25T11:16:00+08:00").getTime();
+    expect(buildAssistantContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: "custom-range",
+        startAt: expectedStart,
+        endAt: expectedEnd,
+      }),
+    );
+    expect(result.recentContext.windowHint).toBe("custom");
+    expect(result.recentContext.timeRange.startAt).toBe(expectedStart);
+    expect(result.recentContext.timeRange.endAt).toBe(expectedEnd);
+
+    vi.useRealTimers();
+  });
+
   it("promotes auto recent discussion questions to the five-minute window", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-24T18:00:00+08:00"));
@@ -661,6 +765,39 @@ describe("realtime assistant helpers", () => {
     expect(answer.answerSpokenText.length).toBeLessThanOrEqual(96);
   });
 
+  it("answers named speaker questions from annotated evidence even when transcript omits the name", () => {
+    const context = {
+      ...createRecentContext(),
+      recentTranscriptSpans: [
+        {
+          windowId: "window-1",
+          eventId: "audio-1",
+          capturedAt: 1,
+          time: "15:29",
+          text: "明天先把报价单发出去，然后下午再确认测试排期。",
+          artifactUrl: "/api/clawsense/artifacts?id=artifact-audio-1",
+        },
+      ],
+      topEvidence: [
+        {
+          ...createRecentContext().topEvidence[0],
+          transcriptExcerpt: "明天先把报价单发出去，然后下午再确认测试排期。",
+          people: ["Amy"],
+        },
+      ],
+    };
+
+    const answer = answerAssistantQuery({
+      queryText: "Amy 刚才说了什么？",
+      recentContext: context,
+      answeredAt: 26,
+    });
+
+    expect(answer.answerText).toContain("Amy");
+    expect(answer.answerText).toContain("报价单");
+    expect(answer.answerText).not.toContain("还没有抓到 Amy");
+  });
+
   it("falls back gracefully when query transcription is empty", () => {
     const answer = answerAssistantQuery({
       queryText: "   ",
@@ -737,6 +874,18 @@ describe("realtime assistant helpers", () => {
     });
 
     expect(resolved.queryText).toBe("");
+    expect(resolved.reason).toBe("ambient_transcript_no_question");
+  });
+
+  it("rejects short interview-style ambient questions even in explicit query mode", () => {
+    const resolved = resolveAssistantQueryText({
+      queryText: "你们的 bug 怎么办？",
+      modeHint: "meeting",
+      explicitQuery: true,
+    });
+
+    expect(resolved.queryText).toBe("");
+    expect(resolved.rawQueryText).toBe("你们的 bug 怎么办？");
     expect(resolved.reason).toBe("ambient_transcript_no_question");
   });
 

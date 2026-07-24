@@ -39,6 +39,7 @@ If you are reviewing the project from the GitHub link, these files are the short
 - [Project proposal draft](./docs/grants/thinking-machines-interactivity-2026/proposal.md): research plan for ClawSense-Interact.
 - [Scripted demo narrative](./docs/grants/thinking-machines-interactivity-2026/scripted-demo-narrative.md): a consented retail consultation scenario that can be run without exposing real customer data.
 - [Prototype evidence summary](./docs/grants/thinking-machines-interactivity-2026/prototype-evidence.md): current implemented capabilities and validation commands.
+- [Validation guide](./docs/validation/README.md): non-device product gate, public meeting replay checks, and what still requires a real Android device.
 - [Android client guide](./android/README.md): phone-side pairing, sensing, and service behavior.
 - [Daily Review skill](./skills/clawsense-daily-review/SKILL.md): user-facing review workflow over captured evidence.
 
@@ -77,9 +78,13 @@ Common checks:
 ```bash
 npm run check
 npm test
+npm run check:non-device-product-gate
+npm run report:non-device-product-gate
 npm run check:release
 npm run check:phase9
 ```
+
+`check:non-device-product-gate` is the preferred host-side gate when no physical Android device is available. It validates evidence routing, historical recall, cached ASR/diarization replay, speaker annotation, active raw-audio diagnostics, and auto-video fixtures. `report:non-device-product-gate` reads the latest gate report without rerunning the long checks; if `freshness.isStale=true`, rerun the full gate before sign-off.
 
 Android build:
 
@@ -162,6 +167,7 @@ The media library is meant to be a same-host, same-origin, lightweight page. Exp
 - [当前阶段交付收口清单](./docs/当前阶段交付收口清单.md)
 - [当前阶段分批提交计划](./docs/当前阶段分批提交计划.md)
 - [当前阶段正式收口总结](./docs/当前阶段正式收口总结.md)
+- [v0.1.0 Beta Readiness](./docs/releases/v0.1.0-beta-readiness-2026-07-14.md)
 - [小白部署与使用指南](./docs/小白部署与使用指南.md)
 - [架构师交接摘要](./docs/架构师交接摘要.md)
 - [多 Agent 协作分工说明](./docs/多Agent协作分工说明.md)
@@ -331,31 +337,183 @@ For Android Video M2, `hostModelVideoMode=keyframes` is the recommended MVP sett
 
 ### Copy-Paste Setup: Local Open-Source ASR
 
-For realtime voice queries, ClawSense can use a local offline ASR model before falling back to any cloud STT provider. This is the preferred free-first path for personal and open-source deployments.
+For realtime voice queries and historical audio evidence, ClawSense can use a local offline ASR model before falling back to any cloud STT provider. This is the preferred free-first path for personal and open-source deployments.
 
-The first supported local backend is:
+Supported local backends:
 
-- `sherpa-onnx-sensevoice`
-- recommended model: `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09`
+- `whisper` — recommended global baseline; works well for international users.
+- `funasr` — recommended Chinese-first path; can expose sentence segments and optional speaker labels if the local FunASR model supports them.
+- `sherpa-onnx-sensevoice` — legacy built-in SenseVoice path; kept for existing deployments.
 
-Example host-side setup:
+Whisper example using the bundled faster-whisper wrapper:
+
+```bash
+python3 -m pip install faster-whisper
+chmod +x /absolute/path/to/ClawSense/scripts/local-asr/whisper-faster.py
+
+openclaw config set plugins.entries.clawsense.config.localAsrBackend "\"whisper\"" --strict-json
+openclaw config set plugins.entries.clawsense.config.localAsrWhisperCommand "\"/absolute/path/to/ClawSense/scripts/local-asr/whisper-faster.py\"" --strict-json
+openclaw config set plugins.entries.clawsense.config.localAsrWhisperModel "\"small\"" --strict-json
+openclaw config set plugins.entries.clawsense.config.localAsrLanguage "\"zh\"" --strict-json
+openclaw config set plugins.entries.clawsense.config.localAsrTimeoutMs "120000" --strict-json
+openclaw gateway restart --json || openclaw gateway start --json
+```
+
+FunASR example using the bundled local wrapper:
+
+```bash
+python3 -m pip install funasr modelscope
+chmod +x /absolute/path/to/ClawSense/scripts/local-asr/funasr-local.py
+
+openclaw config set plugins.entries.clawsense.config.localAsrBackend "\"funasr\"" --strict-json
+openclaw config set plugins.entries.clawsense.config.localAsrFunAsrCommand "\"/absolute/path/to/ClawSense/scripts/local-asr/funasr-local.py\"" --strict-json
+openclaw config set plugins.entries.clawsense.config.localAsrFunAsrModel "\"iic/SenseVoiceSmall\"" --strict-json
+openclaw config set plugins.entries.clawsense.config.localAsrLanguage "\"zh\"" --strict-json
+openclaw config set plugins.entries.clawsense.config.localAsrTimeoutMs "120000" --strict-json
+openclaw gateway restart --json || openclaw gateway start --json
+```
+
+WhisperX optional speaker diarization spike:
+
+```bash
+python3 -m venv .local/asr/whisperx-venv
+. .local/asr/whisperx-venv/bin/activate
+python -m pip install -U pip
+python -m pip install whisperx
+chmod +x /absolute/path/to/ClawSense/scripts/local-asr/whisperx-local.py
+
+# Optional but required for pyannote speaker labels.
+# You must accept the relevant pyannote model terms in Hugging Face first.
+scripts/local-asr/save-hf-token.sh
+source .local/asr/hf-token.env
+
+openclaw config set plugins.entries.clawsense.config.localAsrBackend "\"whisper\"" --strict-json
+openclaw config set plugins.entries.clawsense.config.localAsrWhisperCommand "\"/absolute/path/to/ClawSense/scripts/local-asr/whisperx-local.py\"" --strict-json
+openclaw config set plugins.entries.clawsense.config.localAsrWhisperModel "\"small\"" --strict-json
+openclaw config set plugins.entries.clawsense.config.localAsrLanguage "\"zh\"" --strict-json
+openclaw config set plugins.entries.clawsense.config.localAsrTimeoutMs "600000" --strict-json
+openclaw gateway restart --json || openclaw gateway start --json
+
+# Read-only check: does this route actually produce speaker labels?
+openclaw clawsense diarization-probe 2026-06-25 --provider whisperx --max 1
+```
+
+If `HF_TOKEN` is missing or pyannote cannot run, `whisperx-local.py` degrades to ASR-only output. That is still useful for transcripts, but `speakerReady` will remain false. WhisperX speaker diarization also requires the original audio file to still exist on disk; historical transcript-only records cannot be re-diarized without their source audio.
+
+Hybrid WhisperX + FunASR/CAM++ speaker-label spike:
+
+```bash
+# This route keeps WhisperX/Whisper for transcript quality and uses FunASR/CAM++
+# only as a local speaker timeline. It does not require pyannote gated access.
+chmod +x /absolute/path/to/ClawSense/scripts/local-asr/hybrid-whisper-funasr.py
+
+openclaw config set plugins.entries.clawsense.config.localAsrBackend "\"whisper\"" --strict-json
+openclaw config set plugins.entries.clawsense.config.localAsrWhisperCommand "\"/absolute/path/to/ClawSense/scripts/local-asr/hybrid-whisper-funasr.py\"" --strict-json
+openclaw config set plugins.entries.clawsense.config.localAsrWhisperModel "\"small\"" --strict-json
+openclaw config set plugins.entries.clawsense.config.localAsrLanguage "\"zh\"" --strict-json
+openclaw config set plugins.entries.clawsense.config.localAsrTimeoutMs "600000" --strict-json
+
+# The hybrid wrapper calls two child commands. Use runner scripts when the
+# dependencies live in virtualenvs.
+export CLAWSENSE_HYBRID_ASR_COMMAND="/absolute/path/to/ClawSense/.local/asr/whisperx-runner.sh"
+export CLAWSENSE_HYBRID_SPEAKER_COMMAND="/absolute/path/to/ClawSense/.local/asr/funasr-runner.sh"
+export CLAWSENSE_HYBRID_FUNASR_MODEL="iic/SenseVoiceSmall"
+export CLAWSENSE_HYBRID_SPEAKER_MODEL="cam++"
+
+openclaw clawsense diarization-probe 2026-06-25 --provider hybrid --max 1
+```
+
+Use `hybrid` as a practical open-source fallback when pyannote is blocked. The transcript comes from WhisperX/Whisper; speaker labels are assigned by time overlap from FunASR/CAM++, so long transcript segments may only get the dominant speaker rather than word-level attribution. Numeric speaker ids from local tools are normalized into `speaker_1`, `speaker_2`, etc. so user annotations can attach consistently.
+
+For Chinese meeting-heavy deployments, prefer FunASR as the primary transcript source. The same hybrid wrapper can run FunASR/SenseVoice for transcript and FunASR/CAM++ for speaker timeline:
+
+```bash
+export CLAWSENSE_HYBRID_ASR_COMMAND="/absolute/path/to/ClawSense/.local/asr/funasr-runner.sh"
+export CLAWSENSE_HYBRID_SPEAKER_COMMAND="/absolute/path/to/ClawSense/.local/asr/funasr-runner.sh"
+export CLAWSENSE_HYBRID_FUNASR_MODEL="iic/SenseVoiceSmall"
+export CLAWSENSE_HYBRID_SPEAKER_MODEL="cam++"
+export CLAWSENSE_FUNASR_PUNC_MODEL="none"
+```
+
+Optional public Chinese meeting checks:
+
+```bash
+npm run check:public-zh-meeting
+CLAWSENSE_PUBLIC_ZH_MEETING_PREPARE_CLIP=1 npm run check:public-zh-meeting
+CLAWSENSE_PUBLIC_ZH_MEETING_RUN_ASR=1 npm run check:public-zh-meeting
+npm run check:public-zh-replay
+```
+
+Validation notes live in [docs/validation/README.md](./docs/validation/README.md). Public-sample ASR details are in [docs/validation/local-asr-public-sample-validation-2026-07-02.md](./docs/validation/local-asr-public-sample-validation-2026-07-02.md).
+
+Legacy sherpa-onnx/SenseVoice example:
 
 ```bash
 openclaw config set plugins.entries.clawsense.config.localAsrBackend "\"sherpa-onnx-sensevoice\"" --strict-json
 openclaw config set plugins.entries.clawsense.config.localAsrModelDir "\"/absolute/path/to/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09\"" --strict-json
-openclaw config set plugins.entries.clawsense.config.localAsrLanguage "\"auto\"" --strict-json
+openclaw config set plugins.entries.clawsense.config.localAsrLanguage "\"zh\"" --strict-json
 openclaw config set plugins.entries.clawsense.config.localAsrNumThreads "2" --strict-json
 openclaw gateway restart --json || openclaw gateway start --json
 ```
 
-When enabled, assistant query transcription tries:
+When enabled, audio transcription tries:
 
 1. OpenClaw runtime STT
 2. local offline ASR
-3. OpenAI-compatible STT fallback
-4. primary multimodal audio understanding
+3. primary multimodal audio understanding
+4. OpenAI-compatible STT fallback
 
-This lets the realtime assistant answer spoken questions without requiring an API key, as long as the host has the local model files installed.
+The local command wrapper may output plain text or JSON. JSON can include `transcript`/`text` and optional `segments` with `startMs`, `endMs`, `text`, `speakerLabel`, and `confidence`. ClawSense stores these as `transcriptSegments`, so later review questions can reason over smaller speech spans instead of one coarse audio blob.
+
+Historical ASR worker:
+
+```bash
+# First inspect the local backend.
+openclaw clawsense asr-status
+
+# Safe dry-run on one date. This does not write transcripts back.
+openclaw clawsense asr-worker run-once 2026-06-25 --dry-run --max 3 --batch 1
+
+# Safe dry-run with explicit speaker diarization env for a WhisperX wrapper.
+openclaw clawsense asr-worker run-once 2026-06-25 \
+  --provider local-asr \
+  --diarization-provider whisperx \
+  --dry-run \
+  --max 1 \
+  --batch 1
+
+# Or use the hybrid fallback when pyannote gated access is unavailable.
+openclaw clawsense asr-worker run-once 2026-06-25 \
+  --provider local-asr \
+  --diarization-provider hybrid \
+  --dry-run \
+  --max 1 \
+  --batch 1
+
+# When dry-run looks healthy, run a small real batch.
+openclaw clawsense asr-worker run-once 2026-06-25 --max 3 --batch 1
+
+# If the WhisperX dry-run shows speaker labels, write back only a tiny batch first.
+openclaw clawsense asr-worker run-once 2026-06-25 \
+  --provider local-asr \
+  --diarization-provider whisperx \
+  --max 1 \
+  --batch 1
+
+# Optional automatic background worker. Keep small batches on low-power hosts.
+openclaw config set plugins.entries.clawsense.config.asrWorkerEnabled true --strict-json
+openclaw config set plugins.entries.clawsense.config.asrWorkerIntervalSeconds 900 --strict-json
+openclaw config set plugins.entries.clawsense.config.asrWorkerBatchSize 1 --strict-json
+openclaw config set plugins.entries.clawsense.config.asrWorkerMaxJobs 12 --strict-json
+openclaw config set plugins.entries.clawsense.config.asrWorkerLookbackDays 2 --strict-json
+openclaw config set plugins.entries.clawsense.config.asrWorkerProvider "\"local-asr\"" --strict-json
+openclaw config set plugins.entries.clawsense.config.asrWorkerIncludeTranscribed true --strict-json
+openclaw gateway restart --json || openclaw gateway start --json
+
+openclaw clawsense asr-worker status
+```
+
+The worker is disabled by default because local ASR can be CPU-heavy. Start with `--dry-run`, keep `asrWorkerBatchSize` small, and only enable background processing after `asr-status` reports `ready=true`.
 
 ### Portability Rules
 

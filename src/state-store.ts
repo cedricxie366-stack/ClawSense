@@ -8,6 +8,7 @@ import {
   normalizeSemanticText,
   parseClawSenseAudioSessionHint,
 } from "./utils.js";
+import type { AudioSpeakerTimelineSegment, AudioTranscriptSegment } from "./openai-client.js";
 import type { PluginLogger } from "./openclaw-types.js";
 
 const STATE_RELATIVE_DIR = ["plugins", "clawsense"] as const;
@@ -63,6 +64,8 @@ export type ClawSenseCaptureEvent = {
   modality: "audio" | "image" | "video";
   summary: string;
   transcript?: string;
+  transcriptSegments?: AudioTranscriptSegment[];
+  speakerTimelineSegments?: AudioSpeakerTimelineSegment[];
   note?: string;
   createdAt: number;
   capturedAt: number;
@@ -73,11 +76,12 @@ export type ClawSenseCaptureEvent = {
     | "runtime-stt"
     | "runtime-stt-fallback"
     | "openai-stt-fallback"
+    | "local-asr"
     | "metadata-only";
   analysisProvider?: string;
   analysisStatus?: "succeeded" | "degraded";
   analysisFailureReason?: string;
-  sttProvider?: "runtime" | "openai-fallback" | "compatible-fallback";
+  sttProvider?: "runtime" | "openai-fallback" | "compatible-fallback" | "local-asr";
   lastAudioBackfillAttemptAt?: number;
   audioBackfillAttemptCount?: number;
   captureContext: "audio-window" | "active-window" | "baseline-snapshot";
@@ -96,6 +100,8 @@ export type ClawSenseMemoryJournal = {
   modality: "audio" | "image" | "video";
   summary: string;
   transcript?: string;
+  transcriptSegments?: AudioTranscriptSegment[];
+  speakerTimelineSegments?: AudioSpeakerTimelineSegment[];
   note?: string;
   createdAt: number;
   embeddingModel?: string;
@@ -116,6 +122,8 @@ export type ClawSenseIngestReceipt = {
   modality: "audio" | "image" | "video";
   summary: string;
   transcript?: string;
+  transcriptSegments?: AudioTranscriptSegment[];
+  speakerTimelineSegments?: AudioSpeakerTimelineSegment[];
   createdAt: number;
   storedAt: string;
   namespace: string;
@@ -203,6 +211,79 @@ export type ClawSenseDailyConsolidation = {
   };
 };
 
+export type ClawSenseConversationDigestSnapshot = {
+  digestId: string;
+  date: string;
+  scope: "last-hour" | "today" | "custom-range";
+  startAt: number;
+  endAt: number;
+  generatedAt: number;
+  sourceEventCount: number;
+  sourceWindowCount: number;
+  transcriptWindowCount: number;
+  summary: string;
+  topicIndex: Array<{
+    index: number;
+    windowId: string;
+    timeRange: string;
+    title: string;
+    summary: string;
+    keywordHints: string[];
+    taskHints: string[];
+    transcriptExcerpt?: string;
+  }>;
+  keywordIndex: Array<{
+    keyword: string;
+    topicIndexes: number[];
+  }>;
+};
+
+export type ClawSenseMemoryCard = {
+  cardId: string;
+  date: string;
+  scope: ClawSenseConversationDigestSnapshot["scope"];
+  kind: "task" | "topic" | "attention" | "learning";
+  title: string;
+  summary: string;
+  status: "active" | "archived";
+  confidence: "medium" | "low";
+  startAt: number;
+  endAt: number;
+  lastSeenAt: number;
+  createdAt: number;
+  updatedAt: number;
+  keywords: string[];
+  source: "rolling-digest";
+  evidence: {
+    digestId: string;
+    topicIndexes: number[];
+    windowIds: string[];
+    timeRanges: string[];
+    taskHints: string[];
+    transcriptExcerpts: string[];
+  };
+};
+
+export type ClawSenseSemanticRefreshChange = {
+  eventId: string;
+  modality: ClawSenseCaptureEvent["modality"];
+  capturedAt: number;
+  previousProjectRefs: string[];
+  nextProjectRefs: string[];
+  previousTags: string[];
+  nextTags: string[];
+};
+
+export type ClawSenseSemanticRefreshResult = {
+  ok: true;
+  apply: boolean;
+  date?: string;
+  scannedEvents: number;
+  changedEvents: number;
+  invalidatedDates: string[];
+  sampleChanges: ClawSenseSemanticRefreshChange[];
+};
+
 type StoredStateV1 = {
   version: 1;
   setupTokens: ClawSenseSetupToken[];
@@ -232,6 +313,8 @@ type StoredState = {
   speakers: ClawSenseSpeakerAnnotation[];
   reviews: ClawSenseDailyReview[];
   consolidations: ClawSenseDailyConsolidation[];
+  conversationDigests: ClawSenseConversationDigestSnapshot[];
+  memoryCards: ClawSenseMemoryCard[];
 };
 
 const EMPTY_STATE: StoredState = {
@@ -245,6 +328,8 @@ const EMPTY_STATE: StoredState = {
   speakers: [],
   reviews: [],
   consolidations: [],
+  conversationDigests: [],
+  memoryCards: [],
 };
 
 export class ClawSenseStateStore {
@@ -255,6 +340,10 @@ export class ClawSenseStateStore {
   constructor(params: { resolveStateDir: () => string; logger: PluginLogger }) {
     this.resolveStateDir = params.resolveStateDir;
     this.logger = params.logger;
+  }
+
+  getStateDir(): string {
+    return this.resolveStateDir();
   }
 
   async listSetupTokens(): Promise<ClawSenseSetupToken[]> {
@@ -397,6 +486,8 @@ export class ClawSenseStateStore {
     modality: "audio" | "image" | "video";
     summary: string;
     transcript?: string;
+    transcriptSegments?: AudioTranscriptSegment[];
+    speakerTimelineSegments?: AudioSpeakerTimelineSegment[];
     note?: string;
     createdAt: number;
     capturedAt: number;
@@ -455,6 +546,8 @@ export class ClawSenseStateStore {
         modality: params.modality,
         summary: params.summary,
         transcript: params.transcript,
+        transcriptSegments: params.transcriptSegments,
+        speakerTimelineSegments: params.speakerTimelineSegments,
         note: params.note,
         createdAt: params.createdAt,
         capturedAt: params.capturedAt,
@@ -483,6 +576,8 @@ export class ClawSenseStateStore {
         modality: params.modality,
         summary: params.summary,
         transcript: params.transcript,
+        transcriptSegments: params.transcriptSegments,
+        speakerTimelineSegments: params.speakerTimelineSegments,
         note: params.note,
         createdAt: params.createdAt,
         embeddingModel: params.embeddingModel,
@@ -524,10 +619,44 @@ export class ClawSenseStateStore {
     return (await this.readState()).events.filter((event) => toLocalDateKey(event.capturedAt) === date);
   }
 
+  async refreshEventSemanticSignals(params?: {
+    date?: string;
+    apply?: boolean;
+    maxSamples?: number;
+  }): Promise<ClawSenseSemanticRefreshResult> {
+    const apply = Boolean(params?.apply);
+    const maxSamples = Math.max(0, Math.min(50, Math.floor(params?.maxSamples ?? 12)));
+    if (!apply) {
+      const state = await this.readState();
+      const plan = buildSemanticRefreshPlan(state, {
+        date: params?.date,
+        apply: false,
+        maxSamples,
+      });
+      return plan.result;
+    }
+
+    return await this.mutate((state) => {
+      const plan = buildSemanticRefreshPlan(state, {
+        date: params?.date,
+        apply: true,
+        maxSamples,
+      });
+      if (plan.result.changedEvents > 0) {
+        state.events = plan.nextEvents;
+        state.reviews = state.reviews.filter((review) => !plan.invalidatedDateSet.has(review.date));
+        state.consolidations = state.consolidations.filter((item) => !plan.invalidatedDateSet.has(item.date));
+      }
+      return plan.result;
+    });
+  }
+
   async backfillCaptureAnalysis(params: {
     artifactId: string;
     summary?: string;
     transcript?: string;
+    transcriptSegments?: AudioTranscriptSegment[];
+    speakerTimelineSegments?: AudioSpeakerTimelineSegment[];
     analysisMode?: ClawSenseCaptureEvent["analysisMode"];
     analysisProvider?: ClawSenseCaptureEvent["analysisProvider"];
     analysisStatus?: ClawSenseCaptureEvent["analysisStatus"];
@@ -540,6 +669,8 @@ export class ClawSenseStateStore {
     return await this.mutate((state) => {
       const normalizedTranscript = normalizeSemanticText(params.transcript) || undefined;
       const normalizedSummary = normalizeSemanticText(params.summary) || undefined;
+      const normalizedTranscriptSegments = normalizeTranscriptSegments(params.transcriptSegments);
+      const normalizedSpeakerTimelineSegments = normalizeTranscriptSegments(params.speakerTimelineSegments);
       const attemptedAt = params.attemptedAt ?? Date.now();
       let updated = false;
       let nextEvent: ClawSenseCaptureEvent | null = null;
@@ -554,6 +685,20 @@ export class ClawSenseStateStore {
         const nextTranscript = normalizedTranscript ?? event.transcript;
         if (normalizedTranscript && normalizedTranscript !== event.transcript) {
           next = { ...next, transcript: normalizedTranscript };
+          updated = true;
+        }
+        if (
+          normalizedTranscriptSegments &&
+          !sameTranscriptSegments(normalizedTranscriptSegments, event.transcriptSegments)
+        ) {
+          next = { ...next, transcriptSegments: normalizedTranscriptSegments };
+          updated = true;
+        }
+        if (
+          normalizedSpeakerTimelineSegments &&
+          !sameTranscriptSegments(normalizedSpeakerTimelineSegments, event.speakerTimelineSegments)
+        ) {
+          next = { ...next, speakerTimelineSegments: normalizedSpeakerTimelineSegments };
           updated = true;
         }
 
@@ -635,6 +780,18 @@ export class ClawSenseStateStore {
         let next = entry;
         if (normalizedTranscript && normalizedTranscript !== entry.transcript) {
           next = { ...next, transcript: normalizedTranscript };
+        }
+        if (
+          normalizedTranscriptSegments &&
+          !sameTranscriptSegments(normalizedTranscriptSegments, entry.transcriptSegments)
+        ) {
+          next = { ...next, transcriptSegments: normalizedTranscriptSegments };
+        }
+        if (
+          normalizedSpeakerTimelineSegments &&
+          !sameTranscriptSegments(normalizedSpeakerTimelineSegments, entry.speakerTimelineSegments)
+        ) {
+          next = { ...next, speakerTimelineSegments: normalizedSpeakerTimelineSegments };
         }
         if (
           normalizedSummary &&
@@ -852,6 +1009,75 @@ export class ClawSenseStateStore {
     });
   }
 
+  async listConversationDigests(params: {
+    date?: string;
+    startAt?: number;
+    endAt?: number;
+    scope?: ClawSenseConversationDigestSnapshot["scope"];
+  } = {}): Promise<ClawSenseConversationDigestSnapshot[]> {
+    return (await this.readState()).conversationDigests
+      .filter((digest) => !params.date || digest.date === params.date)
+      .filter((digest) => !params.scope || digest.scope === params.scope)
+      .filter((digest) => !Number.isFinite(params.startAt) || digest.endAt >= Number(params.startAt))
+      .filter((digest) => !Number.isFinite(params.endAt) || digest.startAt <= Number(params.endAt))
+      .sort((left, right) => right.generatedAt - left.generatedAt);
+  }
+
+  async putConversationDigest(digest: ClawSenseConversationDigestSnapshot): Promise<void> {
+    await this.mutate((state) => {
+      state.conversationDigests = state.conversationDigests
+        .filter((item) => item.digestId !== digest.digestId)
+        .concat(digest)
+        .sort((left, right) => left.startAt - right.startAt || left.digestId.localeCompare(right.digestId))
+        .slice(-100);
+    });
+  }
+
+  async listMemoryCards(params: {
+    date?: string;
+    startAt?: number;
+    endAt?: number;
+    scope?: ClawSenseConversationDigestSnapshot["scope"];
+    kind?: ClawSenseMemoryCard["kind"];
+  } = {}): Promise<ClawSenseMemoryCard[]> {
+    return (await this.readState()).memoryCards
+      .filter((card) => !params.date || card.date === params.date)
+      .filter((card) => !params.scope || card.scope === params.scope)
+      .filter((card) => !params.kind || card.kind === params.kind)
+      .filter((card) => !Number.isFinite(params.startAt) || card.endAt >= Number(params.startAt))
+      .filter((card) => !Number.isFinite(params.endAt) || card.startAt <= Number(params.endAt))
+      .sort((left, right) => {
+        const kindPriority = memoryCardKindPriority(left.kind) - memoryCardKindPriority(right.kind);
+        return kindPriority || right.lastSeenAt - left.lastSeenAt || left.title.localeCompare(right.title);
+      });
+  }
+
+  async putMemoryCards(cards: ClawSenseMemoryCard[]): Promise<void> {
+    if (cards.length === 0) {
+      return;
+    }
+    await this.mutate((state) => {
+      const byId = new Map(state.memoryCards.map((card) => [card.cardId, card]));
+      const semanticKeyToId = new Map(
+        state.memoryCards.map((card) => [memoryCardSemanticKey(card), card.cardId]),
+      );
+      for (const card of mergeSemanticallyDuplicateMemoryCards(cards)) {
+        const semanticKey = memoryCardSemanticKey(card);
+        const existingId = byId.has(card.cardId) ? card.cardId : semanticKeyToId.get(semanticKey);
+        const targetId = existingId ?? card.cardId;
+        const existing = byId.get(targetId);
+        const nextCard = existing
+          ? mergeMemoryCard(existing, { ...card, cardId: targetId })
+          : card;
+        byId.set(targetId, nextCard);
+        semanticKeyToId.set(semanticKey, targetId);
+      }
+      state.memoryCards = mergeSemanticallyDuplicateMemoryCards(Array.from(byId.values()))
+        .sort((left, right) => left.startAt - right.startAt || left.cardId.localeCompare(right.cardId))
+        .slice(-300);
+    });
+  }
+
   async pruneExpiredArtifacts(now = Date.now()): Promise<ClawSenseArtifactRecord[]> {
     return await this.mutate((state) => {
       const removed: ClawSenseArtifactRecord[] = [];
@@ -914,6 +1140,12 @@ export class ClawSenseStateStore {
           reviews: Array.isArray((parsed as StoredState).reviews) ? (parsed as StoredState).reviews : [],
           consolidations: Array.isArray((parsed as StoredState).consolidations)
             ? (parsed as StoredState).consolidations
+            : [],
+          conversationDigests: Array.isArray((parsed as StoredState).conversationDigests)
+            ? (parsed as StoredState).conversationDigests
+            : [],
+          memoryCards: Array.isArray((parsed as StoredState).memoryCards)
+            ? (parsed as StoredState).memoryCards
             : [],
         };
         return await this.repairStateIfNeeded(normalized);
@@ -1009,6 +1241,8 @@ function migrateV1(previous: StoredStateV1): StoredState {
     speakers: [],
     reviews: [],
     consolidations: [],
+    conversationDigests: [],
+    memoryCards: [],
   };
 
   for (const item of Array.isArray(previous.journal) ? previous.journal : []) {
@@ -1084,6 +1318,85 @@ function migrateV1(previous: StoredStateV1): StoredState {
   return next;
 }
 
+function memoryCardKindPriority(kind: ClawSenseMemoryCard["kind"]): number {
+  switch (kind) {
+    case "task":
+      return 0;
+    case "attention":
+      return 1;
+    case "learning":
+      return 2;
+    case "topic":
+      return 3;
+  }
+}
+
+function mergeSemanticallyDuplicateMemoryCards(cards: ClawSenseMemoryCard[]): ClawSenseMemoryCard[] {
+  const bySemanticKey = new Map<string, ClawSenseMemoryCard>();
+  for (const card of cards) {
+    const semanticKey = memoryCardSemanticKey(card);
+    const existing = bySemanticKey.get(semanticKey);
+    bySemanticKey.set(semanticKey, existing ? mergeMemoryCard(existing, card) : card);
+  }
+  return Array.from(bySemanticKey.values());
+}
+
+function memoryCardSemanticKey(card: ClawSenseMemoryCard): string {
+  const normalizedTitle = normalizeSemanticText(card.title || card.summary || card.cardId);
+  return [card.date, card.scope, card.kind, normalizedTitle].join(":");
+}
+
+function mergeMemoryCard(existing: ClawSenseMemoryCard, incoming: ClawSenseMemoryCard): ClawSenseMemoryCard {
+  const latest = incoming.lastSeenAt >= existing.lastSeenAt ? incoming : existing;
+  return {
+    ...latest,
+    cardId: existing.cardId,
+    date: existing.date,
+    scope: existing.scope,
+    kind: existing.kind,
+    title: existing.title || incoming.title,
+    summary: chooseMemoryCardSummary(existing.summary, incoming.summary),
+    status: existing.status === "active" || incoming.status === "active" ? "active" : latest.status,
+    confidence: existing.confidence === "medium" || incoming.confidence === "medium" ? "medium" : "low",
+    startAt: Math.min(existing.startAt, incoming.startAt),
+    endAt: Math.max(existing.endAt, incoming.endAt),
+    lastSeenAt: Math.max(existing.lastSeenAt, incoming.lastSeenAt),
+    createdAt: Math.min(existing.createdAt, incoming.createdAt),
+    updatedAt: Math.max(existing.updatedAt, incoming.updatedAt),
+    keywords: normalizeStringList(existing.keywords.concat(incoming.keywords)).slice(0, 12),
+    source: existing.source,
+    evidence: {
+      digestId: latest.evidence.digestId,
+      topicIndexes: uniqueNumbers(existing.evidence.topicIndexes.concat(incoming.evidence.topicIndexes)).slice(0, 24),
+      windowIds: normalizeStringList(existing.evidence.windowIds.concat(incoming.evidence.windowIds)).slice(0, 24),
+      timeRanges: normalizeStringList(existing.evidence.timeRanges.concat(incoming.evidence.timeRanges)).slice(0, 24),
+      taskHints: normalizeStringList(existing.evidence.taskHints.concat(incoming.evidence.taskHints)).slice(0, 12),
+      transcriptExcerpts: normalizeStringList(
+        existing.evidence.transcriptExcerpts.concat(incoming.evidence.transcriptExcerpts),
+      ).slice(0, 12),
+    },
+  };
+}
+
+function chooseMemoryCardSummary(left: string, right: string): string {
+  const normalizedLeft = normalizeSemanticText(left);
+  const normalizedRight = normalizeSemanticText(right);
+  if (!normalizedLeft) {
+    return right;
+  }
+  if (!normalizedRight || normalizedLeft === normalizedRight || normalizedLeft.includes(normalizedRight)) {
+    return left;
+  }
+  if (normalizedRight.includes(normalizedLeft)) {
+    return right;
+  }
+  return right.length > left.length ? right : left;
+}
+
+function uniqueNumbers(values: number[]): number[] {
+  return Array.from(new Set(values.filter((value) => Number.isFinite(value)))).sort((left, right) => left - right);
+}
+
 function normalizeStringList(values: string[] | undefined): string[] {
   return Array.from(
     new Set(
@@ -1094,10 +1407,109 @@ function normalizeStringList(values: string[] | undefined): string[] {
   );
 }
 
+function normalizeTranscriptSegments(
+  segments: AudioTranscriptSegment[] | undefined,
+): AudioTranscriptSegment[] | undefined {
+  const normalized = (segments ?? [])
+    .map((segment) => {
+      const text = normalizeSemanticText(segment.text);
+      if (!text) {
+        return null;
+      }
+      return {
+        ...(typeof segment.startMs === "number" && Number.isFinite(segment.startMs)
+          ? { startMs: Math.max(0, Math.round(segment.startMs)) }
+          : {}),
+        ...(typeof segment.endMs === "number" && Number.isFinite(segment.endMs)
+          ? { endMs: Math.max(0, Math.round(segment.endMs)) }
+          : {}),
+        text,
+        ...(segment.speakerLabel ? { speakerLabel: normalizeSemanticText(segment.speakerLabel) } : {}),
+        ...(typeof segment.confidence === "number" && Number.isFinite(segment.confidence)
+          ? { confidence: segment.confidence }
+          : {}),
+      };
+    })
+    .filter((segment): segment is AudioTranscriptSegment => Boolean(segment));
+  return normalized.length > 0 ? normalized : undefined;
+}
+
 type DerivedEventSemanticSignals = {
   projectRefs: string[];
   tags: string[];
 };
+
+function buildSemanticRefreshPlan(
+  state: StoredState,
+  params: {
+    date?: string;
+    apply: boolean;
+    maxSamples: number;
+  },
+): {
+  nextEvents: ClawSenseCaptureEvent[];
+  invalidatedDateSet: Set<string>;
+  result: ClawSenseSemanticRefreshResult;
+} {
+  const invalidatedDateSet = new Set<string>();
+  const sampleChanges: ClawSenseSemanticRefreshChange[] = [];
+  let scannedEvents = 0;
+  let changedEvents = 0;
+
+  const nextEvents = state.events.map((event) => {
+    const eventDate = toLocalDateKey(event.capturedAt);
+    if (params.date && eventDate !== params.date) {
+      return event;
+    }
+    scannedEvents += 1;
+    const nextSignals = deriveEventSemanticSignals({
+      summary: event.summary,
+      transcript: event.transcript,
+      note: event.note,
+      modality: event.modality,
+    });
+    const nextTags = Array.from(new Set([event.captureContext, ...nextSignals.tags]));
+    const projectRefsChanged = !sameStringList(nextSignals.projectRefs, event.projectRefs);
+    const tagsChanged = !sameStringList(nextTags, event.tags);
+    if (!projectRefsChanged && !tagsChanged) {
+      return event;
+    }
+
+    changedEvents += 1;
+    invalidatedDateSet.add(eventDate);
+    if (sampleChanges.length < params.maxSamples) {
+      sampleChanges.push({
+        eventId: event.eventId,
+        modality: event.modality,
+        capturedAt: event.capturedAt,
+        previousProjectRefs: event.projectRefs,
+        nextProjectRefs: nextSignals.projectRefs,
+        previousTags: event.tags,
+        nextTags,
+      });
+    }
+
+    return {
+      ...event,
+      projectRefs: nextSignals.projectRefs,
+      tags: nextTags,
+    };
+  });
+
+  return {
+    nextEvents,
+    invalidatedDateSet,
+    result: {
+      ok: true,
+      apply: params.apply,
+      ...(params.date ? { date: params.date } : {}),
+      scannedEvents,
+      changedEvents,
+      invalidatedDates: Array.from(invalidatedDateSet).sort(),
+      sampleChanges,
+    },
+  };
+}
 
 const EVENT_SIGNAL_RULES: Array<{
   projectRef: string;
@@ -1118,6 +1530,31 @@ const EVENT_SIGNAL_RULES: Array<{
     projectRef: "meeting_notes",
     tags: ["meeting", "meeting-notes"],
     patterns: [/会议纪要/u, /会议记录/u, /\bminutes\b/i],
+  },
+  {
+    projectRef: "ai_coaching",
+    tags: ["office", "ai-coaching", "training"],
+    patterns: [/AI\s*陪练/iu, /智能陪练/u, /客服陪练/u, /陪练系统/u, /对练/u, /剧本生成/u, /生成剧本/u],
+  },
+  {
+    projectRef: "corpus_sync",
+    tags: ["office", "corpus", "data-sync"],
+    patterns: [/语料库/u, /真实语料/u, /聊天记录语料/u, /语料同步/u, /离线数据/u, /数仓/u, /数据源/u],
+  },
+  {
+    projectRef: "assessment_rubric",
+    tags: ["office", "assessment", "rubric"],
+    patterns: [/考核点/u, /得分维度/u, /扣分维度/u, /评分维度/u, /考试.*练习/u, /考核.*通过率/u],
+  },
+  {
+    projectRef: "ai_report_optimization",
+    tags: ["office", "report", "ai-report"],
+    patterns: [/陪练.*报告/u, /综合报告/u, /报表.*优化/u, /缺陷项/u, /通过率/u, /对话记录.*考核点/u],
+  },
+  {
+    projectRef: "training_arrangement",
+    tags: ["office", "training-plan"],
+    patterns: [/培训安排/u, /物流培训/u, /海南物流/u, /上海物流/u, /工单流程/u, /角色讲解/u],
   },
   {
     projectRef: "report_followup",
@@ -1186,7 +1623,7 @@ function deriveEventSemanticSignals(params: {
   if (/(老师|课堂|课程|作业|复习|考试|实验|教室|\bclass\b|\blecture\b|\bstudy\b|\bhomework\b|\bexam\b|\blab\b)/i.test(combined)) {
     tags.push("study");
   }
-  if (/(朋友|聚会|吃饭|派对|聊天|\bparty\b|\bsocial\b|\bdinner\b)/i.test(combined)) {
+  if (/(朋友|聚会|吃饭|派对|闲聊|和朋友聊|朋友.{0,12}聊|\bparty\b|\bsocial\b|\bdinner\b)/i.test(combined)) {
     tags.push("social");
   }
 
@@ -1227,6 +1664,16 @@ function sameStringList(left: string[] | undefined, right: string[] | undefined)
     return false;
   }
   return normalizedLeft.every((value, index) => value === normalizedRight[index]);
+}
+
+function sameTranscriptSegments(
+  left: AudioTranscriptSegment[] | undefined,
+  right: AudioTranscriptSegment[] | undefined,
+): boolean {
+  return (
+    JSON.stringify(normalizeTranscriptSegments(left) ?? []) ===
+    JSON.stringify(normalizeTranscriptSegments(right) ?? [])
+  );
 }
 
 function shouldAdoptBackfilledSummary(

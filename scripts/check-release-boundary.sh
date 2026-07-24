@@ -30,7 +30,18 @@ bash -n scripts/run-final-live-validation.sh
 node --check scripts/index-stage-final-reports.mjs
 node --check scripts/check-stage-final-doctor.mjs
 node --check scripts/check-phase9-fixtures.mjs
+node --check scripts/check-evidence-v2-smoke.mjs
+node --check scripts/check-local-openclaw-evidence-smoke.mjs
+node --check scripts/check-conversation-evidence-routing-smoke.mjs
+node --check scripts/check-public-wav-asr-smoke.mjs
+node --check scripts/check-public-ami-replay-cli-smoke.mjs
+node --check scripts/check-public-zh-meeting-sample.mjs
+node --check scripts/check-public-zh-meeting-replay-cli-smoke.mjs
+node --check scripts/check-non-device-product-gate.mjs
 node --check scripts/summarize-android-live-report.mjs
+
+echo "[check:release] evidence-v2 smoke"
+npm run check:evidence-v2
 
 echo "[check:release] phase9 fixture smoke"
 npm run check:phase9
@@ -98,6 +109,7 @@ const forbiddenExact = new Set([
 
 const forbidden = [...files].filter((file) => {
   if (forbiddenExact.has(file) || file.endsWith("/.DS_Store")) return true;
+  if (/^scripts\/local-asr\/[^/]+\.py$/.test(file)) return false;
   return forbiddenPrefixes.some((prefix) => file.startsWith(prefix));
 });
 

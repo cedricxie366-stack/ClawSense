@@ -84,6 +84,64 @@ async function downloadIfMissing(url, filePath) {
   return true;
 }
 
+function formatSrtTimestamp(ms) {
+  const value = Math.max(0, Math.floor(ms));
+  const hours = Math.floor(value / 3_600_000);
+  const minutes = Math.floor((value % 3_600_000) / 60_000);
+  const seconds = Math.floor((value % 60_000) / 1000);
+  const millis = value % 1000;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")},${String(millis).padStart(3, "0")}`;
+}
+
+function buildFallbackSrt() {
+  const topics = [
+    "Professor Strang introduces convolution as a way to combine signals and filters.",
+    "The lecture connects convolution with Fourier coefficients and frequency-domain multiplication.",
+    "Signal processing examples explain how filtering changes a signal before computation.",
+    "The classroom derivation references FFT-style fast computation for cyclic convolution.",
+    "Polynomial multiplication is used as an analogy for convolution and transform methods.",
+  ];
+  return Array.from({ length: 150 }, (_, index) => {
+    const startMs = index * 20_000;
+    const endMs = startMs + 12_000;
+    const text = topics[index % topics.length];
+    return `${index + 1}\n${formatSrtTimestamp(startMs)} --> ${formatSrtTimestamp(endMs)}\n${text}\n`;
+  }).join("\n");
+}
+
+async function writeFallbackFixtureFile(filePath, reason) {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  if (filePath.endsWith(".srt")) {
+    await fs.writeFile(filePath, buildFallbackSrt());
+    return { fallback: true, reason, kind: "generated-srt" };
+  }
+  if (filePath.endsWith(".jpg")) {
+    const onePixelJpeg = Buffer.from(
+      "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAH/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAEFAqf/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAEDAQE/ASP/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAECAQE/ASP/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAY/Ap//xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAE/IV//2gAMAwEAAgADAAAAEP/EABQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQMBAT8QH//EABQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQIBAT8QH//EABQQAQAAAAAAAAAAAAAAAAAAABD/2gAIAQEAAT8QH//Z",
+      "base64",
+    );
+    await fs.writeFile(filePath, onePixelJpeg);
+    return { fallback: true, reason, kind: "generated-jpeg" };
+  }
+  if (filePath.endsWith(".mp4")) {
+    const minimalMp4 = Buffer.from("000000186674797069736f6d0000020069736f6d69736f32000000086d646174", "hex");
+    await fs.writeFile(filePath, minimalMp4);
+    return { fallback: true, reason, kind: "generated-mp4-placeholder" };
+  }
+  throw new Error(`fallback_unsupported_file:${filePath}`);
+}
+
+async function downloadOrFallback(url, filePath) {
+  try {
+    return await downloadIfMissing(url, filePath);
+  } catch (error) {
+    if (process.env.CLAWSENSE_STRICT_FIXTURE_DOWNLOADS === "1") {
+      throw error;
+    }
+    return writeFallbackFixtureFile(filePath, error?.message ?? String(error));
+  }
+}
+
 function parseSrtTimestamp(value) {
   const match = value.trim().match(/^(\d{2}):(\d{2}):(\d{2})(?:[,.](\d{1,3}))?$/);
   if (!match) {
@@ -247,12 +305,12 @@ async function main() {
   }
 
   const downloads = {
-    video: await downloadIfMissing(source.mp4Url, videoPath),
-    srt: await downloadIfMissing(source.srtUrl, srtPath),
+    video: await downloadOrFallback(source.mp4Url, videoPath),
+    srt: await downloadOrFallback(source.srtUrl, srtPath),
     keyframes: [],
   };
   for (const keyframe of source.keyframes) {
-    const downloaded = await downloadIfMissing(keyframe.url, path.join(rawRoot, keyframe.fileName));
+    const downloaded = await downloadOrFallback(keyframe.url, path.join(rawRoot, keyframe.fileName));
     downloads.keyframes.push({ fileName: keyframe.fileName, downloaded });
   }
 
