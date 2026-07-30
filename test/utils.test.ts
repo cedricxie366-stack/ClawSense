@@ -1,5 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { inferPublicBaseUrl } from "../src/utils.js";
+import { inferPublicBaseUrl, withProtocol } from "../src/utils.js";
+
+describe("withProtocol", () => {
+  it.each(["HTTP://example.com", "HtTpS://example.com"])(
+    "keeps an existing case-insensitive protocol in %s",
+    (value) => {
+      expect(withProtocol(value)).toBe(value);
+    },
+  );
+
+  it("adds http:// when no protocol is present", () => {
+    expect(withProtocol("example.com")).toBe("http://example.com");
+  });
+});
 
 describe("inferPublicBaseUrl", () => {
   afterEach(() => {
