@@ -1,0 +1,30 @@
+name: EA-3 ClawSense CI
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Run unit tests
+        run: npm test
+      - name: Run pre-registered URL fixture
+        run: node --test calibration-fixtures/public-url-scheme.test.mjs
