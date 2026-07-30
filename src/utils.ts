@@ -85,7 +85,7 @@ export function inferPublicBaseUrl(params: {
 }
 
 export function withProtocol(value: string): string {
-  return value.startsWith("http://") || value.startsWith("https://") ? value : `http://${value}`;
+  return /^https?:\/\//i.test(value) ? value : `http://${value}`;
 }
 
 export function stripTrailingSlash(value: string): string {

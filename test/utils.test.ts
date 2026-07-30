@@ -1,5 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { inferPublicBaseUrl } from "../src/utils.js";
+import { inferPublicBaseUrl, withProtocol } from "../src/utils.js";
+
+describe("withProtocol", () => {
+  it.each([
+    "HTTP://localhost:18789",
+    "Https://localhost:18789",
+  ])("preserves an existing HTTP(S) scheme case-insensitively: %s", (url) => {
+    expect(withProtocol(url)).toBe(url);
+  });
+
+  it("adds HTTP when no protocol is present", () => {
+    expect(withProtocol("localhost:18789")).toBe("http://localhost:18789");
+  });
+});
 
 describe("inferPublicBaseUrl", () => {
   afterEach(() => {

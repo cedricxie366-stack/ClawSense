@@ -1,0 +1,43 @@
+name: Gearbox CI v2
+
+on:
+  pull_request:
+  push:
+    branches:
+      - codex/ea3-clawsense-ci-v2
+
+permissions:
+  contents: read
+
+jobs:
+  target-verifier:
+    name: Target verifier (UTC)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TZ: UTC
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx vitest run test/utils.test.ts --config vitest.config.ts
+
+  package-regression:
+    name: Package regression (Asia/Shanghai)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TZ: Asia/Shanghai
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
