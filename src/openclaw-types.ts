@@ -15,7 +15,7 @@ export type HttpRoute = {
 };
 
 export type AgentToolResult = {
-  content: Array<{ type: string; text?: string }>;
+  content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
   details?: unknown;
 };
 

@@ -1,4 +1,8 @@
 import fs from "node:fs/promises";
+import { LiveWorkStore } from "./src/live/work.js";
+import { registerLive, parseLiveConfig } from "./src/live/server.js";
+import { LiveIngressAuthorization } from "./src/live/ingress.js";
+import { liveAccess } from "./src/live/context.js";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import {
@@ -70,6 +74,17 @@ import {
   withAssistantDeviceFallbackHint,
 } from "./src/realtime-assistant.js";
 import { resolveAutoVideoTriggerReason } from "./src/auto-video-trigger.js";
+import { ClawSenseWorkflowStore } from "./src/workflow-store.js";
+import { createWorkflowTools } from "./src/workflow-tools.js";
+import { renderPairingQrSvg } from "./src/pairing-qr.js";
+import { DigitalContextStore } from "./src/digital-store.js";
+import { createDigitalTools, registerDigitalRoutes } from "./src/digital-context.js";
+import { createOpenClawCompanionTools } from "./src/openclaw-companion.js";
+import { unifiedContext } from "./src/context-store.js";
+import { createContextTools } from "./src/context-tools.js";
+import { withRequestProcessing, withDeviceProcessing, withEvidenceProcessing, assertOpaqueRuntimeProcessing } from "./src/processing-context.js";
+import { currentContextAccess, runWithAgentIdentity, runWithContextAudience } from "./src/tool-context.js";
+import { answerFromConfirmedMemory } from "./src/context-memory.js";
 
 const plugin = {
   id: "clawsense",
@@ -77,7 +92,24 @@ const plugin = {
   description: "Always-on sensory companion for OpenClaw",
   configSchema: clawsenseConfigSchema,
   register(api: OpenClawPluginApi) {
+    const rawConfig = api.pluginConfig as Record<string, unknown> | undefined;
+    if (rawConfig?.companionUrl !== undefined || rawConfig?.companionTokenFile !== undefined) {
+      if (typeof rawConfig.companionUrl !== "string" || !rawConfig.companionUrl.trim() ||
+          typeof rawConfig.companionTokenFile !== "string" || !rawConfig.companionTokenFile.trim()) {
+        throw new Error("companion_url_and_token_file_required");
+      }
+      for (const tool of createOpenClawCompanionTools({ url: rawConfig.companionUrl, tokenFile: rawConfig.companionTokenFile })) api.registerTool(tool);
+      return;
+    }
     const cfg = resolveClawSenseConfig(api.pluginConfig as Record<string, unknown> | undefined);
+    const contextStore = unifiedContext(api.runtime.state.resolveStateDir());
+    const registerBoundTool: OpenClawPluginApi["registerTool"] = (candidate, options) => {
+      const bind = (tool: import("./src/openclaw-types.js").AnyAgentTool | null) => tool && ({ ...tool, execute: (callId: string, params: Record<string, unknown>, signal?: AbortSignal, update?: unknown) => {
+        const execute = () => withRequestProcessing(api.runtime.state.resolveStateDir(), async () => tool.execute(callId, params, signal, update));
+        return api.config.clawsenseStandalone === true ? execute() : runWithAgentIdentity("openclaw", execute, { owner: cfg.primaryAgentContextScopes === undefined, contextScopes: cfg.primaryAgentContextScopes, contextCapabilities: cfg.primaryAgentContextCapabilities, processingLocation: cfg.primaryAgentProcessingLocation ?? "selected-external" });
+      } });
+      api.registerTool(typeof candidate === "function" ? (ctx) => bind(candidate(ctx)) : bind(candidate)!, options);
+    };
     const stateStore = new ClawSenseStateStore({
       resolveStateDir: api.runtime.state.resolveStateDir,
       logger: api.logger,
@@ -89,6 +121,7 @@ const plugin = {
       stateStore,
       resolveStateDir: api.runtime.state.resolveStateDir,
     });
+    contextStore.registerIndexPurger((ids) => memoryStore.purgeIndexEntries(ids));
     const reviewEngine = new ClawSenseReviewEngine({
       cfg,
       runtimeConfig: api.config,
@@ -96,6 +129,15 @@ const plugin = {
       stateStore,
       memorySearch: memoryStore,
     });
+    const workflowStore = new ClawSenseWorkflowStore({ resolveStateDir: api.runtime.state.resolveStateDir });
+    const digitalStore = new DigitalContextStore({ resolveStateDir: api.runtime.state.resolveStateDir, workspaceId: cfg.memoryNamespace });
+    let stopping = false;
+    const backgroundTasks = new Set<Promise<unknown>>();
+    const trackBackground = <T>(task: Promise<T>): Promise<T> => {
+      backgroundTasks.add(task);
+      void task.then(() => backgroundTasks.delete(task), () => backgroundTasks.delete(task));
+      return task;
+    };
     const ONE_DAY_MS = 24 * 60 * 60 * 1000;
     const DEVICE_HEARTBEAT_STALE_FACTOR = 3;
     let maintenanceTimer: NodeJS.Timeout | null = null;
@@ -128,6 +170,8 @@ const plugin = {
     const AUTO_VIDEO_DIRECTIVE_TTL_MS = 2 * 60 * 1000;
     const AUTO_VIDEO_DIRECTIVE_COOLDOWN_MS = 10 * 60 * 1000;
     const assistantConversationTurns = new Map<string, AssistantConversationTurn>();
+    contextStore.registerPurgeObserver(() => assistantConversationTurns.clear());
+    if (cfg.mediaRoot) contextStore.registerManagedMediaRoot(cfg.mediaRoot);
     const autoVideoDirectives = new Map<string, {
       directiveId: string;
       deviceId: string;
@@ -140,6 +184,7 @@ const plugin = {
     }>();
 
     const runAsrWorkerSafely = async (reason: "startup" | "interval" | "manual"): Promise<void> => {
+      if (stopping) return;
       if (asrWorkerActive) {
         api.logger.warn(`[clawsense] ASR worker skipped ${reason}; previous tick is still running`);
         return;
@@ -271,6 +316,7 @@ const plugin = {
       fileName: string;
       mime?: string;
       modeHint?: AssistantModeHint;
+      onPersist?: (filePath: string) => void;
     }): Promise<{ queryText: string; provider?: string; failureReason?: string }> => {
       const providers: string[] = [];
       const failureReasons: string[] = [];
@@ -282,9 +328,11 @@ const plugin = {
       const tempDir = path.join(api.runtime.state.resolveStateDir(), "plugins", "clawsense", "assistant-queries");
       const tempFilePath = path.join(tempDir, `${randomUUID()}-${params.fileName}`);
       try {
-        await fs.mkdir(tempDir, { recursive: true });
-        await fs.writeFile(tempFilePath, params.body);
+        await fs.mkdir(tempDir, { recursive: true, mode: 0o700 });
+        await fs.writeFile(tempFilePath, params.body, { mode: 0o600 });
+        params.onPersist?.(tempFilePath);
         try {
+          await assertOpaqueRuntimeProcessing("runtime:stt");
           const runtimeResponse = await api.runtime.stt.transcribeAudioFile({
             filePath: tempFilePath,
             mime: params.mime,
@@ -727,13 +775,13 @@ const plugin = {
     };
 
     const pumpAnalysisQueue = (): void => {
-      if (analysisPumpActive) {
+      if (analysisPumpActive || stopping) {
         return;
       }
       analysisPumpActive = true;
-      void (async () => {
+      void trackBackground((async () => {
         try {
-          while (analysisQueue.length > 0) {
+          while (!stopping && analysisQueue.length > 0) {
             const job = analysisQueue.shift();
             if (!job) {
               continue;
@@ -764,11 +812,11 @@ const plugin = {
           }
         } finally {
           analysisPumpActive = false;
-          if (analysisQueue.length > 0) {
+          if (!stopping && analysisQueue.length > 0) {
             pumpAnalysisQueue();
           }
         }
-      })();
+      })());
     };
 
     const enqueueAnalysis = (params: {
@@ -779,6 +827,7 @@ const plugin = {
       note?: string;
       requestId?: string;
     }): { accepted: true; requestId: string; queueDepth: number } | { accepted: false; queueDepth: number } => {
+      if (stopping) return { accepted: false, queueDepth: analysisQueue.length };
       const requestId = params.requestId?.trim() || randomUUID();
       const { requestId: _ignoredRequestId, ...jobParams } = params;
       const result = enqueueIngestJob(analysisQueue, {
@@ -812,6 +861,7 @@ const plugin = {
       missingArtifacts: number;
       missingDevices: number;
     }> => {
+      if (stopping) return { scanned: 0, queued: 0, skippedQueued: 0, missingArtifacts: 0, missingDevices: 0 };
       const queuedArtifactIds = new Set<string>();
       for (const job of analysisQueue) {
         queuedArtifactIds.add(job.artifactId);
@@ -878,18 +928,72 @@ const plugin = {
       };
     };
 
-    api.registerTool(
+    const liveConfig = parseLiveConfig(rawConfig?.live);
+    const liveIngress = liveConfig ? new LiveIngressAuthorization(api.runtime.state.resolveStateDir()) : undefined;
+    const registerLiveRoutes = () => registerLive({ api, contextStore, config: liveConfig, publicBaseUrl,
+      work: liveConfig ? new LiveWorkStore(api.runtime.state.resolveStateDir(), workflowStore, { ...(liveConfig.dsh ? { "live-dsh": liveConfig.dsh.cwd } : {}), ...(liveConfig.codex ? { "live-codex": liveConfig.codex.cwd } : {}) }, liveConfig.projectId ?? "live") : undefined,
+      authenticate: (authorization) => liveIngress!.authenticate(authorization),
+      authorizeCapture: (deviceId, projectId) => liveIngress!.authorizeCapture(deviceId, projectId),
+      context: (deviceId, question, persona) => {
+        const access = liveAccess(deviceId, liveConfig?.projectId ?? "live", persona.publicScene ? "public" : "private");
+        return runWithAgentIdentity(access.actor, () => contextStore.consistent(async () => {
+          const { recentContext } = await buildRecentContextPayload({ reviewEngine, artifactUrlBase: artifactUrlBase(), windowHint: "last_5m", question, deviceId, allowSemanticRetrieval: false,
+            timeRangeOverride: persona.publicScene ? { startAt: Date.now() - 5 * 60000, endAt: Date.now() } : undefined });
+          const encounters = (await workflowStore.listSessions()).filter((s) => !persona.publicScene || (s.deviceId === deviceId && s.startedAt >= Date.now() - 5 * 60000)).slice(0, 8);
+          const confirmed = encounters.flatMap((s) => s.facts).filter((f) => f.assertionState === "confirmed" && f.confirmationAuthority === "owner-confirmation").slice(-12);
+          const workItems = (await Promise.all(encounters.map((s) => workflowStore.briefing(s.sessionId)))).flatMap((b) => b.workItems).slice(-5);
+          const selected = new Set((await contextStore.selectedResults(access)).map((r) => r.workItemId));
+          const historicalImages = /(?:刚才|昨天|上次|早些).*(?:画面|看|镜头|杯子|物体)/.test(question) ? (await contextStore.listRecords(access)).filter(record => record.ref.kind === "live-observation" && record.sourceKind === "image" && (record.capturedAt ?? 0) <= recentContext.timeRange.endAt && (/昨天/.test(question) ? (record.capturedAt ?? 0) >= recentContext.timeRange.startAt : true)).sort((a,b)=>(b.capturedAt ?? 0)-(a.capturedAt ?? 0)).slice(0,3) : [];
+          const visualHistory = historicalImages.length ? (await contextStore.exportContext(historicalImages.map(record=>record.ref), access)).entries : [];
+          const refs = await contextStore.refsInRange(recentContext.timeRange.startAt, recentContext.timeRange.endAt, access, deviceId);
+          refs.push(...historicalImages.map(record=>record.ref));
+          refs.push(...confirmed.map((f) => ({ kind: "assertion", id: f.correctionId })), ...workItems.filter((w) => selected.has(w.workItemId)).map((w) => ({ kind: "work", id: w.workItemId })));
+          const snapshot = await contextStore.snapshot(refs, access);
+          return {
+            encounterId: encounters.find(s => !s.endedAt)?.sessionId,
+            contextSnapshotId: snapshot.snapshotId, evidenceRefs: snapshot.dependencies,
+            scene: { historicalVisualAnalysis: visualHistory, ...(recentContext.counts.events > 0 ? { evidenceCoverageWindow: { ...recentContext.timeRange, meaning: "检索覆盖范围，不是会议或约定的时间" } } : {}), summary: recentContext.counts.events > 0 ? recentContext.sceneSummary.slice(0, 1000) : "当前没有声音或画面原件。请依据用户本轮对话及获准历史回答；不要把检索范围当成现实事件。", transcript: recentContext.recentTranscriptSpans.slice(-5).map((s) => ({ text: s.text, capturedAt: s.capturedAt, eventId: s.eventId, windowId: s.windowId })), observations: recentContext.topEvidence.slice(0, 3).map((e) => ({ summary: e.summary, windowId: e.windowId })), pendingAudio: recentContext.counts.pendingAudioWindows },
+            confirmed: confirmed.map((f) => ({ kind: f.kind, text: f.text, revision: f.revision, assertionState: f.assertionState, authority: f.confirmationAuthority })),
+            work: workItems.map((w) => ({ workItemId: w.workItemId, status: w.status, resultText: selected.has(w.workItemId) ? w.resultText?.slice(0, 800) : undefined, reuse: selected.has(w.workItemId) ? "accepted-current" : "not-selected" })),
+          };
+        }), access);
+      },
+    });
+
+    registerDigitalRoutes({ api, store: digitalStore, workflowStore, authenticateDevice: (authorization) => authenticateDevice({ authorization: typeof authorization === "string" ? authorization : undefined }) });
+    for (const tool of createDigitalTools(digitalStore, workflowStore)) registerBoundTool(tool);
+    for (const tool of createContextTools(contextStore)) registerBoundTool(tool);
+    for (const tool of createWorkflowTools({ workflowStore, stateStore, reviewEngine, artifactUrlBase, digitalStore, contextStore })) {
+      registerBoundTool(tool);
+    }
+
+    api.registerHttpRoute(createJsonRoute("/api/clawsense/setup", async (req, res) => {
+      if (req.method !== "POST") { methodNotAllowed(res, ["POST"]); return true; }
+      const payload = await readJson(req, res);
+      if (!payload) return true;
+      const role = payload.deviceRole ?? "sensor";
+      if (role !== "primary" && role !== "sensor") { json(res, 400, { ok: false, error: "invalid_device_role" }); return true; }
+      const baseUrl = publicBaseUrl();
+      const token = issueSetupToken(cfg.pairingTtlSeconds);
+      if (role === "primary") await digitalStore.registerPrimarySetup(token.tokenHash, token.expiresAt);
+      await stateStore.upsertSetupToken(token);
+      const setupCode = createSetupCode(baseUrl, token.token);
+      json(res, 200, { ok: true, setupCode, qrSvg: renderPairingQrSvg(setupCode), expiresAt: token.expiresAt, baseUrl, deviceRole: role });
+      return true;
+    }, { auth: "gateway" }));
+
+    registerBoundTool(
       createClawSenseContextTool({
         reviewEngine,
         artifactUrlBase,
       }),
     );
-    api.registerTool(
+    registerBoundTool(
       createClawSenseAnnotatePersonTool({
         reviewEngine,
       }),
     );
-    api.registerTool(
+    registerBoundTool(
       createClawSenseAnnotateSpeakerTool({
         reviewEngine,
       }),
@@ -948,9 +1052,13 @@ const plugin = {
               : undefined,
         });
 
+        let digitalContextEnabled = false;
+        try { digitalContextEnabled = await digitalStore.activatePrimaryDevice(pending.tokenHash, device.deviceId); }
+        catch { api.logger.warn("[clawsense] digital device authorization unavailable; physical pairing preserved"); }
         json(res, 200, {
           ok: true,
           deviceId: device.deviceId,
+          digitalContextEnabled,
           deviceSecret: device.plainSecret,
           uploadBaseUrl: `${stripTrailingSlash(publicBaseUrl())}/api/clawsense`,
           heartbeatIntervalSec: cfg.heartbeatIntervalSeconds,
@@ -1330,10 +1438,20 @@ const plugin = {
           ok: true,
           heartbeatIntervalSec: cfg.heartbeatIntervalSeconds,
           captureDirective,
+          cacheValidation: typeof payload.cacheSnapshotId === "string" ? await contextStore.validateDeviceCache(payload.cacheSnapshotId, device.deviceId) : undefined,
         });
         return true;
       }),
     );
+
+    api.registerHttpRoute(createJsonRoute("/api/clawsense/cache/validate", async (req, res) => {
+      if (req.method !== "POST") { methodNotAllowed(res, ["POST"]); return true; }
+      const auth = await authenticateDevice({ authorization: req.headers.authorization, deviceIdHint: readHeaderValue(req.headers["x-clawsense-device-id"]) });
+      if (!auth.ok) { unauthorized(res); return true; }
+      const body = await readJson(req, res, 4096);
+      if (!body || typeof body.snapshotId !== "string" || body.snapshotId.length > 300) { json(res, 400, { ok: false, error: "snapshot_id_required" }); return true; }
+      json(res, 200, { ok: true, ...(await contextStore.validateDeviceCache(body.snapshotId, auth.device.deviceId)) }); return true;
+    }));
 
     api.registerHttpRoute(
       createJsonRoute("/api/clawsense/recent-context", async (req, res) => {
@@ -1386,7 +1504,9 @@ const plugin = {
           json(res, 400, { ok: false, error: "queryAudio required" });
           return true;
         }
-        const body = Buffer.from(payload.queryAudio, "base64");
+        if (payload.outputAudience !== undefined && payload.outputAudience !== "private" && payload.outputAudience !== "public") { json(res, 400, { ok: false, error: "invalid_output_audience" }); return true; }
+        const queryOperation = async () => {
+        const body = Buffer.from(payload.queryAudio as string, "base64");
         if (body.length === 0) {
           json(res, 400, { ok: false, error: "invalid_query_audio" });
           return true;
@@ -1411,12 +1531,14 @@ const plugin = {
           (modeHint === "meeting" || modeHint === "desk") && requestedWindowHint !== "last_5m"
             ? "last_5m"
             : requestedWindowHint;
-        const transcribed = await transcribeAssistantQuery({
+        let queryFilePath: string | undefined;
+        const transcribed = await withDeviceProcessing(api.runtime.state.resolveStateDir(), auth.device.deviceId, () => transcribeAssistantQuery({
           body,
           fileName,
           mime,
           modeHint,
-        });
+          onPersist: (filePath) => { queryFilePath = filePath; },
+        }));
         const resolvedQuery = resolveAssistantQueryText({
           queryText: transcribed.queryText,
           modeHint,
@@ -1429,12 +1551,19 @@ const plugin = {
             resolvedQuery.rawQueryText.length
           } rawPreview="${resolvedQuery.rawQueryText.slice(0, 32)}"`,
         );
-        const previousTurn = assistantConversationTurns.get(auth.device.deviceId);
+        let previousTurn = assistantConversationTurns.get(auth.device.deviceId);
+        if (previousTurn?.unifiedContextSnapshotId) { try { await contextStore.inspectSnapshot(previousTurn.unifiedContextSnapshotId, currentContextAccess()); } catch { assistantConversationTurns.delete(auth.device.deviceId); previousTurn = undefined; } }
         const shouldUsePreviousRange = shouldUsePreviousTurnEvidenceRange({
           queryText: resolvedQuery.queryText,
           previousTurn,
         });
-        const scopedContextPayload = await buildRecentContextPayload({
+        const readWithSnapshot = (params: Parameters<typeof buildRecentContextPayload>[0]) => contextStore.consistent(async () => {
+          const result = await buildRecentContextPayload(params);
+          const refs = await contextStore.refsInRange(result.recentContext.timeRange.startAt, result.recentContext.timeRange.endAt, currentContextAccess(), params.deviceId);
+          const snapshot = await contextStore.snapshot(refs, { ...currentContextAccess(), actor: `device:${auth.device.deviceId}` });
+          return { ...result, snapshot };
+        });
+        const scopedContextPayload = await readWithSnapshot({
           reviewEngine,
           artifactUrlBase: "/api/clawsense/artifacts",
           windowHint,
@@ -1445,9 +1574,10 @@ const plugin = {
           now: capturedAt,
         });
         let recentContext = scopedContextPayload.recentContext;
+        let inputSnapshot = scopedContextPayload.snapshot;
         let contextDeviceId: string | undefined = auth.device.deviceId;
         if (shouldFallbackAssistantContextToAllDevices(recentContext)) {
-          const fallbackContextPayload = await buildRecentContextPayload({
+          const fallbackContextPayload = await readWithSnapshot({
             reviewEngine,
             artifactUrlBase: "/api/clawsense/artifacts",
             windowHint,
@@ -1462,6 +1592,7 @@ const plugin = {
               deviceName: auth.device.name,
             });
             contextDeviceId = undefined;
+            inputSnapshot = fallbackContextPayload.snapshot;
           }
         }
         const audioRecheck = await maybeRecheckAssistantQueryAudio({
@@ -1473,7 +1604,8 @@ const plugin = {
           now: capturedAt,
         });
         if (audioRecheck.recentContext) {
-          recentContext = audioRecheck.recentContext;
+          const refreshed = await readWithSnapshot({ reviewEngine, artifactUrlBase: "/api/clawsense/artifacts", windowHint, question: resolvedQuery.queryText, deviceId: contextDeviceId, modeHint, now: capturedAt, timeRangeOverride: recentContext.timeRange });
+          recentContext = refreshed.recentContext; inputSnapshot = refreshed.snapshot;
         }
         const answered = answerAssistantQuery({
           queryText: resolvedQuery.queryText,
@@ -1483,7 +1615,9 @@ const plugin = {
           rawQueryText: resolvedQuery.rawQueryText,
           answeredAt: Date.now(),
         });
-        const modelAnswered =
+        const confirmedAnswer = await answerFromConfirmedMemory(resolvedQuery.queryText, recentContext, workflowStore, answered);
+        if (confirmedAnswer?.memoryCorrectionRefs?.length) { if ((await contextStore.inspectSnapshot(inputSnapshot.snapshotId, currentContextAccess())).state !== "current") throw new Error("context_changed_retry"); inputSnapshot = await contextStore.snapshot([...inputSnapshot.dependencies, ...confirmedAnswer.memoryCorrectionRefs], { ...currentContextAccess(), actor: `device:${auth.device.deviceId}` }); }
+        const modelAnswered = confirmedAnswer ?? (
           (!resolvedQuery.queryText && resolvedQuery.reason) ||
           shouldUseDeterministicAssistantAnswer(resolvedQuery.queryText)
             ? null
@@ -1492,15 +1626,21 @@ const plugin = {
                 recentContext,
                 fallback: answered,
                 previousTurn,
-              });
+              }));
         let finalAnswer = modelAnswered ?? answered;
+        if ((await contextStore.inspectSnapshot(inputSnapshot.snapshotId, currentContextAccess())).state !== "current") throw new Error("context_changed_retry");
         finalAnswer = await maybePersistAssistantDraft({
           deviceId: auth.device.deviceId,
           queryText: finalAnswer.queryText,
           answer: finalAnswer,
           recentContext,
         });
+        const snapshot = previousTurn?.unifiedContextSnapshotId && /读全文|完整读/.test(resolvedQuery.queryText)
+          ? (await contextStore.inspectSnapshot(previousTurn.unifiedContextSnapshotId, currentContextAccess())).snapshot
+          : inputSnapshot;
+        if (queryFilePath) await contextStore.registerManagedCopy(queryFilePath, snapshot.dependencies, "query-audio");
         assistantConversationTurns.set(auth.device.deviceId, {
+          unifiedContextSnapshotId: snapshot.snapshotId,
           queryText: finalAnswer.queryText,
           answerText: finalAnswer.answerText,
           answerSpokenText: finalAnswer.answerSpokenText,
@@ -1519,6 +1659,8 @@ const plugin = {
           modeUsed: finalAnswer.modeUsed,
           answeredAt: finalAnswer.answeredAt,
           answerSource: finalAnswer.answerSource ?? "template",
+          contextSnapshotId: snapshot.snapshotId,
+          outputAudience: payload.outputAudience === "public" ? "public" : "private",
           actionIntent: finalAnswer.actionIntent ?? { type: "none" },
           recentContext: {
             windowHint: recentContext.windowHint,
@@ -1542,6 +1684,8 @@ const plugin = {
           audioRecheck: audioRecheck.diagnostics,
         });
         return true;
+        };
+        return runWithContextAudience(payload.outputAudience === "public" ? "public" : "private", queryOperation);
       }),
     );
 
@@ -1665,7 +1809,8 @@ const plugin = {
         previousTurn: params.previousTurn,
       });
       try {
-        const completion = await openai.chat.completions.create({
+        const refs = await contextStore.refsInRange(params.recentContext.timeRange.startAt, params.recentContext.timeRange.endAt, currentContextAccess());
+        const completion = await withEvidenceProcessing(api.runtime.state.resolveStateDir(), refs, () => openai.chat.completions.create({
           model: reviewModel.model,
           stream: false,
           messages: [
@@ -1673,7 +1818,7 @@ const plugin = {
             { role: "user", content: prompt.user },
           ],
           temperature: 0.2,
-        });
+        }));
         return mergeAssistantModelAnswer({
           rawText: extractChatCompletionText(completion),
           queryText: params.queryText,
@@ -1709,7 +1854,8 @@ const plugin = {
           .replace(/[:.]/g, "-");
         const fileName = `${timestamp}-${toSafeSlug(draft.title) || "clawsense-draft"}.md`;
         const filePath = path.join(draftDir, fileName);
-        await fs.writeFile(filePath, draft.markdown, "utf8");
+        await fs.writeFile(filePath, draft.markdown, { encoding: "utf8", mode: 0o600 });
+        await contextStore.registerManagedCopy(filePath, await contextStore.refsInRange(params.recentContext.timeRange.startAt, params.recentContext.timeRange.endAt, currentContextAccess()), "draft");
         const actionIntent = {
           ...(params.answer.actionIntent ?? { type: "draft_document" as const }),
           type: "draft_document" as const,
@@ -3485,29 +3631,36 @@ const plugin = {
     api.registerService({
       id: "clawsense",
       start: async () => {
+        stopping = false;
+        await contextStore.initialize();
+        digitalStore.setWorkspaceIdentity((await contextStore.workspace()).workspaceId);
         await stateStore.pruneExpiredSetupTokens(DEFAULT_PAIRING_TTL_SECONDS);
         await memoryStore.pruneExpiredArtifacts();
-        await ensureBootstrapQr();
+        if (api.config.clawsenseStandalone !== true) await ensureBootstrapQr();
+        pumpAnalysisQueue();
         await requeuePendingAnalysis(12);
         maintenanceTimer = setInterval(() => {
-          void reviewEngine.runMaintenanceTick().catch((error) => {
+          if (stopping) return;
+          void trackBackground(reviewEngine.runMaintenanceTick()).catch((error) => {
             api.logger.warn(`[clawsense] maintenance tick failed: ${String(error)}`);
           });
         }, 5 * 60 * 1000);
         if (cfg.asrWorkerEnabled) {
-          void runAsrWorkerSafely("startup");
+          void trackBackground(runAsrWorkerSafely("startup"));
           asrWorkerTimer = setInterval(() => {
-            void runAsrWorkerSafely("interval");
+            void trackBackground(runAsrWorkerSafely("interval"));
           }, cfg.asrWorkerIntervalSeconds * 1000);
         }
         analysisRecoveryTimer = setInterval(() => {
-          void requeuePendingAnalysis(12).catch((error) => {
+          if (stopping) return;
+          void trackBackground(requeuePendingAnalysis(12)).catch((error) => {
             api.logger.warn(`[clawsense] pending analysis recovery tick failed: ${String(error)}`);
           });
         }, 60 * 1000);
         api.logger.info("[clawsense] service started");
       },
       stop: async () => {
+        stopping = true;
         if (maintenanceTimer) {
           clearInterval(maintenanceTimer);
           maintenanceTimer = null;
@@ -3520,9 +3673,12 @@ const plugin = {
           clearInterval(asrWorkerTimer);
           asrWorkerTimer = null;
         }
+        while (backgroundTasks.size > 0) await Promise.allSettled([...backgroundTasks]);
+        await contextStore.release();
         api.logger.info("[clawsense] service stopped");
       },
     });
+    registerLiveRoutes();
   },
 };
 

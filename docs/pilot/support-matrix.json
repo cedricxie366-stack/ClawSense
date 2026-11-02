@@ -1,0 +1,19 @@
+{
+  "date": "2026-10-16",
+  "release": "0.2.0-preview.2",
+  "status": "candidate_human_acceptance_pending",
+  "publiclyPublished": false,
+  "recruitment": { "targetMinimum": 5, "targetMaximum": 10, "durationDays": 14, "enrolled": 0 },
+  "coreProcessing": "Android capture and playback, owned Apple Silicon Mac inference",
+  "phoneOnlyInferenceAccepted": false,
+  "fullDuplexAccepted": false,
+  "hosts": [
+    { "name": "DSH", "evidence": "0.2.0-rc.2, configured glm-gateway/glm-5.3-flash, actual files and phone return", "scope": "selected-external project authorization; provider configuration name does not prove model identity" },
+    { "name": "Codex", "evidence": "CLI 0.154.0, actual files and shared correction reuse", "scope": "existing authentication and selected-external project authorization" },
+    { "name": "OpenClaw", "evidence": "original plugin and companion entry retained", "scope": "no new current-model Live acceptance claim" },
+    { "name": "Pi / Claude Code / OpenCode / WorkBuddy / TRAE / Doubao Work / QwenWork", "evidence": "configuration or import guidance", "scope": "not a claim of actual client end-to-end acceptance" }
+  ],
+  "offline": { "kind": "authorized cached memory, not offline Live inference", "maxItems": 100, "maxBytes": 2097152, "maxAgeHours": 24, "revocationsWhileOfflineKnown": false },
+  "humanPending": ["voice naturalness", "ten spoken turns", "real visual relevance", "multiple speakers", "headphones", "actual calls and secure device lock", "long capture and battery"],
+  "evidence": ["../validation/p1-p2-integrated-2026-10-15.md", "../validation/p1-p2-closeout-2026-10-16.md"]
+}

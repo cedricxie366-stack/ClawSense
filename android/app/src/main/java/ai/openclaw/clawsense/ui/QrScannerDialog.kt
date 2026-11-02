@@ -1,6 +1,5 @@
 package ai.openclaw.clawsense.ui
 
-import android.annotation.SuppressLint
 import android.content.Context
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
@@ -13,6 +12,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -25,7 +25,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -49,17 +49,17 @@ fun QrScannerDialog(
     Column(
       modifier = Modifier
         .fillMaxWidth()
-        .background(Color(0xFF0C1620), RoundedCornerShape(28.dp))
+        .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(24.dp))
         .padding(16.dp),
       verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-      Text("对准终端里的 ASCII 二维码", style = MaterialTheme.typography.titleMedium, color = Color.White)
+      Text("对准电脑上的配对二维码", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
       Text(
-        "扫码成功后会自动关闭并把引导码填回首页。",
+        "识别后会返回连接页面，请检查并确认连接。",
         style = MaterialTheme.typography.bodyMedium,
-        color = Color(0xFFB8C5D1),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
       )
-      Box(modifier = Modifier.fillMaxWidth().height(460.dp)) {
+      Box(modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 340.dp).weight(1f, fill = false)) {
         ScannerPreview(onDetected = onDetected)
       }
       Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
@@ -69,7 +69,6 @@ fun QrScannerDialog(
   }
 }
 
-@SuppressLint("UnsafeOptInUsageError")
 @Composable
 private fun ScannerPreview(
   onDetected: (String) -> Unit,
@@ -113,6 +112,7 @@ private fun ScannerPreview(
   )
 }
 
+@androidx.annotation.OptIn(androidx.camera.core.ExperimentalGetImage::class)
 private fun bindScannerCamera(
   context: Context,
   previewView: PreviewView,

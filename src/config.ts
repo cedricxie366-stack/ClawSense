@@ -1,4 +1,5 @@
 import { Type } from "@sinclair/typebox";
+import { normalizeContextScopes, normalizeContextCapabilities, type ContextScope, type ContextMutation } from "./context-access.js";
 
 export const DEFAULT_PAIRING_TTL_SECONDS = 10 * 60;
 const DEFAULT_GATEWAY_PORT = 3000;
@@ -32,6 +33,12 @@ const DEFAULT_ASR_WORKER_INCLUDE_TRANSCRIBED = true;
 
 export const clawsenseConfigSchema = Type.Object(
   {
+    live: Type.Optional(Type.Any()),
+    companionUrl: Type.Optional(Type.String()),
+    companionTokenFile: Type.Optional(Type.String()),
+    primaryAgentContextScopes: Type.Optional(Type.Array(Type.Any())),
+    primaryAgentContextCapabilities: Type.Optional(Type.Array(Type.String())),
+    primaryAgentProcessingLocation: Type.Optional(Type.Union([Type.Literal("local-only"), Type.Literal("owned-devices"), Type.Literal("selected-external")])),
     publicBaseUrl: Type.Optional(Type.String()),
     gatewayPort: Type.Optional(Type.Integer({ minimum: 1, maximum: 65535 })),
     openaiApiKey: Type.Optional(Type.String()),
@@ -80,6 +87,9 @@ export const clawsenseConfigSchema = Type.Object(
 );
 
 export type ClawSenseConfig = {
+  primaryAgentContextScopes?: ContextScope[];
+  primaryAgentContextCapabilities?: ContextMutation[];
+  primaryAgentProcessingLocation?: "local-only" | "owned-devices" | "selected-external";
   publicBaseUrl?: string;
   gatewayPort: number;
   openaiApiKey?: string;
@@ -128,6 +138,9 @@ export type ClawSenseConfig = {
 export function resolveClawSenseConfig(raw: Record<string, unknown> | undefined): ClawSenseConfig {
   const cfg = (raw ?? {}) as Record<string, unknown>;
   return {
+    primaryAgentContextScopes: normalizeContextScopes(cfg.primaryAgentContextScopes),
+    primaryAgentContextCapabilities: normalizeContextCapabilities(cfg.primaryAgentContextCapabilities),
+    primaryAgentProcessingLocation: cfg.primaryAgentProcessingLocation === undefined ? undefined : normalizeProcessingLocation(cfg.primaryAgentProcessingLocation),
     publicBaseUrl: readOptionalString(cfg.publicBaseUrl),
     gatewayPort: readOptionalInteger(cfg.gatewayPort, { min: 1, max: 65535 }) ?? DEFAULT_GATEWAY_PORT,
     openaiApiKey: readOptionalString(cfg.openaiApiKey),
@@ -193,6 +206,8 @@ export function resolveClawSenseConfig(raw: Record<string, unknown> | undefined)
       : DEFAULT_ASR_WORKER_INCLUDE_TRANSCRIBED,
   };
 }
+
+function normalizeProcessingLocation(value: unknown): "local-only" | "owned-devices" | "selected-external" { if (value !== "local-only" && value !== "owned-devices" && value !== "selected-external") throw new Error("invalid_processing_location"); return value; }
 
 function readOptionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;

@@ -670,6 +670,8 @@ tap_query() {
   clear_logcat_if_needed "tap-query"
   run_logged adb_cmd shell am start -n "$MAIN_COMPONENT"
   sleep 0.5
+  tap_visible_text "助手"
+  sleep 0.3
   tap_visible_text "$label"
   sleep 0.3
   tap_visible_text "问实时助手"

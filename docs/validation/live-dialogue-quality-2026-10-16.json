@@ -1,0 +1,464 @@
+{
+  "date": "2026-10-16",
+  "scope": "Local Live dialogue repair on owned Mac plus OPPO PDEM10 Android13; no stage signoff",
+  "human": {
+    "shortArithmetic": "结果是12",
+    "shortVoice": "目前感觉正常",
+    "reportedDefects": [
+      "camera-enabled voice perceived slow",
+      "other questions unhelpful"
+    ],
+    "newNaturalnessAccepted": true,
+    "retest": {
+      "feedbackVerbatim": "实际答案不错，语速正常，语音自然。",
+      "requestedScenario": "camera enabled; sky explanation then English translation without re-addressing",
+      "acceptedScope": [
+        "answer relevance for this pair",
+        "normal speech rate",
+        "natural voice for these replies"
+      ],
+      "actualAnswersVerbatim": null,
+      "stageSignedOff": false
+    }
+  },
+  "model": {
+    "repo": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
+    "revision": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b",
+    "license": "apache-2.0",
+    "weights": {
+      "file": "model.safetensors",
+      "bytes": 2263022417,
+      "sha256": "2a73c6c248601ab904e035548abd8e6abb65ea27dcb5f342fb0a8910eb44173f"
+    },
+    "visionUnchanged": "mlx-community/Qwen3.5-2B-4bit@674aaa7240b91e8012fcad5d791b7dfe5ba90207"
+  },
+  "dialogue": {
+    "model": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
+    "revision": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b",
+    "results": [
+      {
+        "mode": "clean",
+        "kind": "capability",
+        "query": "你能帮我做哪些事情？",
+        "answer": "我可以陪你聊聊天、解释不明白的概念、翻译文字，或者给你一些实用的小建议。需要的时候，我随时都在呢～",
+        "automatedCheck": true,
+        "firstTextMs": 4522.089958,
+        "elapsedMs": 5243.443917
+      },
+      {
+        "mode": "clean",
+        "kind": "knowledge",
+        "query": "为什么天空是蓝色的？",
+        "answer": "阳光穿过大气层时，短波蓝光比其他颜色更容易被空气中的分子散射，所以我们看到的天空是蓝色的。",
+        "automatedCheck": true,
+        "firstTextMs": 255.59991700000046,
+        "elapsedMs": 1015.8799170000002
+      },
+      {
+        "mode": "clean",
+        "kind": "translation",
+        "query": "把这句话翻译成英语：谢谢你今天的帮助。",
+        "answer": "Thank you for your help today.",
+        "automatedCheck": true,
+        "firstTextMs": 263.4870000000001,
+        "elapsedMs": 451.0137500000001
+      },
+      {
+        "mode": "clean",
+        "kind": "advice",
+        "query": "明天要见客户，我该准备些什么？",
+        "answer": "带一份简洁的提案和公司介绍资料，提前十分钟到现场，保持微笑和眼神交流。",
+        "automatedCheck": false,
+        "firstTextMs": 252.14587500000016,
+        "elapsedMs": 784.4965830000001
+      },
+      {
+        "mode": "clean",
+        "kind": "realtime",
+        "query": "今天天气如何？",
+        "answer": "我目前没有联网天气工具，不能确认实时天气。你提供预报后，我可以帮你解读。",
+        "automatedCheck": true,
+        "firstTextMs": 0.09429199999976845,
+        "elapsedMs": 0.11287499999980355
+      },
+      {
+        "mode": "clean",
+        "kind": "missing-memory",
+        "query": "我昨天和谁见面？",
+        "answer": "目前获准的资料里没有这件事的记录，我还不能确定。",
+        "automatedCheck": true,
+        "firstTextMs": 0.09387500000048021,
+        "elapsedMs": 0.11570800000026793
+      },
+      {
+        "mode": "clean",
+        "kind": "heldout-science",
+        "query": "用两句话解释月亮为什么发光。",
+        "answer": "月亮本身不发光，它反射的是太阳照过来的光。我们看到的月光，其实是太阳光被月球反射后传到地球的。",
+        "automatedCheck": true,
+        "firstTextMs": 253.48624999999993,
+        "elapsedMs": 1081.2032499999996
+      },
+      {
+        "mode": "clean",
+        "kind": "heldout-rewrite",
+        "query": "把这句话改得礼貌一点：明天上午十点前把报价发给我。",
+        "answer": "麻烦您在明天上午十点前将报价发给我就好了。",
+        "automatedCheck": true,
+        "firstTextMs": 254.7250409999997,
+        "elapsedMs": 615.0929999999989
+      },
+      {
+        "mode": "clean",
+        "kind": "heldout-logic",
+        "query": "三只猫各有四条腿，一共有多少条腿？请直接给答案。",
+        "answer": "3只猫 × 4条腿 = 12条腿。",
+        "automatedCheck": true,
+        "firstTextMs": 1032.2588329999999,
+        "elapsedMs": 1472.8522080000002
+      },
+      {
+        "mode": "prior-echo",
+        "kind": "capability",
+        "query": "你能帮我做哪些事情？",
+        "answer": "一起把事情做好的，我来帮你把事情理清楚～  \n比如翻译、解释、写点东西，或者给你具体建议，都行～  \n你想先从哪开始？",
+        "automatedCheck": true,
+        "firstTextMs": 1109.3907920000001,
+        "elapsedMs": 2219.7972090000003
+      },
+      {
+        "mode": "prior-echo",
+        "kind": "knowledge",
+        "query": "为什么天空是蓝色的？",
+        "answer": "阳光穿过大气层时，短波蓝光比其他颜色更容易被空气中的分子散射，所以我们看到的天空是蓝色的。",
+        "automatedCheck": true,
+        "firstTextMs": 257.73383300000023,
+        "elapsedMs": 1029.6407500000005
+      },
+      {
+        "mode": "prior-echo",
+        "kind": "translation",
+        "query": "把这句话翻译成英语：谢谢你今天的帮助。",
+        "answer": "Thank you for your help today.",
+        "automatedCheck": true,
+        "firstTextMs": 254.58729200000016,
+        "elapsedMs": 442.3376250000001
+      },
+      {
+        "mode": "prior-echo",
+        "kind": "advice",
+        "query": "明天要见客户，我该准备些什么？",
+        "answer": "带一份简洁的提案和公司介绍资料，提前十分钟到现场，保持自然微笑，别紧张。",
+        "automatedCheck": false,
+        "firstTextMs": 252.52416699999958,
+        "elapsedMs": 807.9464590000007
+      },
+      {
+        "mode": "prior-echo",
+        "kind": "realtime",
+        "query": "今天天气如何？",
+        "answer": "我目前没有联网天气工具，不能确认实时天气。你提供预报后，我可以帮你解读。",
+        "automatedCheck": true,
+        "firstTextMs": 0.08558400000038091,
+        "elapsedMs": 0.08754199999930279
+      },
+      {
+        "mode": "prior-echo",
+        "kind": "missing-memory",
+        "query": "我昨天和谁见面？",
+        "answer": "目前获准的资料里没有这件事的记录，我还不能确定。",
+        "automatedCheck": true,
+        "firstTextMs": 0.0754159999996773,
+        "elapsedMs": 0.08533300000090094
+      },
+      {
+        "mode": "prior-echo",
+        "kind": "heldout-science",
+        "query": "用两句话解释月亮为什么发光。",
+        "answer": "月亮本身不发光，它反射的是太阳照过来的光。我们看到的月光，其实是太阳光被月球反射后传到地球的。",
+        "automatedCheck": true,
+        "firstTextMs": 252.33008300000074,
+        "elapsedMs": 1093.7202080000006
+      },
+      {
+        "mode": "prior-echo",
+        "kind": "heldout-rewrite",
+        "query": "把这句话改得礼貌一点：明天上午十点前把报价发给我。",
+        "answer": "麻烦您在明天上午十点前将报价发给我就好了。",
+        "automatedCheck": true,
+        "firstTextMs": 254.4653330000001,
+        "elapsedMs": 626.8213329999999
+      },
+      {
+        "mode": "prior-echo",
+        "kind": "heldout-logic",
+        "query": "三只猫各有四条腿，一共有多少条腿？请直接给答案。",
+        "answer": "3只猫 × 4条腿 = 12条腿。",
+        "automatedCheck": true,
+        "firstTextMs": 1102.541624999998,
+        "elapsedMs": 1501.411
+      }
+    ]
+  },
+  "dialogueReview": {
+    "automatedMatches": 16,
+    "automatedMismatches": 2,
+    "mismatchKinds": [
+      "advice clean",
+      "advice prior-echo"
+    ],
+    "review": "Both advice replies contain concrete preparation: proposal/company materials and arriving early. Original narrow demand/goal keyword check marked these false. Results kept unchanged; this is limited human code-review of synthetic answers, not founder acceptance."
+  },
+  "deviceGeneral": {
+    "rounds": [
+      {
+        "kind": "translation",
+        "query": "把这句话翻译成英语：谢谢你今天的帮助。",
+        "answer": "Thank you for your help today.",
+        "audioPlayed": true
+      },
+      {
+        "kind": "explanation",
+        "query": "为什么天空是蓝色的？请用两句话解释。",
+        "answer": "阳光穿过大气时，蓝光比其他颜色的光更容易被空气分子散射。我们看到的天空是蓝色，因为蓝光散射到各个方向，比红光更强烈。",
+        "audioPlayed": true
+      },
+      {
+        "kind": "advice",
+        "query": "明天要见客户，我该准备些什么？请用两句话回答。",
+        "answer": "带一份简洁的提案和公司简介，提前十分钟到现场。记得确认客户是否需要PPT或具体问题清单。",
+        "audioPlayed": true
+      }
+    ],
+    "microphoneUsed": false,
+    "humanNaturalnessAccepted": false
+  },
+  "cameraBefore": {
+    "rounds": [
+      {
+        "cameraEnabled": false,
+        "sampleRateHz": 24000,
+        "playbackRateHz": 24000,
+        "underruns": 1,
+        "playedFrames": 71040,
+        "playedPcmMs": 2960.0,
+        "inputToFirstAudioMs": 1262,
+        "firstAudioToFinishedMs": 3259,
+        "answer": "结果是12。",
+        "imagesRequested": false,
+        "humanVoiceUsed": false
+      },
+      {
+        "cameraEnabled": true,
+        "sampleRateHz": 24000,
+        "playbackRateHz": 24000,
+        "underruns": 1,
+        "playedFrames": 26880,
+        "playedPcmMs": 1120.0,
+        "inputToFirstAudioMs": 711,
+        "firstAudioToFinishedMs": 1229,
+        "answer": "结果是12。",
+        "imagesRequested": false,
+        "humanVoiceUsed": false
+      },
+      {
+        "cameraEnabled": true,
+        "sampleRateHz": 24000,
+        "playbackRateHz": 24000,
+        "underruns": 1,
+        "playedFrames": 40320,
+        "playedPcmMs": 1680.0,
+        "inputToFirstAudioMs": 690,
+        "firstAudioToFinishedMs": 1777,
+        "answer": "结果是12。",
+        "imagesRequested": false,
+        "humanVoiceUsed": false
+      },
+      {
+        "cameraEnabled": false,
+        "sampleRateHz": 24000,
+        "playbackRateHz": 24000,
+        "underruns": 1,
+        "playedFrames": 26880,
+        "playedPcmMs": 1120.0,
+        "inputToFirstAudioMs": 767,
+        "firstAudioToFinishedMs": 1257,
+        "answer": "结果是12。",
+        "imagesRequested": false,
+        "humanVoiceUsed": false
+      }
+    ]
+  },
+  "cameraAfter": {
+    "rounds": [
+      {
+        "cameraEnabled": false,
+        "sampleRateHz": 24000,
+        "playbackRateHz": 24000,
+        "underruns": 1,
+        "playedFrames": 48000,
+        "playedPcmMs": 2000.0,
+        "inputToFirstAudioMs": 1190,
+        "firstAudioToFinishedMs": 2280,
+        "answer": "结果是12。",
+        "imagesRequested": false,
+        "humanVoiceUsed": false
+      },
+      {
+        "cameraEnabled": true,
+        "sampleRateHz": 24000,
+        "playbackRateHz": 24000,
+        "underruns": 1,
+        "playedFrames": 34560,
+        "playedPcmMs": 1440.0,
+        "inputToFirstAudioMs": 1770,
+        "firstAudioToFinishedMs": 1581,
+        "answer": "结果是12。",
+        "imagesRequested": false,
+        "humanVoiceUsed": false
+      },
+      {
+        "cameraEnabled": true,
+        "sampleRateHz": 24000,
+        "playbackRateHz": 24000,
+        "underruns": 1,
+        "playedFrames": 23040,
+        "playedPcmMs": 960.0,
+        "inputToFirstAudioMs": 1038,
+        "firstAudioToFinishedMs": 1106,
+        "answer": "结果是12。",
+        "imagesRequested": false,
+        "humanVoiceUsed": false
+      },
+      {
+        "cameraEnabled": false,
+        "sampleRateHz": 24000,
+        "playbackRateHz": 24000,
+        "underruns": 1,
+        "playedFrames": 32640,
+        "playedPcmMs": 1360.0,
+        "inputToFirstAudioMs": 784,
+        "firstAudioToFinishedMs": 1477,
+        "answer": "结果是12。",
+        "imagesRequested": false,
+        "humanVoiceUsed": false
+      }
+    ]
+  },
+  "audioInput": [
+    {
+      "kind": "sky",
+      "source": "macOS synthesized file streamed as 16kHz PCM, no microphone",
+      "transcripts": [
+        {
+          "text": "小",
+          "final": false
+        },
+        {
+          "text": "小伴为",
+          "final": false
+        },
+        {
+          "text": "小伴为什么天",
+          "final": false
+        },
+        {
+          "text": "小伴为什么天空是蓝",
+          "final": false
+        },
+        {
+          "text": "小伴为什么天空是蓝色的",
+          "final": false
+        },
+        {
+          "text": "小伴，为什么天空是蓝色的？",
+          "final": true
+        }
+      ],
+      "answer": "因为阳光穿过大气层时，短波蓝光比其他颜色更容易被空气分子散射，所以我们看到的天空就是蓝色的。✨",
+      "elapsedMs": 13876,
+      "firstTextMs": 1850,
+      "firstAudioMs": 2796,
+      "generatedPcmMs": 11760,
+      "audioPackets": 50
+    },
+    {
+      "kind": "translate",
+      "source": "macOS synthesized file streamed as 16kHz PCM, no microphone",
+      "transcripts": [
+        {
+          "text": "把",
+          "final": false
+        },
+        {
+          "text": "把这句话",
+          "final": false
+        },
+        {
+          "text": "把这句话翻译成",
+          "final": false
+        },
+        {
+          "text": "把这句话翻译成英语",
+          "final": false
+        },
+        {
+          "text": "把这句话翻译成英语谢",
+          "final": false
+        },
+        {
+          "text": "把这句话翻译成英语谢谢你今",
+          "final": false
+        },
+        {
+          "text": "把这句话翻译成英语谢谢你今天的帮",
+          "final": false
+        },
+        {
+          "text": "把这句话翻译成英语，谢谢你今天的帮助。",
+          "final": true
+        }
+      ],
+      "answer": "Thank you for your help today.",
+      "elapsedMs": 9674,
+      "firstTextMs": 2765,
+      "firstAudioMs": 3435,
+      "generatedPcmMs": 1840,
+      "audioPackets": 8
+    }
+  ],
+  "checks": {
+    "unitTests": 481,
+    "crossAgent": "passed; model-free fixtures and stdio",
+    "calibration": "passed 3",
+    "pythonSyntax": "passed",
+    "newPrepareProfile": "passed with pre-existing Python environment and cached models",
+    "androidTestBuild": "passed",
+    "deviceGeneral": "passed 1 in 32.846s; three questions",
+    "deviceCamera": "passed 1 in 20.393s; four camera toggles"
+  },
+  "limitations": [
+    "Camera-enabled human retest reported normal speed; no universal camera-related speed guarantee.",
+    "Synthetic voice first sky run took 32.414s; final limited sample took13.876s. Not a latency distribution or causal performance proof.",
+    "Naturalness accepted for this short pair. Long reading, spontaneous ten-turn conversation and complex device combinations remain pending.",
+    "No public release, recruitment, cloud fallback or APK replacement in this task."
+  ],
+  "sourceHashes": {
+    "src/live/dialogue.ts": "6ec9aa71464c3553f70bef2484c5f987a735597e3f6234ad348efd41265b7853",
+    "src/live/session.ts": "f2f47e7812d616f6c138404fd4f8f924dce9beda4df94fab514336473dcbfe5f",
+    "src/live/types.ts": "fc60c4a3b026bcf86d9d9fed934546225e2ea888ba005f9b0856623f0715089f",
+    "src/live/local-provider.ts": "630394050768d16ce157f698638547d8b0616ea18cfdc094fac6e5be43b6d3af",
+    "scripts/live/worker.py": "0a0cefd0cf7047dd24190c689536edb20504f10aea956942ef5699750127db03",
+    "scripts/live/prepare.py": "d2f3b6f5f1602fc09f4c78c2e01d31740f08f9870c5ba444cc2b4d2796b8d212"
+  },
+  "phonePrepared": {
+    "visibleControls": [
+      {
+        "label": "开启 Live",
+        "bounds": "[601,2164][840,2244]"
+      }
+    ],
+    "captureStopped": true,
+    "nextStartLimitMs": 120000
+  }
+}

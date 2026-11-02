@@ -1,0 +1,55 @@
+{
+  "date": "2026-10-16",
+  "status": "running",
+  "phaseSignedOff": false,
+  "phoneAvailable": false,
+  "publicRelease": "paused by user",
+  "recruitment": "paused by user",
+  "sourceHashes": {
+    "src/live/session.ts": "03523c517cea79a4f69ae1503d6d8c04028d168eaa0df0c1e3eff5301c415b54",
+    "src/live/local-provider.ts": "bbd20faf96e3d767fd8ed934e7f2cd6ab63feed1a8dc8c0ecf0ba5dab7768c12",
+    "src/live/server.ts": "161b3288327d8f4f8a10f08748ed4d800fa44fc74fac3e9ba786f1c5cdd61608",
+    "src/live/dialogue.ts": "0710600a62eb4b9e75a207c465c6d903130cf24d4b2c64d9742d1a322e6eabab",
+    "src/live/recall.ts": "cd8931dc5e88256f6d59191ffd0ecc465394b1e44cfac21e2f0b88579b8f595d",
+    "scripts/live/worker.py": "57cfdfd8bc761db9fbfd817655eb69f539ca324a4f0b6d7776877aaecdd58ae7"
+  },
+  "stopStress": {
+    "input": "synthetic stop PCM; no microphone",
+    "rows": [
+      {
+        "round": 0,
+        "inputStartToFirstPauseMs": 370,
+        "oldAudioResumed": false
+      },
+      {
+        "round": 1,
+        "inputStartToFirstPauseMs": 296,
+        "oldAudioResumed": false
+      },
+      {
+        "round": 2,
+        "inputStartToFirstPauseMs": 269,
+        "oldAudioResumed": false
+      },
+      {
+        "round": 3,
+        "inputStartToFirstPauseMs": 237,
+        "oldAudioResumed": false
+      },
+      {
+        "round": 4,
+        "inputStartToFirstPauseMs": 350,
+        "oldAudioResumed": false
+      }
+    ],
+    "connected": true
+  },
+  "remaining": [
+    "final mixed window",
+    "remaining boundary tests",
+    "long speech",
+    "model integrity",
+    "clean package install",
+    "physical and human validation"
+  ]
+}

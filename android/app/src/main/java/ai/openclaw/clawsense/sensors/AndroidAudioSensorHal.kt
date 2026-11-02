@@ -27,6 +27,18 @@ class AndroidAudioSensorHal(
   private val context: Context,
   private val config: Config = Config(),
 ) : AudioSensorHal {
+  @Volatile private var liveConsumer: ((ByteArray) -> Unit)? = null
+  @Volatile private var liveAmbientRecording = true
+  private var echo: android.media.audiofx.AcousticEchoCanceler? = null
+  val echoAvailable: Boolean get() = echo?.enabled == true
+  fun setLiveConsumer(consumer: ((ByteArray) -> Unit)?, recordAmbient: Boolean = true) {
+    liveConsumer = consumer
+    liveAmbientRecording = recordAmbient
+    if (consumer != null && record != null && echo == null && android.media.audiofx.AcousticEchoCanceler.isAvailable()) {
+      echo = runCatching { android.media.audiofx.AcousticEchoCanceler.create(record!!.audioSessionId)?.apply { enabled = true } }.getOrNull()
+    }
+    if (consumer == null) { echo?.release(); echo = null }
+  }
   private val tag = "ClawSenseAudio"
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
   private var record: AudioRecord? = null
@@ -34,6 +46,9 @@ class AndroidAudioSensorHal(
   @Volatile private var activeAudioSource: Int = config.audioSource
   @Volatile private var pendingQueryCapture: AssistantQueryCapture? = null
   @Volatile private var activeQueryCapture: AssistantQueryCapture? = null
+  private val ambientIsolation = AmbientAudioIsolation()
+
+  fun setAmbientCaptureSuppressed(suppressed: Boolean) = ambientIsolation.setSuppressed(suppressed)
 
   /**
    * Starts a dedicated push-to-record capture for an explicit assistant query.
@@ -73,6 +88,7 @@ class AndroidAudioSensorHal(
       "AudioRecord started. sampleRate=${config.sampleRate} source=${audioSourceName(activeAudioSource)} threshold=${config.vadThresholdRms} minVoicedMs=${config.minVoicedMs}",
     )
     record = recorder
+    liveConsumer?.let { setLiveConsumer(it, liveAmbientRecording) }
 
     loopJob = scope.launch {
       val frame = ShortArray(config.readFrameSize)
@@ -94,7 +110,11 @@ class AndroidAudioSensorHal(
       var clipStartedAtWallClockMs = 0L
 
       while (isActive) {
-        val read = recorder.read(frame, 0, frame.size, AudioRecord.READ_BLOCKING)
+        // Live short controls must not wait for the legacy 128ms recording
+        // block. Preserve that recording contract when ambient capture is on.
+        val readSamples = if (liveConsumer != null && !liveAmbientRecording)
+          minOf(frame.size, (config.sampleRate / 50).coerceAtLeast(1)) else frame.size
+        val read = recorder.read(frame, 0, readSamples, AudioRecord.READ_BLOCKING)
         if (read <= 0) {
           continue
         }
@@ -102,6 +122,17 @@ class AndroidAudioSensorHal(
         val frameDurationMs = ((read * 1000L) / config.sampleRate).coerceAtLeast(1L)
         val frameBytes = toPcm16Bytes(frame, read)
         val rms = computeRms(frame, read)
+        liveConsumer?.invoke(frameBytes)
+        if (liveConsumer != null && (!liveAmbientRecording || System.currentTimeMillis() < ai.openclaw.clawsense.AppGraph.live(context).suppressAmbientUntil)) {
+          if (liveAmbientRecording && capturing && clipVoicedMs >= config.minVoicedMs && pcmBuffer.size() > 0) {
+            val duration = (nowElapsed - clipStartElapsed).coerceAtLeast(1L)
+            val sessionId = currentConversationWindowId ?: "conv-${clipStartedAtWallClockMs}-live"
+            val clip = CapturedAudioClip(bytes = WavEncoder.wrapPcm16Mono(pcmBuffer.toByteArray(), config.sampleRate), fileName = "capture-live-${System.currentTimeMillis()}.wav", capturedAt = clipStartedAtWallClockMs, durationMs = duration,
+              note = buildConversationNote(sessionId, conversationSegmentIndex + 1, if (currentConversationWindowStartedAtMs > 0) currentConversationWindowStartedAtMs else clipStartedAtWallClockMs, duration, clipVoicedMs, peakRms, "live-playback-start", true))
+            try { onClip(clip) } catch (error: Throwable) { if (error is CancellationException) throw error; Log.w(tag, "Pre-playback ambient handoff failed") }
+          }
+          capturing = false; pcmBuffer.reset(); preRollFrames.clear(); clipVoicedMs = 0L; voicedFrameStreak = 0; continue
+        }
 
         pendingQueryCapture?.let { requested ->
           pendingQueryCapture = null
@@ -155,6 +186,27 @@ class AndroidAudioSensorHal(
             }
           }
           // Query frames never feed the ambient pipeline.
+          continue
+        }
+
+        if (!ambientIsolation.allowFrame {
+            capturing = false
+            pcmBuffer.reset()
+            preRollFrames.clear()
+            voicedFrameStreak = 0
+            peakRms = 0.0
+            clipStartElapsed = 0L
+            lastVoiceElapsed = 0L
+            clipStartedAtElapsed = 0L
+            clipStartedAtWallClockMs = 0L
+            clipVoicedMs = 0L
+            currentConversationWindowId = null
+            currentConversationWindowStartedAtMs = 0L
+            conversationSegmentIndex = 0
+            lastConversationClipEndedAtElapsed = Long.MIN_VALUE
+          }) {
+          // Explicit query frames were handled above; waiting/TTS/drain frames
+          // must never accumulate into a later ambient clip.
           continue
         }
 
@@ -312,6 +364,7 @@ class AndroidAudioSensorHal(
     loopJob = null
     activeQueryCapture = null
     withContext(Dispatchers.IO) {
+      echo?.release(); echo = null
       record?.runCatching { release() }
       record = null
     }
@@ -349,19 +402,20 @@ class AndroidAudioSensorHal(
 
   private fun createRecorder(minBuffer: Int): AudioRecord {
     val bufferSize = maxOf(minBuffer * 2, config.readFrameSize * 2)
+    val requestedSource = if (liveConsumer != null && !liveAmbientRecording) MediaRecorder.AudioSource.VOICE_COMMUNICATION else config.audioSource
     val primary = AudioRecord(
-      config.audioSource,
+      requestedSource,
       config.sampleRate,
       AudioFormat.CHANNEL_IN_MONO,
       AudioFormat.ENCODING_PCM_16BIT,
       bufferSize,
     )
     if (primary.state == AudioRecord.STATE_INITIALIZED) {
-      activeAudioSource = config.audioSource
+      activeAudioSource = requestedSource
       return primary
     }
-    if (config.audioSource == MediaRecorder.AudioSource.MIC) {
-      activeAudioSource = config.audioSource
+    if (requestedSource == MediaRecorder.AudioSource.MIC) {
+      activeAudioSource = requestedSource
       return primary
     }
     primary.release()

@@ -1,9 +1,74 @@
 # ClawSense
 
+2026-11-03：当前工作区已整理为 **[v0.2.0-preview.12 预览快照](https://github.com/cedricxie366-stack/ClawSense/releases/tag/v0.2.0-preview.12)**，按用户要求包含未完成验收的功能。Host 为 `0.2.0-preview.12`，Android 为 `0.3.12-upstream-device-preview-live-preview`。这是保存现状、供后续改进的预览发布，不代表 P1／P2 整体验收通过。火山等强云端 Live 方案仍处于研究阶段，尚未接入；公开招募未启动。[安装与已知问题](docs/releases/v0.2.0-preview.12.md)。以下日期记录保留各自验证范围。
+
+## P1／P2 集成预览与内测候选
+
+2026-10-29真机续验：Android0.3.12已安装OPPO并配对，新SDK连接与静音文字问答成立。已补会话亮屏；自动接收连接存在系统麦克风访问例外，后续自动准备只走HTTP。最后集中真人检查仍待完成，P1未签核。见[续验记录](docs/validation/p1-upstream-device-2026-10-29.md)。
+
+Host `0.2.0-preview.11`／Android `0.3.11-upstream-live-preview`（versionCode15）已形成可选上游候选。Pipecat接管轮次与媒体，ClawSense保留来源、权限和记忆；独立HF对照、11轮静音模型输出、实际WebRTC收发与停止恢复、三组背景声和图像／记忆／撤权检查取得限定通过。558项项目检查及56项Android JVM通过。当前未检测到已授权手机，新APK尚未安装；最终真人听感、回声与实物集中留到最后，P1未整体签核。见[本轮验收记录](docs/validation/p1-upstream-2026-10-29.md)和[运行约定](docs/contracts/live-upstream-v1.md)。
+
+10月23日候选为Host `0.2.0-preview.10`、Android `0.3.10-live-conversation-preview`（versionCode14）已安装OPPO。正常12轮对话使用实际模型和手机播放器静音检查，75.68秒音频全部播完；分句、朗读／翻译、最新安排及背景推理准备已补修。546项项目检查、56项JVM、6项Python、跨Agent和校准通过。最新6秒完整句首写940ms；冷准备6.7秒；10次生成口令停止均不复播，样本P95为481ms。自然听感仍待一次集中短测，严格300ms及响应长尾仍开放，P1未整体签核。见[本轮记录](docs/validation/p1-normal-dialogue-2026-10-23.md)。
+
+已接入 Live 当前镜头、语音／按钮停止、带来源的近期会话、DSH 与 Codex 实际工作及手机成果复核。手机数字分享、联系人关联、OCR／裁剪／遮挡、共同背景缓存和桌面主动导入使用同一记忆与权限体系。基础模型在自有电脑运行；不是纯手机推理或已验收的全双工产品。
+
+10月19日本地候选版为 `0.2.0-preview.3`，独立 Android **ClawSense Live** 为 `0.3.3-live-latency-preview`（versionCode7）。本批处理响应长尾、模型驻留与释放、中间转写／整句复核、较早用户陈述、回声、服务结束竞争及新画面失败后的旧答复。自动结果、视觉等待和实体设备待验范围见[10月19日自验](docs/validation/p1-autonomous-2026-10-19.md)。旧 `0.2.0-preview.2` 综合包及日期证据保持原哈希；0.3.3尚未安装到本人的OPPO。原 OpenClaw 与 Android 采集入口保留。公共发布和招募按用户安排暂缓，其它宿主的安装配置不等于实际客户端验收。
+
+10月16日真机续验另交付 Android `0.3.1-live-start-preview` 启动修复：连接错误显示在按钮附近、启动等待有时限，实际开启／结束和本机验收限时通过。详见[真机续验记录](docs/validation/p1-p2-human-2026-10-16.md)；旧综合包的APK和哈希保持不变。公共发布与招募已由用户明确暂缓，当前集中验证现场体验。
+
+同日对话质量修复将新准备的本机文本模型与视觉模型分开：文本默认Qwen3-4B-Instruct-2507，视觉保留Qwen3.5-2B；已有配置需明确升级，不自动迁移。翻译／一般解释减少无关私密历史输入，长答后的追问窗口按播报结束续算；未配置联网工具时不编造实时天气。本人已确认本次开镜头的一般问答／追问“实际答案不错，语速正常，语音自然”，见[专项记录](docs/validation/live-dialogue-quality-2026-10-16.md)。十轮真人、插话、视觉故事和设备组合仍待验；后续0.3.2另补调试验收限时，见[最新回执](docs/validation/live-human-confirm-2026-10-16.md)。
+
+- [Live 使用契约](docs/contracts/live-runtime-v1.md)
+- [现行总体计划](docs/产品演进路线与执行计划.md)
+- [专业场景内测手册与支持范围](docs/pilot/README.md)
+
+主动导入桌面文件：`clawsense import --file ./selected.md --project live`；工作台“导入数字资料”可预览文字／截图，浏览器书签只带入当时选择的片段，确认后保存。来源文本不自动变成业务约定或执行指令。
+
+
 [![license](https://img.shields.io/github/license/cedricxie366-stack/ClawSense)](./LICENSE)
 [![release](https://img.shields.io/github/v/tag/cedricxie366-stack/ClawSense?label=release)](https://github.com/cedricxie366-stack/ClawSense/releases)
 
-ClawSense is a working OpenClaw plugin and Android client for physical-world interactive agents. It uses an Android phone as a real-time multimodal sensing node, then turns consented audio, images, short video, timestamps, and heartbeat signals into inspectable evidence that an agent can use during live interaction.
+ClawSense is building a user-controlled assistant that can hear and see the physical world, remember it with evidence and corrections, and participate through natural Live conversation. It starts with experienced AI users and professional roles, connecting their existing agents to phones and other sensing devices, then evolves toward phone/watch clients and packaged services for everyday users.
+
+**Start with the [product vision and founder’s complete statement](./VISION.md), then the [current evolution and delivery plan](./docs/产品演进路线与执行计划.md).** Natural Live interaction, private memory, selective sharing, and eventual phone-only operation are core goals. A desktop computer is an optional future enhancement; the current developer preview still uses a companion service.
+
+The current Android preview captures consented audio, images and short video, supports bounded spoken questions and TTS, and keeps evidence, corrections and work results available across agents. Broader Live quality, phone-local end-to-end inference, and watch clients remain development targets. OpenClaw remains supported as the original host integration. [Digital context design](./docs/手机与桌面数字上下文规划.md) and [nanoMuse reuse assessment](./docs/research/nanomuse-reuse-2026-10-14.md) supply implementation context.
+
+The current plan explicitly retains mobile sharing/contact/OCR/inbox and reusable memory in P2, desktop inputs, historical Q&A and Daily Review, per-host installation and publishing, selective screen/notification sources, and later phone authority and watch integration. Live is the immediate product track; each retained capability has a delivery batch, dependency and acceptance scope in the [overall plan](./docs/产品演进路线与执行计划.md).
+
+Experimental Live is now integrated from `codex/live-companion` into the shared context core. Android has a separate **ClawSense Live** preview with continuous microphone transport, streaming replies, interruption and DSH result viewing. The default ASR, language model and voice model run on the user's Mac; this is owned-device processing, not phone-local inference or full-duplex acceptance. See the [Live runtime contract](docs/contracts/live-runtime-v1.md) and [integration validation](docs/validation/live-mainline-integration-2026-10-14.md). The original Android app and OpenClaw entry remain available.
+
+## Cross-agent developer preview
+
+The October 14 G2 implementation adds common workspace/person identities, analysis history, correction authority, dependency snapshots, independent result review/replacement, project/source/operation grants, processing-recipient checks, managed deletion and offline migration/recovery. Default reuse selects accepted, current, authorized results. Legacy physical-library credentials retain their existing scope; selective office access requires a new scoped connection. Android validates new answer snapshots and drops tombstoned queued captures. See [implementation and usage](./docs/G2统一上下文实现与使用.md) and [G2 validation](./docs/validation/g2-unified-2026-10-14.md). Phone-local inference, automatic host execution, external-copy erasure and public distribution remain separate work.
+
+The standalone companion now runs without an OpenClaw installation. It provides authenticated MCP over stdio and Streamable HTTP, encounter revisions, explicit corrections, work handoffs and saved results. A local browser console supports pairing, evidence inspection, corrections, downloads and preparation for the next encounter.
+
+Installation bundles can be generated for Pi, Codex, Claude Code, OpenCode, DSH, WorkBuddy, TRAE, Doubao Work, QwenWork and OpenClaw's companion-client mode. The CLI can merge local MCP settings for Pi, Codex, Claude Code and OpenCode. DSH receives a Cordis patch for its existing model environment. OpenClaw receives a native-plugin config fragment for the same companion library, using a revocable `openclaw-client` identity and no second capture service. **Generated configurations and protocol tests do not mean every native host or marketplace has been accepted.** WorkBuddy, TRAE and QwenWork retain native import steps; Doubao Work's HTTP template needs a reachable HTTPS deployment and manual connection verification. Public publishing remains separate.
+
+On October 13, the four-tab Android UI was integrated and a real phone camera image was read by an independent DSH client using the configured GLM gateway. The cup's appearance and large visible text matched the original image. This validates one image case; phone-side automatic visual Q&A and broader G0 quality checks remain open. See the [image acceptance record](docs/validation/g0-cup-vision-2026-10-13.md).
+
+On October 14, the early G0/G1 functional baseline passed for the tested Android device, scenarios and native Codex/DSH hosts. Phone tests confirmed automatic cup-image Q&A, complete reading, cancellation, two-fact speech under tapping noise, no unarmed reply and bounded playback isolation. Native Codex → DSH completed correction, handoff, result storage and reuse by fresh sessions after a service restart. The fourth draft was explicitly selected after three drafts failed semantic checks; older completed drafts are retained and are not automatically superseded. Storage completion does not prove approval, sending or delivery. This is a limited baseline, not acceptance of every host, noise condition or an uninterrupted recorder. Natural voice quality, unified physical/digital context, automatic execution and public release remain open. See the [final baseline record](docs/validation/g0-g1-closeout-2026-10-14.md) and [DSH workflow record](docs/validation/g1-dsh-2026-10-14.md).
+
+Live acceptance has started: Codex CLI 0.154.0 read an original test image and real Android calibration transcript, saved corrections and a draft, and recovered them after a companion restart. That run could not consume native audio directly. Claude Code's October 10 model request returned 401; the October 12 isolated client reported no login. Real phone video with two linked still images and offline recovery across a phone process restart passed limited tests. On October 12 the user confirmed the corrected Friday answer, follow-up, short full-text playback and stop-speaking, with understandable but mechanical voice. Long-text truncation and TTS queue cancellation were fixed; the updated APK passed actual system TTS and UI stop-capture checks without clearing user data. Visual semantics and wider background-speech quality remain open. See the [October 10 record](./docs/validation/g0-g1-live-2026-10-10.md) and [October 12 continuation](./docs/validation/g0-live-2026-10-12.md).
+
+On October 13, actual Codex and OpenClaw clients completed a bounded handoff and saved-result workflow against the same companion. Both recovered the selected OpenClaw draft in fresh sessions after a service restart. Deadline and recipient errors in earlier drafts were caught and retained in the record; saving a result is not content approval. This does not establish all-host acceptance, automatic agent execution, continuous conversation or publication. See the [cross-host acceptance record](./docs/validation/g1-native-2026-10-13.md).
+
+From this source checkout (Node 22.12+):
+
+```bash
+npm install
+npm run build
+node dist/src/cli.js start --lan --local-asr
+node dist/src/cli.js open
+node dist/src/cli.js connect codex --apply
+```
+
+The browser opens locally; use it to obtain a temporary phone setup code. Android capture still starts explicitly in the phone app. `--lan` selects a private LAN address; use `--public-url` when multiple network interfaces require a different address. Keep the host reachable during capture. Omitting `--lan` limits the service to this computer.
+
+Default companion state is `~/.clawsense`, separate from OpenClaw. Each connected agent receives a revocable credential for this owner's library. `--local-asr` prepares the free SenseVoice int8 speech model (about 240 MB on first use), verifies pinned file hashes and native loading, then reuses it. It needs no Python setup or paid API key. The generated companion preset disables inherited cloud credentials, leaves image/video interpretation to the connected agent, and keeps raw media locally. Connecting a cloud agent still grants it access to the evidence it requests; this is not a claim that the whole chain stays local. Custom processing configurations remain available through `--config`.
+
+See [cross-agent usage](./docs/跨Agent插件使用指南.md), [current development plan](./docs/产品演进路线与执行计划.md) and [G2 validation](./docs/validation/g2-unified-2026-10-14.md). Complete sensing quality, all target hosts, graphical installation and public directory publication remain pending.
 
 The research question behind the project is simple:
 

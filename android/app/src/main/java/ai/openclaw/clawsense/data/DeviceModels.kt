@@ -12,6 +12,7 @@ data class DeviceSession(
   val heartbeatIntervalSec: Int,
   val memoryNamespace: String,
   val pairedAt: Long,
+  val digitalContextEnabled: Boolean = false,
 )
 
 data class PairingSetup(
@@ -38,6 +39,7 @@ data class PairingResponse(
   val heartbeatIntervalSec: Int = 60,
   val memoryNamespace: String = "clawsense",
   val pairedAt: Long,
+  val digitalContextEnabled: Boolean = false,
 )
 
 @Serializable
@@ -63,6 +65,7 @@ data class HeartbeatRequest(
   val batteryPct: Double? = null,
   val network: String? = null,
   val appState: String? = null,
+  val cacheSnapshotId: String? = null,
 )
 
 @Serializable
@@ -80,7 +83,11 @@ data class CaptureVideoDirective(
 data class HeartbeatResult(
   val heartbeatIntervalSec: Int,
   val captureDirective: CaptureVideoDirective? = null,
+  val cacheValidation: ContextCacheValidation? = null,
 )
+
+@Serializable
+data class ContextCacheValidation(val snapshotId: String, val state: String)
 
 @Serializable
 data class CapturePreferences(
@@ -161,6 +168,7 @@ enum class ServicePhase {
   STOPPED,
   STARTING,
   RUNNING,
+  STOPPING,
   ERROR,
 }
 
@@ -262,6 +270,7 @@ data class AssistantQueryResponse(
   val actionIntent: AssistantActionIntent? = null,
   val stt: AssistantQuerySttDiagnostics? = null,
   val audioRecheck: AssistantAudioRecheckDiagnostics? = null,
+  val contextSnapshotId: String? = null,
 )
 
 @Serializable
@@ -283,4 +292,5 @@ data class AssistantInteractionSnapshot(
   val answerText: String? = null,
   val answerSpokenText: String? = null,
   val answeredAt: Long? = null,
+  val contextSnapshotId: String? = null,
 )

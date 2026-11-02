@@ -1,0 +1,69 @@
+{
+  "reviewDate": "2026-10-14",
+  "scope": "Upstream source LICENSE files only; not a full dependency, model-weight or distribution audit. No upstream code imported.",
+  "nanoMuseCommit": "3428c15fc1eb57945a6c1bb42b53db9ceffa812f",
+  "dshPackageMetadata": {
+    "name": "@deepseek-ai/dsh",
+    "version": "0.2.0-rc.2",
+    "license": "MIT",
+    "source": "https://registry.npmjs.org/@deepseek-ai%2Fdsh/0.2.0-rc.2"
+  },
+  "repositories": [
+    {
+      "repo": "deepseek-ai/deepseek-harness",
+      "sha": "d743267388641bc76f17c45ce8b4c231aed1d32c",
+      "license": "MIT",
+      "path": "LICENSE",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/d743267388641bc76f17c45ce8b4c231aed1d32c/LICENSE",
+      "sha256": "ebb4f09972aee8608be255debaf78451a68e95c290f55c240dec2ecfa16ea6be"
+    },
+    {
+      "repo": "earendil-works/pi",
+      "sha": "3daa20280f6a7c7cbe0935680c9a38fdc3863005",
+      "license": "MIT",
+      "path": "LICENSE",
+      "url": "https://github.com/earendil-works/pi/blob/3daa20280f6a7c7cbe0935680c9a38fdc3863005/LICENSE",
+      "sha256": "0457f5bcec3b3b211605dfb5d1a49042fd638f3686a410fe099c24a25af13c48"
+    },
+    {
+      "repo": "helloooideeeeea/RealTimeCutVADLibraryForAndroid",
+      "sha": "a4450c2b5fb0f2d14a9ef2ac727e0ee2ae9a9116",
+      "license": "MIT",
+      "path": "LICENSE",
+      "url": "https://github.com/helloooideeeeea/RealTimeCutVADLibraryForAndroid/blob/a4450c2b5fb0f2d14a9ef2ac727e0ee2ae9a9116/LICENSE",
+      "sha256": "890516b450530c3f736d61eae55e7c0a8360e38651f359868099bef8c3571479"
+    },
+    {
+      "repo": "snakers4/silero-vad",
+      "sha": "1e261b036686cd0017d500ee96acd1c4ba572a9d",
+      "license": "MIT",
+      "path": "LICENSE",
+      "url": "https://github.com/snakers4/silero-vad/blob/1e261b036686cd0017d500ee96acd1c4ba572a9d/LICENSE",
+      "sha256": "2e63e9a38b6e8fc0c7bc37ce174caca1862870856c6daf5697cfb785e925520b"
+    },
+    {
+      "repo": "RikkaApps/Shizuku-API",
+      "sha": "a27f6e4151ba7b39965ca47edb2bf0aeed7102e5",
+      "license": "MIT",
+      "path": "LICENSE",
+      "url": "https://github.com/RikkaApps/Shizuku-API/blob/a27f6e4151ba7b39965ca47edb2bf0aeed7102e5/LICENSE",
+      "sha256": "64870037f294b6f2b75c8ebe77cc0702acb3b64f86b4b0e58bf8558525303686"
+    },
+    {
+      "repo": "lgy0404/MemGUI-Bench",
+      "sha": "3fb01b6cc0d13e287c67f488c76f449df7d65558",
+      "license": "MIT",
+      "path": "LICENSE",
+      "url": "https://github.com/lgy0404/MemGUI-Bench/blob/3fb01b6cc0d13e287c67f488c76f449df7d65558/LICENSE",
+      "sha256": "4fcd9de2604362b40f3529af286e34882e01bd4cb26dbedc9934c09a3f6ee827"
+    },
+    {
+      "repo": "rclone/rclone",
+      "sha": "4983d291e66c590a75acd4f9cf0d50e61230f6d3",
+      "license": "MIT",
+      "path": "COPYING",
+      "url": "https://github.com/rclone/rclone/blob/4983d291e66c590a75acd4f9cf0d50e61230f6d3/COPYING",
+      "sha256": "8cd2e9e750b90a04b7d82dbbca3930c696ae0309d7c10464f90a44f45754cd04"
+    }
+  ]
+}

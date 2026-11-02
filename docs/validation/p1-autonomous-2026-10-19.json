@@ -1,0 +1,1340 @@
+{
+  "date": "2026-10-19",
+  "status": "host_and_bounded_android_checks_complete_with_joint_device_acceptance_pending",
+  "phaseSignedOff": false,
+  "hostVersion": "0.2.0-preview.3",
+  "androidVersionCode": 7,
+  "physicalPhoneLastContact": {
+    "date": "2026-10-16",
+    "versionCode": 6
+  },
+  "sourceHashes": {
+    "src/live/session.ts": "66c10d7565ed7e78ec75b58585fbb831e14c52949ad3f1591657409429555c1b",
+    "src/live/local-provider.ts": "5296e72c4a595f508375ef5220f8416d4a46a4a4418233a1f09ba3d219901313",
+    "src/live/server.ts": "8c43e0e89f467bdc83cccba584893eacbfa1af4d58233e0fe495837da5c7b03e",
+    "src/live/dialogue.ts": "5c7f2c351687393abf462a0d5b2eddb5456a4f8f69ccaa19ee769bba16bab947",
+    "src/live/recall.ts": "cd8931dc5e88256f6d59191ffd0ecc465394b1e44cfac21e2f0b88579b8f595d",
+    "scripts/live/worker.py": "914927cb65e6ca153b10eb6db1bffe31140e0ac31e9cc8ee83a2b696d4343396"
+  },
+  "scope": {
+    "host": "owned Mac M4/16GiB; no Android emulator during sustained window",
+    "actualMicrophone": false,
+    "actualCamera": false,
+    "androidAudioTrackInSustainedWindow": false,
+    "audioEndpoint": "first PCM received by WebSocket client; paced synthetic acknowledgements; no acoustic output",
+    "wholePhoneLocalInference": false,
+    "externalTcpDenied": true
+  },
+  "hostMixed": {
+    "complete": true,
+    "elapsedMs": 1800663,
+    "turns": 89,
+    "continuousInputFrames": 83050,
+    "stopAndReconnectChecks": 7,
+    "byKind": {
+      "0": {
+        "samples": 15,
+        "medianMs": 1107,
+        "p95Ms": 2363,
+        "maxMs": 2363
+      },
+      "1": {
+        "samples": 15,
+        "medianMs": 2436,
+        "p95Ms": 3064,
+        "maxMs": 3064
+      },
+      "2": {
+        "samples": 15,
+        "medianMs": 4930,
+        "p95Ms": 5624,
+        "maxMs": 5624
+      },
+      "3": {
+        "samples": 15,
+        "medianMs": 983,
+        "p95Ms": 1210,
+        "maxMs": 1210
+      },
+      "4": {
+        "samples": 15,
+        "medianMs": 7227,
+        "p95Ms": 9468,
+        "maxMs": 9468
+      },
+      "5": {
+        "samples": 14,
+        "medianMs": 440,
+        "p95Ms": 1207,
+        "maxMs": 1207
+      }
+    },
+    "kindNames": {
+      "0": "general explanation",
+      "1": "memory three-fact summary",
+      "2": "3694.6875ms input PCM question, includes utterance duration",
+      "3": "translation",
+      "4": "synthetic JPEG analysis",
+      "5": "arithmetic"
+    }
+  },
+  "resources": {
+    "samples": 357,
+    "hostTreeRssMaxMiB": 6844,
+    "availableMemoryMinGiB": 1.0319366455078125,
+    "systemSwapMaxGiB": 20.8306884765625,
+    "maxSchedulerGapMs": 5096.43895807676,
+    "rssIsNotTotalUnifiedMemory": true,
+    "systemSwapIsNotExclusiveToClawSense": true
+  },
+  "androidBoundaries": [
+    {
+      "method": "stoppingAnIdleServiceCannotDisconnectTheNextLive",
+      "passed": true
+    },
+    {
+      "method": "expiredFrameCannotLeaveThePreviousVisualAnswerOnScreen",
+      "passed": true
+    },
+    {
+      "method": "currentCameraFrameIsRequestedOnceAndEndsWithLive",
+      "passed": true
+    },
+    {
+      "method": "cameraVideoAndCancellationPreserveTheCaptureContract",
+      "passed": true
+    },
+    {
+      "method": "liveOnlyUsesOneMicrophoneAndEndReleasesIt",
+      "passed": true
+    },
+    {
+      "method": "controlledAudioFocusLossStopsLiveWithoutResuming",
+      "passed": true
+    },
+    {
+      "method": "backgroundAndEmulatedScreenSleepKeepSingleSessionUntilEnd",
+      "passed": true
+    },
+    {
+      "method": "activityValidationLimitEndsLiveWithoutHostDisconnection",
+      "passed": true
+    },
+    {
+      "method": "streamingConversationAndInterruptKeepOldAudioStopped",
+      "passed": true
+    },
+    {
+      "method": "repeatedSpokenStopsDoNotBackUpTheInputQueue",
+      "passed": true
+    },
+    {
+      "method": "audienceSettingsSaveBeforeStartingMicrophone",
+      "passed": true
+    },
+    {
+      "method": "cameraTogglePlaybackCalibration",
+      "passed": true
+    }
+  ],
+  "androidTenTypedTurns": {
+    "turns": 10,
+    "typedTextToAudioTrackMs": [
+      1559,
+      1373,
+      1367,
+      1374,
+      1430,
+      3558,
+      2773,
+      1322,
+      1245,
+      2519
+    ],
+    "measurements": [
+      {
+        "turn": 1,
+        "inputToFirstPacketMs": 1493,
+        "firstPacketToAudioTrackMs": 66,
+        "host": {
+          "version": 1,
+          "input": "text",
+          "endpoint": "host-pcm-emitted",
+          "totalMs": 4205.698249999958,
+          "milestonesMs": {
+            "inputPrepared": 311.4425419999752,
+            "contextReady": 1191.4338329999591,
+            "firstText": 1216.6987079999526,
+            "firstPhraseReady": 1217.9568330000038,
+            "firstTtsStarted": 1217.9597079999512,
+            "firstTtsPacket": 1442.3837919999496,
+            "firstHostAudio": 1466.4613749999553
+          },
+          "spans": {
+            "historyFilter": {
+              "totalMs": 144.5064999999595,
+              "count": 2
+            },
+            "inputCheckpoint": {
+              "totalMs": 201.2372500000056,
+              "count": 1
+            },
+            "contextBuild": {
+              "totalMs": 330.1901249999646,
+              "count": 1
+            },
+            "sourceValidation": {
+              "totalMs": 461.3261689998326,
+              "count": 18
+            },
+            "recordUser": {
+              "totalMs": 307.57541699998546,
+              "count": 1
+            },
+            "historyBinding": {
+              "totalMs": 186.771584000031,
+              "count": 1
+            },
+            "outputCheckpoint": {
+              "totalMs": 194.22616699995706,
+              "count": 1
+            }
+          },
+          "providers": [
+            {
+              "stage": "tts",
+              "values": {
+                "firstAudioMs": 213.12049985863268,
+                "totalMs": 2765.601582825184,
+                "generatedDurationMs": 3760,
+                "activeMemoryMiB": 2997.238494873047,
+                "cacheMemoryMiB": 33.10564136505127,
+                "peakMemoryMiB": 3406.5882425308228,
+                "wiredLimitMiB": 3932.161874771118,
+                "modelLoadMs": 0.004083849489688873,
+                "residencyMs": 0.005042180418968201
+              }
+            }
+          ],
+          "meaning": "Host offsets start at accepted text/transcript; spans may overlap. ASR, transport and audible playback are separate."
+        }
+      },
+      {
+        "turn": 2,
+        "inputToFirstPacketMs": 1358,
+        "firstPacketToAudioTrackMs": 15,
+        "host": {
+          "version": 1,
+          "input": "text",
+          "endpoint": "host-pcm-emitted",
+          "totalMs": 2791.996167000034,
+          "milestonesMs": {
+            "inputPrepared": 235.224709000031,
+            "contextReady": 1053.8087920000544,
+            "firstText": 1080.7599170000176,
+            "firstPhraseReady": 1081.33620900003,
+            "firstTtsStarted": 1081.337750000006,
+            "firstTtsPacket": 1284.6328340000473,
+            "firstHostAudio": 1309.6909590000287
+          },
+          "spans": {
+            "historyFilter": {
+              "totalMs": 112.6929999999702,
+              "count": 2
+            },
+            "inputCheckpoint": {
+              "totalMs": 157.1909169999999,
+              "count": 1
+            },
+            "contextBuild": {
+              "totalMs": 303.4021669999929,
+              "count": 1
+            },
+            "sourceValidation": {
+              "totalMs": 282.0307100000791,
+              "count": 11
+            },
+            "recordUser": {
+              "totalMs": 295.37716700002784,
+              "count": 1
+            },
+            "historyBinding": {
+              "totalMs": 157.49908300000243,
+              "count": 1
+            },
+            "outputCheckpoint": {
+              "totalMs": 145.71145800000522,
+              "count": 1
+            }
+          },
+          "providers": [
+            {
+              "stage": "tts",
+              "values": {
+                "firstAudioMs": 202.09370786324143,
+                "totalMs": 1563.7873329687864,
+                "generatedDurationMs": 2160,
+                "activeMemoryMiB": 2997.255096435547,
+                "cacheMemoryMiB": 33.105469703674316,
+                "peakMemoryMiB": 3406.5882425308228,
+                "wiredLimitMiB": 3932.161874771118,
+                "modelLoadMs": 0.01679197885096073,
+                "residencyMs": 0.01854216679930687
+              }
+            }
+          ],
+          "meaning": "Host offsets start at accepted text/transcript; spans may overlap. ASR, transport and audible playback are separate."
+        }
+      },
+      {
+        "turn": 3,
+        "inputToFirstPacketMs": 1339,
+        "firstPacketToAudioTrackMs": 28,
+        "host": {
+          "version": 1,
+          "input": "text",
+          "endpoint": "host-pcm-emitted",
+          "totalMs": 2409.1541669999715,
+          "milestonesMs": {
+            "inputPrepared": 196.09545799996704,
+            "contextReady": 1039.914208000002,
+            "firstText": 1063.6574169999803,
+            "firstPhraseReady": 1064.24420799996,
+            "firstTtsStarted": 1064.245707999973,
+            "firstTtsPacket": 1252.5400420000078,
+            "firstHostAudio": 1280.116875000007
+          },
+          "spans": {
+            "historyFilter": {
+              "totalMs": 92.49895899998955,
+              "count": 2
+            },
+            "inputCheckpoint": {
+              "totalMs": 152.6342500000028,
+              "count": 1
+            },
+            "contextBuild": {
+              "totalMs": 310.80541699996684,
+              "count": 1
+            },
+            "sourceValidation": {
+              "totalMs": 243.40775100002065,
+              "count": 9
+            },
+            "recordUser": {
+              "totalMs": 295.2177499999525,
+              "count": 1
+            },
+            "historyBinding": {
+              "totalMs": 165.08829200000037,
+              "count": 1
+            },
+            "outputCheckpoint": {
+              "totalMs": 140.55541699996684,
+              "count": 1
+            }
+          },
+          "providers": [
+            {
+              "stage": "tts",
+              "values": {
+                "firstAudioMs": 186.65266688913107,
+                "totalMs": 1184.1670419089496,
+                "generatedDurationMs": 1600,
+                "activeMemoryMiB": 2997.238494873047,
+                "cacheMemoryMiB": 33.090271949768066,
+                "peakMemoryMiB": 3406.5882425308228,
+                "wiredLimitMiB": 3932.161874771118,
+                "modelLoadMs": 0.013208016753196716,
+                "residencyMs": 0.020416919142007828
+              }
+            }
+          ],
+          "meaning": "Host offsets start at accepted text/transcript; spans may overlap. ASR, transport and audible playback are separate."
+        }
+      },
+      {
+        "turn": 4,
+        "inputToFirstPacketMs": 1346,
+        "firstPacketToAudioTrackMs": 28,
+        "host": {
+          "version": 1,
+          "input": "text",
+          "endpoint": "host-pcm-emitted",
+          "totalMs": 2638.949750000029,
+          "milestonesMs": {
+            "inputPrepared": 188.31737499998417,
+            "contextReady": 982.4983749999665,
+            "firstText": 1024.4575830000103,
+            "firstPhraseReady": 1025.0444579999894,
+            "firstTtsStarted": 1025.0457919999608,
+            "firstTtsPacket": 1276.6238329999615,
+            "firstHostAudio": 1302.837916999997
+          },
+          "spans": {
+            "historyFilter": {
+              "totalMs": 89.8643339999835,
+              "count": 2
+            },
+            "inputCheckpoint": {
+              "totalMs": 136.3258340000175,
+              "count": 1
+            },
+            "contextBuild": {
+              "totalMs": 307.6812090000021,
+              "count": 1
+            },
+            "sourceValidation": {
+              "totalMs": 333.95804399991175,
+              "count": 9
+            },
+            "recordUser": {
+              "totalMs": 257.93041699996684,
+              "count": 1
+            },
+            "historyBinding": {
+              "totalMs": 168.69437499996275,
+              "count": 1
+            },
+            "outputCheckpoint": {
+              "totalMs": 164.1112499999581,
+              "count": 1
+            }
+          },
+          "providers": [
+            {
+              "stage": "tts",
+              "values": {
+                "firstAudioMs": 249.99962514266372,
+                "totalMs": 1428.4636250231415,
+                "generatedDurationMs": 1600,
+                "activeMemoryMiB": 2997.238494873047,
+                "cacheMemoryMiB": 33.090271949768066,
+                "peakMemoryMiB": 3406.5882425308228,
+                "wiredLimitMiB": 3932.161874771118,
+                "modelLoadMs": 0.023292144760489464,
+                "residencyMs": 0.025833025574684143
+              }
+            }
+          ],
+          "meaning": "Host offsets start at accepted text/transcript; spans may overlap. ASR, transport and audible playback are separate."
+        }
+      },
+      {
+        "turn": 5,
+        "inputToFirstPacketMs": 1403,
+        "firstPacketToAudioTrackMs": 27,
+        "host": {
+          "version": 1,
+          "input": "text",
+          "endpoint": "host-pcm-emitted",
+          "totalMs": 3118.2924999999814,
+          "milestonesMs": {
+            "inputPrepared": 236.58095899992622,
+            "contextReady": 1077.5616669999436,
+            "firstText": 1111.7423339999514,
+            "firstPhraseReady": 1112.3450419999426,
+            "firstTtsStarted": 1112.3465839999262,
+            "firstTtsPacket": 1332.1135839999188,
+            "firstHostAudio": 1356.1425419999287
+          },
+          "spans": {
+            "historyFilter": {
+              "totalMs": 94.21316600008868,
+              "count": 2
+            },
+            "inputCheckpoint": {
+              "totalMs": 190.23441599996295,
+              "count": 1
+            },
+            "contextBuild": {
+              "totalMs": 301.233917000005,
+              "count": 1
+            },
+            "sourceValidation": {
+              "totalMs": 358.3898349996889,
+              "count": 12
+            },
+            "recordUser": {
+              "totalMs": 280.53154200001154,
+              "count": 1
+            },
+            "historyBinding": {
+              "totalMs": 184.47179199999664,
+              "count": 1
+            },
+            "outputCheckpoint": {
+              "totalMs": 178.04899999999907,
+              "count": 1
+            }
+          },
+          "providers": [
+            {
+              "stage": "tts",
+              "values": {
+                "firstAudioMs": 218.23870786465704,
+                "totalMs": 1801.5866249334067,
+                "generatedDurationMs": 2320,
+                "activeMemoryMiB": 2997.238494873047,
+                "cacheMemoryMiB": 33.090821266174316,
+                "peakMemoryMiB": 3406.5882425308228,
+                "wiredLimitMiB": 3932.161874771118,
+                "modelLoadMs": 0.016124919056892395,
+                "residencyMs": 0.016791047528386116
+              }
+            }
+          ],
+          "meaning": "Host offsets start at accepted text/transcript; spans may overlap. ASR, transport and audible playback are separate."
+        }
+      },
+      {
+        "turn": 6,
+        "inputToFirstPacketMs": 3518,
+        "firstPacketToAudioTrackMs": 40,
+        "host": {
+          "version": 1,
+          "input": "text",
+          "endpoint": "host-pcm-emitted",
+          "totalMs": 8993.767249999917,
+          "milestonesMs": {
+            "inputPrepared": 269.86404099990614,
+            "contextReady": 1452.3550409999443,
+            "firstText": 2745.994915999938,
+            "firstPhraseReady": 2945.126457999926,
+            "firstTtsStarted": 2945.132665999932,
+            "firstTtsPacket": 3427.4977499999804,
+            "firstHostAudio": 3453.2987079999875
+          },
+          "spans": {
+            "historyFilter": {
+              "totalMs": 145.49420900002588,
+              "count": 2
+            },
+            "inputCheckpoint": {
+              "totalMs": 187.17850000003818,
+              "count": 1
+            },
+            "contextBuild": {
+              "totalMs": 345.6895830000285,
+              "count": 1
+            },
+            "sourceValidation": {
+              "totalMs": 1633.7272899998352,
+              "count": 56
+            },
+            "recordUser": {
+              "totalMs": 532.0543750000652,
+              "count": 1
+            },
+            "historyBinding": {
+              "totalMs": 219.71691599988844,
+              "count": 1
+            },
+            "outputCheckpoint": {
+              "totalMs": 158.07791600003839,
+              "count": 1
+            }
+          },
+          "providers": [
+            {
+              "stage": "llm",
+              "values": {
+                "analysisWaitMs": 0.011416999972425401,
+                "parkVisualMs": 0.005624999990686774
+              }
+            },
+            {
+              "stage": "llm",
+              "values": {
+                "promptTokens": 908,
+                "cachedTokens": 399,
+                "firstTokenMs": 1227.6039170101285,
+                "cacheLookupMs": 3.817375050857663,
+                "cacheBytes": 172081152,
+                "activeMemoryMiB": 2396.6240730285645,
+                "cacheMemoryMiB": 64.25752258300781,
+                "peakMemoryMiB": 2883.9230308532715,
+                "wiredLimitMiB": 3058.3481245040894,
+                "requestPreparationMs": 21.943582920357585,
+                "workerQueueMs": 0.8931669872254133,
+                "modelLoadMs": 0.014082994312047958,
+                "residencyMs": 0.14141597785055637
+              }
+            },
+            {
+              "stage": "tts",
+              "values": {
+                "firstAudioMs": 480.61529197730124,
+                "totalMs": 2205.546749988571,
+                "generatedDurationMs": 2480,
+                "activeMemoryMiB": 2997.231170654297,
+                "cacheMemoryMiB": 33.083497047424316,
+                "peakMemoryMiB": 3406.5882425308228,
+                "wiredLimitMiB": 3932.161874771118,
+                "modelLoadMs": 0.0210409052670002,
+                "residencyMs": 0.02591707743704319
+              }
+            },
+            {
+              "stage": "tts",
+              "values": {
+                "firstAudioMs": 241.91179196350276,
+                "totalMs": 2453.0808329582214,
+                "generatedDurationMs": 3280,
+                "activeMemoryMiB": 2997.238494873047,
+                "cacheMemoryMiB": 33.10523319244385,
+                "peakMemoryMiB": 3406.5882425308228,
+                "wiredLimitMiB": 3932.161874771118,
+                "modelLoadMs": 0.008292030543088913,
+                "residencyMs": 0.011125113815069199
+              }
+            },
+            {
+              "stage": "tts",
+              "values": {
+                "firstAudioMs": 178.62533289007843,
+                "totalMs": 1165.7679579220712,
+                "generatedDurationMs": 1600,
+                "activeMemoryMiB": 2997.238494873047,
+                "cacheMemoryMiB": 33.088318824768066,
+                "peakMemoryMiB": 3406.5882425308228,
+                "wiredLimitMiB": 3932.161874771118,
+                "modelLoadMs": 0.0069160014390945435,
+                "residencyMs": 0.01200009137392044
+              }
+            }
+          ],
+          "meaning": "Host offsets start at accepted text/transcript; spans may overlap. ASR, transport and audible playback are separate."
+        }
+      },
+      {
+        "turn": 7,
+        "inputToFirstPacketMs": 2747,
+        "firstPacketToAudioTrackMs": 26,
+        "host": {
+          "version": 1,
+          "input": "text",
+          "endpoint": "host-pcm-emitted",
+          "totalMs": 4452.053624999942,
+          "milestonesMs": {
+            "inputPrepared": 245.29358299996238,
+            "contextReady": 1512.9067499999655,
+            "firstText": 2253.9434999999357,
+            "firstPhraseReady": 2380.9624579999363,
+            "firstTtsStarted": 2380.9673750000075,
+            "firstTtsPacket": 2665.2264999999898,
+            "firstHostAudio": 2696.18987500004
+          },
+          "spans": {
+            "historyFilter": {
+              "totalMs": 117.53999900014605,
+              "count": 2
+            },
+            "inputCheckpoint": {
+              "totalMs": 196.7495409999974,
+              "count": 1
+            },
+            "contextBuild": {
+              "totalMs": 413.05287499993574,
+              "count": 1
+            },
+            "sourceValidation": {
+              "totalMs": 576.2575829998823,
+              "count": 17
+            },
+            "recordUser": {
+              "totalMs": 525.8600419999566,
+              "count": 1
+            },
+            "historyBinding": {
+              "totalMs": 182.64716699998826,
+              "count": 1
+            },
+            "outputCheckpoint": {
+              "totalMs": 175.54737499996554,
+              "count": 1
+            }
+          },
+          "providers": [
+            {
+              "stage": "llm",
+              "values": {
+                "analysisWaitMs": 0.10770799999590963,
+                "parkVisualMs": 0.010375000070780516
+              }
+            },
+            {
+              "stage": "llm",
+              "values": {
+                "promptTokens": 890,
+                "cachedTokens": 657,
+                "firstTokenMs": 686.5559581201524,
+                "cacheLookupMs": 2.373291179537773,
+                "cacheBytes": 172081152,
+                "activeMemoryMiB": 2396.6240730285645,
+                "cacheMemoryMiB": 65.86899185180664,
+                "peakMemoryMiB": 2883.9230308532715,
+                "wiredLimitMiB": 3058.3481245040894,
+                "requestPreparationMs": 18.287916900590062,
+                "workerQueueMs": 0.6573330610990524,
+                "modelLoadMs": 0.030624913051724434,
+                "residencyMs": 0.02337503246963024
+              }
+            },
+            {
+              "stage": "tts",
+              "values": {
+                "firstAudioMs": 280.0300831440836,
+                "totalMs": 1891.9018330052495,
+                "generatedDurationMs": 2400,
+                "activeMemoryMiB": 2997.255096435547,
+                "cacheMemoryMiB": 33.105652809143066,
+                "peakMemoryMiB": 3406.5882425308228,
+                "wiredLimitMiB": 3932.161874771118,
+                "modelLoadMs": 0.1695409882813692,
+                "residencyMs": 0.17337501049041748
+              }
+            }
+          ],
+          "meaning": "Host offsets start at accepted text/transcript; spans may overlap. ASR, transport and audible playback are separate."
+        }
+      },
+      {
+        "turn": 8,
+        "inputToFirstPacketMs": 1311,
+        "firstPacketToAudioTrackMs": 11,
+        "host": {
+          "version": 1,
+          "input": "text",
+          "endpoint": "host-pcm-emitted",
+          "totalMs": 2378.2674159999005,
+          "milestonesMs": {
+            "inputPrepared": 219.42487499990966,
+            "contextReady": 959.4705409999005,
+            "firstText": 987.5368749999907,
+            "firstPhraseReady": 987.8453329999465,
+            "firstTtsStarted": 987.847415999975,
+            "firstTtsPacket": 1208.0612499999115,
+            "firstHostAudio": 1232.7167909999844
+          },
+          "spans": {
+            "historyFilter": {
+              "totalMs": 75.7144580000313,
+              "count": 2
+            },
+            "inputCheckpoint": {
+              "totalMs": 180.13695800001733,
+              "count": 1
+            },
+            "contextBuild": {
+              "totalMs": 283.6321669999743,
+              "count": 1
+            },
+            "sourceValidation": {
+              "totalMs": 229.5159159997711,
+              "count": 9
+            },
+            "recordUser": {
+              "totalMs": 234.85291700006928,
+              "count": 1
+            },
+            "historyBinding": {
+              "totalMs": 163.29025000007823,
+              "count": 1
+            },
+            "outputCheckpoint": {
+              "totalMs": 141.50291699997615,
+              "count": 1
+            }
+          },
+          "providers": [
+            {
+              "stage": "tts",
+              "values": {
+                "firstAudioMs": 218.8297079410404,
+                "totalMs": 1247.87687510252,
+                "generatedDurationMs": 1680,
+                "activeMemoryMiB": 2997.255096435547,
+                "cacheMemoryMiB": 33.107056617736816,
+                "peakMemoryMiB": 3406.5882425308228,
+                "wiredLimitMiB": 3932.161874771118,
+                "modelLoadMs": 0.015500001609325409,
+                "residencyMs": 0.01700012944638729
+              }
+            }
+          ],
+          "meaning": "Host offsets start at accepted text/transcript; spans may overlap. ASR, transport and audible playback are separate."
+        }
+      },
+      {
+        "turn": 9,
+        "inputToFirstPacketMs": 1225,
+        "firstPacketToAudioTrackMs": 20,
+        "host": {
+          "version": 1,
+          "input": "text",
+          "endpoint": "host-pcm-emitted",
+          "totalMs": 2677.525499999989,
+          "milestonesMs": {
+            "inputPrepared": 181.268708000076,
+            "contextReady": 914.5899160000263,
+            "firstText": 940.7404160000151,
+            "firstPhraseReady": 941.3097500000149,
+            "firstTtsStarted": 941.3111250000075,
+            "firstTtsPacket": 1137.4231660000514,
+            "firstHostAudio": 1161.4642910000402
+          },
+          "spans": {
+            "historyFilter": {
+              "totalMs": 76.23862499999814,
+              "count": 2
+            },
+            "inputCheckpoint": {
+              "totalMs": 141.77083299995866,
+              "count": 1
+            },
+            "contextBuild": {
+              "totalMs": 283.1941250000382,
+              "count": 1
+            },
+            "sourceValidation": {
+              "totalMs": 296.1558729999233,
+              "count": 12
+            },
+            "recordUser": {
+              "totalMs": 233.8577079999959,
+              "count": 1
+            },
+            "historyBinding": {
+              "totalMs": 156.36262500006706,
+              "count": 1
+            },
+            "outputCheckpoint": {
+              "totalMs": 138.06829199998174,
+              "count": 1
+            }
+          },
+          "providers": [
+            {
+              "stage": "tts",
+              "values": {
+                "firstAudioMs": 195.38645795546472,
+                "totalMs": 1577.6052500586957,
+                "generatedDurationMs": 2240,
+                "activeMemoryMiB": 2997.231658935547,
+                "cacheMemoryMiB": 33.083802223205566,
+                "peakMemoryMiB": 3411.8446016311646,
+                "wiredLimitMiB": 3932.161874771118,
+                "modelLoadMs": 0.000708969309926033,
+                "residencyMs": 0.0012919772416353226
+              }
+            }
+          ],
+          "meaning": "Host offsets start at accepted text/transcript; spans may overlap. ASR, transport and audible playback are separate."
+        }
+      },
+      {
+        "turn": 10,
+        "inputToFirstPacketMs": 2491,
+        "firstPacketToAudioTrackMs": 28,
+        "host": {
+          "version": 1,
+          "input": "text",
+          "endpoint": "host-pcm-emitted",
+          "totalMs": 9447.947374999989,
+          "milestonesMs": {
+            "inputPrepared": 202.16566699999385,
+            "contextReady": 912.6845840000315,
+            "firstText": 1754.6959590000333,
+            "firstPhraseReady": 1931.6931249999907,
+            "firstTtsStarted": 1931.7006670000264,
+            "firstTtsPacket": 2420.129249999998,
+            "firstHostAudio": 2448.0116249999264
+          },
+          "spans": {
+            "historyFilter": {
+              "totalMs": 90.53204199997708,
+              "count": 2
+            },
+            "inputCheckpoint": {
+              "totalMs": 149.7892920000013,
+              "count": 1
+            },
+            "contextBuild": {
+              "totalMs": 277.017375000054,
+              "count": 1
+            },
+            "sourceValidation": {
+              "totalMs": 1895.9421659997897,
+              "count": 62
+            },
+            "recordUser": {
+              "totalMs": 221.6321669999743,
+              "count": 1
+            },
+            "historyBinding": {
+              "totalMs": 152.47649999998976,
+              "count": 1
+            },
+            "outputCheckpoint": {
+              "totalMs": 238.98637499997858,
+              "count": 1
+            }
+          },
+          "providers": [
+            {
+              "stage": "llm",
+              "values": {
+                "analysisWaitMs": 0.007166999974288046,
+                "parkVisualMs": 0.003999999957159162
+              }
+            },
+            {
+              "stage": "llm",
+              "values": {
+                "promptTokens": 884,
+                "cachedTokens": 578,
+                "firstTokenMs": 807.0736250374466,
+                "cacheLookupMs": 0.6282501854002476,
+                "cacheBytes": 172081152,
+                "activeMemoryMiB": 2396.6240730285645,
+                "cacheMemoryMiB": 65.91619873046875,
+                "peakMemoryMiB": 2913.1261291503906,
+                "wiredLimitMiB": 3058.3481245040894,
+                "requestPreparationMs": 6.45645777694881,
+                "workerQueueMs": 0.1538340002298355,
+                "modelLoadMs": 0.012042000889778137,
+                "residencyMs": 0.012083910405635834
+              }
+            },
+            {
+              "stage": "tts",
+              "values": {
+                "firstAudioMs": 480.6755830068141,
+                "totalMs": 2835.620499914512,
+                "generatedDurationMs": 3440,
+                "activeMemoryMiB": 2997.231170654297,
+                "cacheMemoryMiB": 33.084229469299316,
+                "peakMemoryMiB": 3411.8446016311646,
+                "wiredLimitMiB": 3932.161874771118,
+                "modelLoadMs": 0.017999904230237007,
+                "residencyMs": 0.024207867681980133
+              }
+            },
+            {
+              "stage": "tts",
+              "values": {
+                "firstAudioMs": 208.6802499834448,
+                "totalMs": 3030.8579590637237,
+                "generatedDurationMs": 3760,
+                "activeMemoryMiB": 2997.238494873047,
+                "cacheMemoryMiB": 33.107544898986816,
+                "peakMemoryMiB": 3411.8446016311646,
+                "wiredLimitMiB": 3932.161874771118,
+                "modelLoadMs": 0.0068338122218847275,
+                "residencyMs": 0.013208948075771332
+              }
+            },
+            {
+              "stage": "tts",
+              "values": {
+                "firstAudioMs": 210.40437486954033,
+                "totalMs": 1305.7238329201937,
+                "generatedDurationMs": 1680,
+                "activeMemoryMiB": 2997.255096435547,
+                "cacheMemoryMiB": 33.105103492736816,
+                "peakMemoryMiB": 3411.8446016311646,
+                "wiredLimitMiB": 3932.161874771118,
+                "modelLoadMs": 0.010334188118577003,
+                "residencyMs": 0.017041107639670372
+              }
+            }
+          ],
+          "meaning": "Host offsets start at accepted text/transcript; spans may overlap. ASR, transport and audible playback are separate."
+        }
+      }
+    ],
+    "expectedConfirmedBudget": "三万",
+    "buttonToAudioTrackPauseMs": 0,
+    "oldAudioResumed": false,
+    "microphoneUsedForTheseTurns": false,
+    "humanNaturalnessAccepted": false
+  },
+  "androidSpokenStop": {
+    "input": "synthetic stop PCM; no microphone",
+    "rows": [
+      {
+        "round": 0,
+        "inputStartToFirstPauseMs": 460,
+        "oldAudioResumed": false
+      },
+      {
+        "round": 1,
+        "inputStartToFirstPauseMs": 441,
+        "oldAudioResumed": false
+      },
+      {
+        "round": 2,
+        "inputStartToFirstPauseMs": 491,
+        "oldAudioResumed": false
+      },
+      {
+        "round": 3,
+        "inputStartToFirstPauseMs": 408,
+        "oldAudioResumed": false
+      },
+      {
+        "round": 4,
+        "inputStartToFirstPauseMs": 402,
+        "oldAudioResumed": false
+      }
+    ],
+    "connected": true
+  },
+  "cameraPlayback": {
+    "rounds": [
+      {
+        "cameraEnabled": false,
+        "sampleRateHz": 24000,
+        "playbackRateHz": 24000,
+        "underruns": 1,
+        "playedFrames": 30720,
+        "playedPcmMs": 1280,
+        "inputToFirstAudioMs": 1656,
+        "firstAudioToFinishedMs": 1343,
+        "answer": "结果是12。",
+        "imagesRequested": false,
+        "humanVoiceUsed": false
+      },
+      {
+        "cameraEnabled": true,
+        "sampleRateHz": 24000,
+        "playbackRateHz": 24000,
+        "underruns": 1,
+        "playedFrames": 28800,
+        "playedPcmMs": 1200,
+        "inputToFirstAudioMs": 2389,
+        "firstAudioToFinishedMs": 1220,
+        "answer": "结果是12。",
+        "imagesRequested": false,
+        "humanVoiceUsed": false
+      },
+      {
+        "cameraEnabled": true,
+        "sampleRateHz": 24000,
+        "playbackRateHz": 24000,
+        "underruns": 1,
+        "playedFrames": 26880,
+        "playedPcmMs": 1120,
+        "inputToFirstAudioMs": 2065,
+        "firstAudioToFinishedMs": 1202,
+        "answer": "结果是12。",
+        "imagesRequested": false,
+        "humanVoiceUsed": false
+      },
+      {
+        "cameraEnabled": false,
+        "sampleRateHz": 24000,
+        "playbackRateHz": 24000,
+        "underruns": 1,
+        "playedFrames": 28800,
+        "playedPcmMs": 1200,
+        "inputToFirstAudioMs": 1456,
+        "firstAudioToFinishedMs": 1252,
+        "answer": "结果是12。",
+        "imagesRequested": false,
+        "humanVoiceUsed": false
+      }
+    ]
+  },
+  "networkChecks": {
+    "persistedLimitPassed": true,
+    "networkFence": {
+      "runtimePid": 69474,
+      "profileSha256": "38b17e0ad53fc74ee16cc81983bb42814c01db7d2b4ec5a85c37940b08311ce0",
+      "externalNode": {
+        "blocked": true,
+        "code": "EPERM"
+      },
+      "childPython": {
+        "loopback": "connected",
+        "otherLoopback": {
+          "errno": 1,
+          "type": "PermissionError"
+        },
+        "external": {
+          "errno": 1,
+          "type": "PermissionError"
+        }
+      },
+      "scope": "per-process macOS sandbox; only localhost TCP19631/19632 allowed; other loopback proxy ports and external addresses denied; test host/inherited workers only; global VPN unchanged",
+      "wholePhoneOfflineAccepted": false
+    },
+    "fencedModelChecks": [
+      {
+        "method": "generalQuestionsProduceAnswersAndPlaybackWithoutMicrophone",
+        "passed": true,
+        "log": ".local/p1-tail-2026-10-16/logs/network-generalQuestionsProduceAnswersAndPlaybackWithoutMicrophone-1792375485897.log"
+      },
+      {
+        "method": "synthesizedSpeechUsesPhoneTransportAsrAndSpokenStop",
+        "passed": true,
+        "log": ".local/p1-tail-2026-10-16/logs/network-synthesizedSpeechUsesPhoneTransportAsrAndSpokenStop-1792375523181.log"
+      },
+      {
+        "method": "currentCameraFrameIsRequestedOnceAndEndsWithLive",
+        "passed": false,
+        "log": ".local/p1-tail-2026-10-16/logs/network-currentCameraFrameIsRequestedOnceAndEndsWithLive-1792375548596.log"
+      }
+    ],
+    "hostLossPassed": true,
+    "unavailableHostPassed": true,
+    "coldRestartPassed": true,
+    "platform": "Android emulator microphone transport; actual owned host stop and cold process restart",
+    "physicalPhone": false,
+    "logs": [
+      ".local/p1-tail-2026-10-16/logs/network-lostHostConnectionStopsLiveOnlyMicrophone-1792375446908.log",
+      ".local/p1-tail-2026-10-16/logs/network-unavailableHostStartStopsCaptureAndReportsAnError-1792375458186.log",
+      ".local/p1-tail-2026-10-16/logs/network-stoppingAnIdleServiceCannotDisconnectTheNextLive-1792375462398.log"
+    ],
+    "cameraFencedAttempt": {
+      "method": "currentCameraFrameIsRequestedOnceAndEndsWithLive",
+      "passed": false,
+      "failure": "current fresh frame was unavailable within the existing two-second deadline",
+      "log": ".local/p1-tail-2026-10-16/logs/network-camera-reliable-2026-10-19.log",
+      "requiresPhysicalDeviceFollowup": true
+    }
+  },
+  "modelIntegrity": {
+    "cases": 22,
+    "actualModelCases": 18,
+    "localToolCases": 4,
+    "passed": true,
+    "actualOwnerConfirmationFlowTested": false
+  },
+  "visualModelChecks": {
+    "actualPhysicalCamera": false,
+    "actualModel": true,
+    "syntheticImages": true,
+    "rows": [
+      {
+        "kind": "blue-circle",
+        "query": "照片里主要是什么颜色和形状？",
+        "answer": "画面中主要物体是一个蓝色的圆形，背景为白色。",
+        "passed": true,
+        "processingMs": 5106.9484170000005
+      },
+      {
+        "kind": "yellow-triangle",
+        "query": "照片里主要是什么颜色和形状？",
+        "answer": "照片里主要是一个黄色的三角形。",
+        "passed": true,
+        "processingMs": 539.5762080000004
+      },
+      {
+        "kind": "black-occlusion",
+        "query": "我现在看到了什么具体物体？",
+        "answer": "画面中可见一个黑色的物体，其具体形状和细节无法辨认。",
+        "passed": true,
+        "processingMs": 633.9049999999997
+      },
+      {
+        "kind": "two-frames",
+        "query": "这次连续两帧里，物体有什么变化？",
+        "answer": "红色方块消失，蓝色圆形保留。",
+        "passed": true,
+        "processingMs": 1357.8577079999995
+      },
+      {
+        "kind": "one-frame-no-motion",
+        "query": "物体发生了什么移动？",
+        "answer": "目前只有本次的一张照片，无法判断物体是否移动或发生了什么变化。",
+        "passed": true,
+        "processingMs": 0.058207999999467575
+      }
+    ]
+  },
+  "longSpeech": {
+    "evidenceDate": "2026-10-16",
+    "input": "controlled synthetic text; real Qwen TTS and SenseVoice; no LLM or phone",
+    "characters": 1127,
+    "spokenCharacters": 1127,
+    "audioPackets": 1089,
+    "generatedDurationMs": 254080,
+    "processingMs": 169769.631667,
+    "streamedBeforeFullText": true,
+    "tailTranscript": "和来源本轮朗读结束，最后编号是7426。",
+    "fullTextPreserved": true,
+    "tailAccepted": true,
+    "cancel": {
+      "interruptCallMs": 0.618540999974357,
+      "observationWindowMs": 1003.0221249999886,
+      "audioResumed": false,
+      "textRetained": true
+    }
+  },
+  "echoLoopback": {
+    "source": "controlled reply; actual Qwen TTS PCM looped into real streaming ASR, final ASR and VAD at realtime pace",
+    "actualMicrophone": false,
+    "actualSpeaker": false,
+    "loopback": {
+      "openedNewReply": false,
+      "interrupted": false,
+      "transcripts": [
+        {
+          "text": "小",
+          "final": false
+        },
+        {
+          "text": "小陈希望",
+          "final": false
+        },
+        {
+          "text": "小陈希望周",
+          "final": false
+        },
+        {
+          "text": "小陈希望周四",
+          "final": false
+        },
+        {
+          "text": "小陈希望周四收到方",
+          "final": false
+        },
+        {
+          "text": "小陈希望周四收到方案预",
+          "final": false
+        },
+        {
+          "text": "小陈希望周四收到方案预算是",
+          "final": false
+        },
+        {
+          "text": "小陈希望周四收到方案预算是三",
+          "final": false
+        },
+        {
+          "text": "小陈希望周四收到方案预算是三万元",
+          "final": false
+        },
+        {
+          "text": "小陈希望周四收到方案，预算是3万元。",
+          "final": true
+        }
+      ],
+      "audioDurationMs": 5520
+    },
+    "correctionAccepted": true,
+    "correctionQuery": "预算是4万元。",
+    "passed": true
+  },
+  "nativeCancellation": {
+    "evidenceDate": "2026-10-16",
+    "actualLocalModels": true,
+    "actualPhone": false,
+    "osNetworkFenceAppliedByLauncher": true,
+    "visualToLanguage": {
+      "old": {
+        "error": "aborted"
+      },
+      "answer": "月亮本身不发光，它反射太阳光。我们看到的月光是太阳光照射到月球表面后，被反射到地球的光。",
+      "firstTextAfterAbortMs": 1409.8496250000026,
+      "metrics": [
+        {
+          "stage": "llm",
+          "values": {
+            "analysisWaitMs": 1206.637125000001,
+            "parkVisualMs": 0.01020799999969313
+          }
+        },
+        {
+          "stage": "llm",
+          "values": {
+            "id": "6869ca25-179e-4d40-ba34-395b1d2cdf89",
+            "type": "model_metrics",
+            "promptTokens": 68,
+            "cachedTokens": 4,
+            "firstTokenMs": 189.9550419766456,
+            "cacheLookupMs": 0.6259160581976175,
+            "cacheBytes": 150994944,
+            "requestPreparationMs": 2.45274999178946,
+            "workerQueueMs": 0.09099999442696571,
+            "modelLoadMs": 0.011375173926353455,
+            "residencyMs": 0.014167046174407005,
+            "activeMemoryMiB": 2304.3740730285645,
+            "cacheMemoryMiB": 8.856918334960938,
+            "peakMemoryMiB": 2658.719596862793,
+            "wiredLimitMiB": 3058.3481245040894
+          }
+        }
+      ],
+      "passed": true
+    },
+    "languageToVisual": {
+      "description": "画面中主要物体是一个红色正方形和一个蓝色圆形，它们都呈现为纯色填充，没有文字或复杂图案。",
+      "completionMs": 1224.7537080000002,
+      "passed": true
+    },
+    "passed": true
+  },
+  "decoderStallRecovery": {
+    "role": "asr",
+    "requestedPauseMs": 8000,
+    "actualPauseMs": 7522.981958999997,
+    "resumeCause": "result_cleanup",
+    "tag": "async-streaming-2026-10-19",
+    "scope": "synthetic realtime PCM; only this fixture-owned asr child was paused and resumed",
+    "result": "completed",
+    "answer": "希望周四收到方案。",
+    "inputStartToResultMs": 7523.029166999997
+  },
+  "captureBudgetFailure": {
+    "role": "vad",
+    "requestedPauseMs": 3500,
+    "actualPauseMs": 2206.0976250000003,
+    "resumeCause": "result_cleanup",
+    "tag": "capture-budget-2026-10-19",
+    "scope": "synthetic realtime PCM; only this fixture-owned vad child was paused and resumed",
+    "result": "error",
+    "code": "audio_backpressure",
+    "inputDiagnostics": {
+      "stage": "vad",
+      "stageElapsedMs": 2161.4949999999953,
+      "pendingFrames": 100,
+      "pendingAudioMs": 2000,
+      "audioBudgetMs": 2000,
+      "packetLimit": 200,
+      "pendingFinalizations": 0,
+      "partialPendingMs": 0,
+      "partialLimited": false,
+      "streamingFinals": 0
+    },
+    "inputStartToResultMs": 2206.1449159999993
+  },
+  "remaining": [
+    "Actual phone installation and affected regression",
+    "Physical camera fresh-frame timing under joint load; fenced emulator joint camera attempt failed and remains failed",
+    "Spontaneous human ten turns and direct voice interruption",
+    "Long-form/name/date naturalness",
+    "Physical objects/change/occlusion and bystanders",
+    "Earphone,controlled call and secure lockscreen",
+    "Thirty-minute phone joint load and two-hour physical capture/temperature/battery"
+  ],
+  "publicRelease": "paused by user",
+  "recruitment": "paused by user",
+  "failedAttemptsPreserved": true,
+  "candidateInstallEvidence": "separate local artifact manifest",
+  "experimentalFullResidency": {
+    "shortWindowOnly": true,
+    "elapsedMs": 182860,
+    "turns": 9,
+    "imageSamples": [
+      {
+        "firstReceivedPcmMs": 1976.3197920000093,
+        "answer": "画面中有一个红色的正方形和一个蓝色的圆形，它们都位于白色背景上。"
+      }
+    ],
+    "sustainedResourceAccepted": false,
+    "productionDefaultChanged": false
+  }
+}

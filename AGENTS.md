@@ -1,5 +1,14 @@
 # ClawSense Repo Guide
 
+## Product Context — Read First
+
+- Read [VISION.md](./VISION.md) before product planning, architecture, implementation, or review. It preserves the founder’s 2026-10-14 vision verbatim and is the primary product context.
+- ClawSense is a user-controlled assistant present in the physical world: sensing, correctable private memory, natural Live conversation, and participation in communication and work. Plugins and context collection are the early entry point, not the full product goal.
+- Serve experienced AI users and professional roles first; evolve the same core into phone/watch clients and packaged services for ordinary users. Keep external agents replaceable; a complete ClawSense experience need not rebuild every general agent engine.
+- Treat native Live quality, phone-local capability, selective disclosure, and watch feasibility as explicit workstreams. Distinguish local storage, local inference, owned-device processing, and external model calls; multiple providers do not inherently guarantee privacy.
+- Use [产品演进路线与执行计划](./docs/产品演进路线与执行计划.md) as the single current delivery plan. Preserve existing Android ingest and OpenClaw entry points and dated acceptance evidence. Isolated Live/edge/watch experiments do not imply production migration or acceptance.
+- For nanoMuse reuse, read [the source and license assessment](./docs/research/nanomuse-reuse-2026-10-14.md). nanoMuse/OpenMinis product code is GPL; MIT upstream libraries must be obtained and verified separately.
+
 ## Scope
 
 - This repository has two different instruction surfaces:
@@ -9,6 +18,11 @@
 - Do not add repo-local developer rules to `openclaw.plugin.json`.
 
 ## Current Priorities
+
+- Current delivery plan: [docs/产品演进路线与执行计划.md](./docs/产品演进路线与执行计划.md). The prior cross-agent plan and OpenClaw-only phase freezes are historical; keep their dated evidence.
+- Preserve the Android ingest contract and OpenClaw entry point. The standalone companion defaults to a separate state directory; never point two writers at one state directory.
+- Cross-agent checks: `npm run check:cross-agent`, `npm run check:calibration`, `npm test`. Use temporary state and model-free fixtures; do not substitute these for real host or Android acceptance.
+- Runtime distribution assets for other hosts belong in `agent-plugins/`. Do not put developer guidance into runtime skills.
 
 - Treat ClawSense as an active, dirty worktree. Read changes carefully and do not revert unrelated edits.
 - The project is in a multimodal OpenClaw + Android pairing and ingest stage. Favor fixes that preserve the current working data plane.

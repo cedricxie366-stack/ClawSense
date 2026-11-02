@@ -62,6 +62,7 @@ export type RecentContextPayload = {
 };
 
 export type AssistantAnswerPayload = {
+  memoryCorrectionRefs?: Array<{ kind: string; id: string }>;
   queryText: string;
   answerText: string;
   answerSpokenText: string;
@@ -93,6 +94,7 @@ export type AssistantModelPrompt = {
 };
 
 export type AssistantConversationTurn = {
+  unifiedContextSnapshotId?: string;
   queryText: string;
   answerText: string;
   answerSpokenText?: string;
@@ -182,6 +184,7 @@ export function resolveAssistantQueryText(params: {
 }
 
 export async function buildRecentContextPayload(params: {
+  allowSemanticRetrieval?: boolean;
   reviewEngine: ClawSenseReviewEngine;
   artifactUrlBase: string;
   windowHint?: RecentContextWindowHint;
@@ -216,6 +219,7 @@ export async function buildRecentContextPayload(params: {
   const context =
     range.kind === "day"
       ? await params.reviewEngine.buildAssistantContext({
+          allowSemanticRetrieval: params.allowSemanticRetrieval,
           scope: "today",
           date: range.date,
           question: params.question,
@@ -224,6 +228,7 @@ export async function buildRecentContextPayload(params: {
           now,
         })
       : await params.reviewEngine.buildAssistantContext({
+          allowSemanticRetrieval: params.allowSemanticRetrieval,
           scope: "custom-range",
           startAt: range.startAt,
           endAt: range.endAt,
@@ -704,7 +709,7 @@ function buildFollowUpTemplateAnswer(params: {
     return {
       queryText,
       answerText,
-      answerSpokenText: truncateSpokenText(previous.answerText, 900),
+      answerSpokenText: previous.answerText,
       supportingEvidence,
       modeUsed: previous.modeUsed,
       answeredAt: params.answeredAt,
@@ -1176,28 +1181,33 @@ function buildTranscriptSpans(
 }
 
 function resolveSceneSummary(context: AssistantContextPayload): string {
-  const latestVisualEvent = context.windows
+  const visualEvents = context.windows
     .flatMap((window) => window.events)
     .filter((event) => event.modality === "image" || event.modality === "video")
-    .sort((left, right) => right.capturedAt - left.capturedAt)[0];
-  if (latestVisualEvent?.summary?.trim()) {
-    return latestVisualEvent.summary.trim();
-  }
+    .sort((left, right) => right.capturedAt - left.capturedAt);
+  const visual = visualEvents.find((event) => usableEvidenceSummary(event.summary ?? ""));
+  if (visual) return visual.summary!.trim();
+  // Saved metadata is not a visual observation, and speech must not become a scene.
+  if (visualEvents.length || !context.windows.some((window) => window.imageCount > 0 || window.videoCount > 0)) return "";
   const topWindow = context.windows[0];
-  if (topWindow?.primarySummary?.trim() && !looksLikeAssistantSelfTalk(topWindow.primarySummary)) {
+  if (topWindow && usableEvidenceSummary(topWindow.primarySummary) && !looksLikeAssistantSelfTalk(topWindow.primarySummary)) {
     return topWindow.primarySummary.trim();
   }
-  return context.summary.trim();
+  return usableEvidenceSummary(context.summary) ? context.summary.trim() : "";
+}
+
+function usableEvidenceSummary(value: string): boolean {
+  return Boolean(value.trim()) && !/^(?:Image|Audio|Video) captured\b|visual summary model was unavailable|Device note\s*:|(?:visual )?analysis is pending|(?:图像|视频|音频).*(?:分析尚未完成|模型不可用)/i.test(value);
 }
 
 function resolveWindowEvidenceSummary(window: AssistantContextPayload["windows"][number]): string {
-  if (window.primarySummary?.trim() && !looksLikeAssistantSelfTalk(window.primarySummary)) {
+  if (usableEvidenceSummary(window.primarySummary) && !looksLikeAssistantSelfTalk(window.primarySummary)) {
     return window.primarySummary.trim();
   }
   const visualSummary = window.events
     .filter((event) => event.modality === "image" || event.modality === "video")
     .map((event) => event.summary?.trim() ?? "")
-    .find((summary) => summary && !looksLikeAssistantSelfTalk(summary));
+    .find((summary) => usableEvidenceSummary(summary) && !looksLikeAssistantSelfTalk(summary));
   if (visualSummary) {
     return visualSummary;
   }
@@ -1205,7 +1215,7 @@ function resolveWindowEvidenceSummary(window: AssistantContextPayload["windows"]
   if (cleanedTranscript) {
     return truncateText(cleanedTranscript, 160);
   }
-  return window.primarySummary.trim();
+  return "";
 }
 
 function buildRecentContextOverview(
@@ -1230,7 +1240,7 @@ function buildRecentContextOverview(
   return {
     kind,
     date: context.date,
-    summary: context.summary.trim(),
+    summary: usableEvidenceSummary(context.summary) ? context.summary.trim() : "",
     counts: context.counts,
     audioCoverage: context.highlights.audioCoverage,
     reviewItems,
@@ -1306,9 +1316,9 @@ function scoreRecentContextEvidenceWindow(
 
 function extractTaskHints(context: AssistantContextPayload): string[] {
   const candidates = context.windows.flatMap((window) => {
-    const transcriptSentences = splitSentences(cleanTranscriptText(window.transcriptText));
+    const transcriptSentences = taskEvidenceSentences(cleanTranscriptText(window.transcriptText));
     const actionSentences = transcriptSentences.filter((sentence) =>
-      /(需要|要我|要你|要他|要她|要我们|要大家|要把|跟进|确认|安排|负责|提交|同步|明天|今天|待确认|决定|结论|稍后|等会|发出去|交付|上线|测试|排期|报价|deadline|截止|action|todo)/i.test(sentence),
+      /(需要|要我|要你|要他|要她|要我们|要大家|要把|跟进|确认|安排|负责|提交|同步|明天|今天|待确认|决定|结论|稍后|等会|发出去|发送|交付|上线|测试|排期|报价|deadline|截止|action|todo)/i.test(sentence),
     );
     if (actionSentences.length > 0) {
       return actionSentences.slice(0, 2);
@@ -1317,11 +1327,26 @@ function extractTaskHints(context: AssistantContextPayload): string[] {
       !looksLikeAssistantSelfTalk(window.primarySummary) &&
       /(任务|待办|确认|安排|跟进|提醒|排期|报价|测试|会议|讨论)/.test(window.primarySummary)
     ) {
-      return [window.primarySummary];
+      return taskEvidenceSentences(window.primarySummary).filter((sentence) =>
+        /(任务|待办|确认|安排|跟进|提醒|排期|报价|测试|会议|讨论)/.test(sentence),
+      );
     }
     return [];
   });
   return dedupeStrings(candidates).slice(0, 4);
+}
+
+function isInformationQuestion(text: string): boolean {
+  const asks = /[？?]\s*$|几点|几时|什么时候|何时|哪天|什么时间|几号|多少钱|多少金额|怎么样|谁负责|落给谁|说了什么|聊了什么/.test(text);
+  const requestsAction = /(请|麻烦|帮我|帮忙|需要(?:确定|确认|查询|查)|要我|要你|要我们|记得|负责确认|确认一下)/.test(text);
+  return asks && !requestsAction;
+}
+
+function taskEvidenceSentences(text: string): string[] {
+  // Keep factual clauses in a mixed utterance without turning its final question into a task.
+  return splitSentences(text).map((sentence) => sentence.split(/[，,；;]/)
+    .map((clause) => clause.trim()).filter((clause) => clause && !isInformationQuestion(clause)).join("，"))
+    .filter(Boolean);
 }
 
 function extractAttentionHints(params: {
@@ -1357,9 +1382,11 @@ type AssistantIntent =
   | { kind: "assignment" }
   | { kind: "visit" }
   | { kind: "person"; displayName: string }
+  | { kind: "quoted_fact"; queryText: string }
   | { kind: "general" };
 
 function classifyQuestionIntent(queryText: string, recentContext: RecentContextPayload): AssistantIntent {
+  if (/(什么时候|何时|哪天|几点|几时|什么时间|几号|多少钱|多少金额|预算.*多少)/.test(queryText)) return { kind: "quoted_fact", queryText };
   const matchedPerson = recentContext.peopleHints.find((hint) => queryText.includes(hint.displayName));
   if (matchedPerson) {
     return { kind: "person", displayName: matchedPerson.displayName };
@@ -1373,7 +1400,7 @@ function classifyQuestionIntent(queryText: string, recentContext: RecentContextP
   if (/(过去|最近).*(小时|分钟|天).*(发生|做了什么|干了什么|聊了什么|说了什么|讨论|重点|回顾|总结)/.test(queryText)) {
     return { kind: "day_summary" };
   }
-  if (/(看什么|看到什么|场景|环境|周围|画面)/.test(queryText)) {
+  if (/(看什么|看到(?:了)?什么|场景|环境|周围|画面)/.test(queryText)) {
     return { kind: "scene" };
   }
   if (/(我刚才.*(怎么|如何)?.*(回复|回的|说的|讲的)|我刚刚.*(怎么|如何)?.*(回复|回的|说的|讲的)|我说了什么|我刚才讲了什么|我刚才说了什么)/.test(queryText)) {
@@ -1398,6 +1425,7 @@ function classifyQuestionIntent(queryText: string, recentContext: RecentContextP
 }
 
 function buildAnswerForIntent(intent: AssistantIntent, recentContext: RecentContextPayload): string {
+  if (intent.kind === "quoted_fact") return buildQuotedFactAnswer(intent.queryText, recentContext);
   if (intent.kind === "day_summary") {
     return buildOverviewAnswer(recentContext);
   }
@@ -1508,6 +1536,37 @@ function buildAnswerForIntent(intent: AssistantIntent, recentContext: RecentCont
     return `${generalParts.join("。")}。`;
   }
   return "最近这个时间窗里的新证据还不够多，我暂时只能告诉你：还没有形成可稳定复述的内容。";
+}
+
+/** Narrow fallback: quote matching speech, never turn an ambiguous date into a confirmed promise. */
+function buildQuotedFactAnswer(queryText: string, context: RecentContextPayload): string {
+  const subject = queryText.replace(/(?:刚才|刚刚|今天|昨天)?测试(?:里|中)(?:的)?/g, "")
+    .replace(/刚才|刚刚|客户|希望|什么时候|什么时间|何时|哪天|几点|几时|几号|多少钱|多少金额|多少|请问|收到|交付|完成|发送|安排在|安排|是|的|了|呢|吗|[？?。，,\s]/g, "");
+  const terms = [...new Set((subject.match(/[\u4e00-\u9fff]+|[a-z0-9]+/gi) ?? []).flatMap((word) =>
+    /^[\u4e00-\u9fff]+$/.test(word) ? Array.from({ length: Math.max(0, word.length - 1) }, (_, index) => word.slice(index, index + 2)) : [word]))];
+  const score = (text: string) => terms.filter((term) => text.includes(term)).length;
+  const ranked = context.recentTranscriptSpans.map((span) => ({ span, clauses: taskEvidenceSentences(span.text)
+    .flatMap((sentence) => sentence.split(/[，,；;]/)).filter(Boolean) }))
+    .filter((item) => item.clauses.length > 0)
+    .map((item) => ({ ...item, score: Math.max(...item.clauses.map(score)) }));
+  const maximum = Math.max(0, ...ranked.map((item) => item.score));
+  if (!ranked.length || (terms.length && maximum === 0)) return "这段时间的录音里，我还没有找到能直接回答这个问题的内容。请指定相关面谈或扩大时间范围。";
+  const selected = ranked.filter((item) => item.score === maximum).slice(0, 3);
+  const matches = selected.map((item) => item.span);
+  const date = "(?:(?:下|本|这|上)?周[一二三四五六日天]|星期[一二三四五六日天]|明天|后天|今天|昨天|\\d{1,2}月\\d{1,2}[日号])";
+  const clock = "(?:(?:凌晨|早上|早晨|上午|中午|下午|傍晚|晚上|深夜)?\\s*(?:[01]?\\d|2[0-3]|[零〇一二三四五六七八九十两]{1,3})(?:[:：][0-5]\\d|[点时](?:半|[一三]刻|[0-5]?\\d分?|[一二三四五六七八九十]{1,3}分)?))";
+  const askingClock = /(几点|几时)/.test(queryText);
+  const pattern = askingClock ? `(?:${date}\\s*)?${clock}` : `(?:${date}\\s*)?${clock}|${date}`;
+  const temporal = [...new Set(selected.flatMap((item) => item.clauses.filter((clause) => !terms.length || score(clause) === maximum)
+    .flatMap((clause) => [...clause.matchAll(new RegExp(pattern, "g"))].map((match) => match[0].trim()))))];
+  const askingTime = /(什么时候|何时|哪天|几点|几时|什么时间|几号)/.test(queryText);
+  const uncertain = matches.some((span) => /(不是|不要|不想|没有|还没|如果|可能|暂定)/.test(span.text));
+  const lead = askingTime && uncertain ? "相关录音包含否定或未确认的说法，不能直接确定最终约定。" :
+    askingTime && temporal.length === 1 ? `录音里提到的时间是${temporal[0]}。` :
+    askingTime && temporal.length > 1 ? "相关录音中出现了不同时间，不能直接确定最终约定。" :
+    askingClock ? "相关录音没有给出具体几点，不能补出一个时刻。" : "";
+  const quotes = matches.map((span) => `${span.time} 的原话：“${span.text}”`).join("；");
+  return `${lead}${quotes}。`;
 }
 
 function buildOverviewAnswer(recentContext: RecentContextPayload): string {
@@ -1738,6 +1797,12 @@ function buildSpokenAnswerText(
   const normalized = normalizeQuestion(answerText);
   if (!normalized) {
     return "我现在还没有整理出可播报的答案。";
+  }
+  if (intent?.kind === "quoted_fact") {
+    const confirmedTime = normalized.match(/^录音里提到的时间是([^。]+)。/);
+    if (confirmedTime) return `${confirmedTime[1]}。原话已显示在屏幕上。`;
+    const uncertainTime = normalized.match(/^(相关录音[^。]*(?:不能直接确定最终约定|没有给出具体几点)[^。]*。)/);
+    if (uncertainTime) return `${uncertainTime[1]}原话已显示在屏幕上。`;
   }
   const sentences = splitSentences(normalized);
   const spoken = sentences.slice(0, 2).join("。");

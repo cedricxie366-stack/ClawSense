@@ -1,0 +1,412 @@
+{
+  "date": "2026-10-22",
+  "timezone": "Asia/Shanghai",
+  "hostVersion": "0.2.0-preview.9",
+  "androidVersionCode": 13,
+  "androidVersion": "0.3.9-live-playback-preview",
+  "p1Accepted": false,
+  "publicRelease": "paused by user",
+  "userFeedback": "本轮自动测试完全无法完整播出一句语音",
+  "findings": [
+    "Interruption tests deliberately inject stop after playback begins.",
+    "Recovery checks previously disconnected at generation completion before player drain."
+  ],
+  "phone": {
+    "model": "OPPO Find X2 / PDEM10",
+    "android": 13
+  },
+  "checks": {
+    "projectTests": 528,
+    "projectFiles": 40,
+    "androidJvmTests": 56,
+    "calibrationTests": 3,
+    "crossAgentProtocol": true,
+    "physicalHumanAcceptance": false
+  },
+  "completePlayback": {
+    "source": "actual local generation and muted AudioTrack; no injected stop or microphone",
+    "answer": "会议安排在明天下午四点，预算五万元，方案周六交付。",
+    "writtenFrames": 144000,
+    "playedFrames": 144000,
+    "firstAudioMs": 5674,
+    "generationCompletedMs": 9663,
+    "playbackCompletedMs": 11826,
+    "microphoneFrames": 0,
+    "outputMuted": true,
+    "humanListeningAccepted": false
+  },
+  "finalColdPreparation": {
+    "preparationMs": 4114,
+    "entryMs": 109,
+    "microphoneFrames": 0,
+    "hostPreparation": {
+      "ok": true,
+      "ready": true,
+      "preparationMs": 4079.70375,
+      "capabilitiesMs": 2831.540917,
+      "finalWarmupMs": 1248.1686250000002,
+      "initialization": {
+        "asr": {
+          "modelLoadMs": 553.8063331041485,
+          "probeMs": 553.8195411209017
+        },
+        "llm": {
+          "modelLoadMs": 1810.1922499481589,
+          "probeMs": 1810.1993747986853
+        },
+        "tts": {
+          "modelLoadMs": 2550.329582998529,
+          "probeMs": 2551.3082921970636
+        },
+        "final-asr": {
+          "modelLoadMs": 535.3044578805566,
+          "probeMs": 535.3124169632792
+        },
+        "vad": {
+          "modelLoadMs": 6.893083918839693,
+          "probeMs": 6.897540995851159
+        }
+      },
+      "mediaStarted": false
+    },
+    "cameraStarted": false,
+    "foregroundActivity": true
+  },
+  "finalStop": {
+    "source": "generated PCM through phone transport, actual ASR and AudioTrack; no physical microphone",
+    "rounds": [
+      {
+        "round": 1,
+        "captureStartToPlayerPauseMs": 268,
+        "oldAudioResumed": false,
+        "captureStartToStopCompletedMs": 272,
+        "nominalPcmMs": 364,
+        "actualFeedMs": 364,
+        "notice": "已停止说话，宿主任务的执行状态保持不变。",
+        "transcript": "停",
+        "stops": [
+          {
+            "arrivalMs": 266,
+            "completeMs": 272,
+            "pauseCompletedMs": 268,
+            "gateWaitMs": 0,
+            "pauseMs": 2,
+            "flushMs": 1
+          }
+        ]
+      },
+      {
+        "round": 2,
+        "captureStartToPlayerPauseMs": 286,
+        "oldAudioResumed": false,
+        "captureStartToStopCompletedMs": 287,
+        "nominalPcmMs": 364,
+        "actualFeedMs": 365,
+        "notice": "已停止说话，宿主任务的执行状态保持不变。",
+        "transcript": "停",
+        "stops": [
+          {
+            "arrivalMs": 286,
+            "completeMs": 287,
+            "pauseCompletedMs": 286,
+            "gateWaitMs": 0,
+            "pauseMs": 0,
+            "flushMs": 1
+          }
+        ]
+      },
+      {
+        "round": 3,
+        "captureStartToPlayerPauseMs": 299,
+        "oldAudioResumed": false,
+        "captureStartToStopCompletedMs": 301,
+        "nominalPcmMs": 364,
+        "actualFeedMs": 365,
+        "notice": "已停止说话，宿主任务的执行状态保持不变。",
+        "transcript": "停",
+        "stops": [
+          {
+            "arrivalMs": 298,
+            "completeMs": 301,
+            "pauseCompletedMs": 299,
+            "gateWaitMs": 0,
+            "pauseMs": 1,
+            "flushMs": 1
+          }
+        ]
+      },
+      {
+        "round": 4,
+        "captureStartToPlayerPauseMs": 285,
+        "oldAudioResumed": false,
+        "captureStartToStopCompletedMs": 285,
+        "nominalPcmMs": 364,
+        "actualFeedMs": 365,
+        "notice": "已停止说话，宿主任务的执行状态保持不变。",
+        "transcript": "停",
+        "stops": [
+          {
+            "arrivalMs": 284,
+            "completeMs": 285,
+            "pauseCompletedMs": 285,
+            "gateWaitMs": 0,
+            "pauseMs": 1,
+            "flushMs": 0
+          }
+        ]
+      },
+      {
+        "round": 5,
+        "captureStartToPlayerPauseMs": 357,
+        "oldAudioResumed": false,
+        "captureStartToStopCompletedMs": 359,
+        "nominalPcmMs": 364,
+        "actualFeedMs": 366,
+        "notice": "已停止说话，宿主任务的执行状态保持不变。",
+        "transcript": "停",
+        "stops": [
+          {
+            "arrivalMs": 355,
+            "completeMs": 359,
+            "pauseCompletedMs": 357,
+            "gateWaitMs": 1,
+            "pauseMs": 1,
+            "flushMs": 0
+          }
+        ]
+      },
+      {
+        "round": 6,
+        "captureStartToPlayerPauseMs": 262,
+        "oldAudioResumed": false,
+        "captureStartToStopCompletedMs": 267,
+        "nominalPcmMs": 364,
+        "actualFeedMs": 364,
+        "notice": "已停止说话，宿主任务的执行状态保持不变。",
+        "transcript": "停",
+        "stops": [
+          {
+            "arrivalMs": 260,
+            "completeMs": 267,
+            "pauseCompletedMs": 262,
+            "gateWaitMs": 0,
+            "pauseMs": 2,
+            "flushMs": 4
+          }
+        ]
+      },
+      {
+        "round": 7,
+        "captureStartToPlayerPauseMs": 303,
+        "oldAudioResumed": false,
+        "captureStartToStopCompletedMs": 304,
+        "nominalPcmMs": 364,
+        "actualFeedMs": 365,
+        "notice": "已停止说话，宿主任务的执行状态保持不变。",
+        "transcript": "停",
+        "stops": [
+          {
+            "arrivalMs": 298,
+            "completeMs": 304,
+            "pauseCompletedMs": 303,
+            "gateWaitMs": 0,
+            "pauseMs": 5,
+            "flushMs": 0
+          }
+        ]
+      },
+      {
+        "round": 8,
+        "captureStartToPlayerPauseMs": 270,
+        "oldAudioResumed": false,
+        "captureStartToStopCompletedMs": 272,
+        "nominalPcmMs": 364,
+        "actualFeedMs": 365,
+        "notice": "已停止说话，宿主任务的执行状态保持不变。",
+        "transcript": "停",
+        "stops": [
+          {
+            "arrivalMs": 269,
+            "completeMs": 272,
+            "pauseCompletedMs": 270,
+            "gateWaitMs": 0,
+            "pauseMs": 1,
+            "flushMs": 0
+          }
+        ]
+      },
+      {
+        "round": 9,
+        "captureStartToPlayerPauseMs": 324,
+        "oldAudioResumed": false,
+        "captureStartToStopCompletedMs": 325,
+        "nominalPcmMs": 364,
+        "actualFeedMs": 365,
+        "notice": "已停止说话，宿主任务的执行状态保持不变。",
+        "transcript": "停",
+        "stops": [
+          {
+            "arrivalMs": 323,
+            "completeMs": 325,
+            "pauseCompletedMs": 324,
+            "gateWaitMs": 0,
+            "pauseMs": 1,
+            "flushMs": 1
+          }
+        ]
+      },
+      {
+        "round": 10,
+        "captureStartToPlayerPauseMs": 288,
+        "oldAudioResumed": false,
+        "captureStartToStopCompletedMs": 291,
+        "nominalPcmMs": 364,
+        "actualFeedMs": 364,
+        "notice": "已停止说话，宿主任务的执行状态保持不变。",
+        "transcript": "停",
+        "stops": [
+          {
+            "arrivalMs": 286,
+            "completeMs": 291,
+            "pauseCompletedMs": 288,
+            "gateWaitMs": 0,
+            "pauseMs": 2,
+            "flushMs": 1
+          }
+        ]
+      }
+    ],
+    "newQuestionAnswered14": true,
+    "humanStopAccepted": false,
+    "completed": true,
+    "error": null,
+    "notice": null,
+    "outputMuted": true,
+    "socketDefaultNoDelay": false,
+    "socketNoDelayEnabled": true
+  },
+  "stopStatistics": {
+    "rounds": 10,
+    "medianMs": 287.0,
+    "nearestRankP95Ms": 357,
+    "targetP95Ms": 300,
+    "targetMet": false,
+    "measurement": "Generated PCM capture start to AudioTrack pause completion; actual phone transport and ASR, muted player, no physical microphone."
+  },
+  "syntheticRecognition": {
+    "passed": true,
+    "cases": [
+      {
+        "name": "normal",
+        "passed": true,
+        "falseStop": false
+      },
+      {
+        "name": "quiet-scaled",
+        "passed": true,
+        "falseStop": false
+      },
+      {
+        "name": "artificial-midpoint-500ms-gap",
+        "passed": true,
+        "falseStop": false
+      },
+      {
+        "name": "silence",
+        "passed": true,
+        "falseStop": false
+      },
+      {
+        "name": "white-noise",
+        "passed": true,
+        "falseStop": false
+      },
+      {
+        "name": "fan-hum",
+        "passed": true,
+        "falseStop": false
+      },
+      {
+        "name": "knocks",
+        "passed": true,
+        "falseStop": false
+      }
+    ]
+  },
+  "voiceWarmupComparison": [
+    {
+      "mode": "baseline",
+      "loadMs": 5077.039959000001,
+      "warmMs": 1015.8735829999996,
+      "readyMs": 6092.913542,
+      "firstAudioMs": 197.98933300000044,
+      "pcmBytes": 119040,
+      "pcmSha256": "4ff0696c9c3fb22233b0ccae62bd1ffdb115e5db35abe050c9e858e793f385ec",
+      "workerWarmMs": 1007.8656659461558
+    },
+    {
+      "mode": "short-probe",
+      "loadMs": 2340.023583,
+      "warmMs": 737.0090419999997,
+      "readyMs": 3077.032625,
+      "firstAudioMs": 195.2592080000013,
+      "pcmBytes": 119040,
+      "pcmSha256": "4ff0696c9c3fb22233b0ccae62bd1ffdb115e5db35abe050c9e858e793f385ec",
+      "workerWarmMs": 736.5140840411186
+    },
+    {
+      "mode": "baseline",
+      "loadMs": 5600.019333,
+      "warmMs": 1298.832875,
+      "readyMs": 6898.852208,
+      "firstAudioMs": 184.08095899999898,
+      "pcmBytes": 119040,
+      "pcmSha256": "4ff0696c9c3fb22233b0ccae62bd1ffdb115e5db35abe050c9e858e793f385ec",
+      "workerWarmMs": 1298.169583082199
+    },
+    {
+      "mode": "short-probe",
+      "loadMs": 2307.2685409999976,
+      "warmMs": 819.5901670000021,
+      "readyMs": 3126.8587079999998,
+      "firstAudioMs": 185.29183299999931,
+      "pcmBytes": 119040,
+      "pcmSha256": "4ff0696c9c3fb22233b0ccae62bd1ffdb115e5db35abe050c9e858e793f385ec",
+      "workerWarmMs": 818.9121659379452
+    }
+  ],
+  "savedVoice": {
+    "source": "actual local Live output saved to a file; no automatic playback or microphone",
+    "answer": "会议安排在明天下午四点，预算五万元，方案周六交付。",
+    "sampleRate": 24000,
+    "frames": 144000,
+    "durationSeconds": 6,
+    "pcmSha256": "fed00d78a70bcd72e98f177a2b81340b3b874500f4f474bf5fec7c33947e2d72"
+  },
+  "iterations": {
+    "xiaomiBeforePreparationMs": 13537,
+    "xiaomiIntermediatePreparationMs": 4895,
+    "xiaomiBeforeStopMs": [
+      1854,
+      431,
+      371
+    ],
+    "xiaomiFourThreadCandidateMs": [
+      250,
+      458,
+      295,
+      377,
+      307
+    ],
+    "fixedWindowExperimentAdopted": false,
+    "qosExperimentAdopted": false
+  },
+  "remaining": [
+    "strict actual-human stop P95 <=300ms",
+    "cold and ordinary-response latency distribution",
+    "one consolidated human check including complete playback",
+    "device combination acceptance"
+  ],
+  "privateEvidenceDirectory": ".local/p1-latency-2026-10-22",
+  "rawMediaIncluded": false
+}

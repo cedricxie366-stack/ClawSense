@@ -1,0 +1,411 @@
+{
+  "date": "2026-10-20",
+  "hostVersion": "0.2.0-preview.6",
+  "androidCandidateVersionCode": 10,
+  "androidInstalledVersionCode": 9,
+  "phoneDisconnected": true,
+  "humanAcceptancePausedByUser": true,
+  "acceptanceRuntimeStopped": true,
+  "phaseP1SignedOff": false,
+  "projectTestsPassed": 516,
+  "projectTestWorkers": 4,
+  "androidJvmPassed": 54,
+  "realAsrFixture": {
+    "physicalMicrophone": false,
+    "actualSpeaker": false,
+    "realAsrModels": true,
+    "realLanguageModel": false,
+    "realMemoryConfirmation": false,
+    "rows": [
+      {
+        "name": "normal",
+        "source": "previously generated synthetic speech; CPU VAD and two ASR models; controlled reply",
+        "physicalMicrophone": false,
+        "actualSpeaker": false,
+        "inputAudioMs": 6000,
+        "queries": [
+          "会议安排在明天下午4点，预算5万元方案周六交付。"
+        ],
+        "endpointState": {
+          "bufferedMs": 0,
+          "voicedMs": 0,
+          "silenceMs": 0,
+          "partialCharacters": 0
+        },
+        "diagnostics": {
+          "stage": "idle",
+          "stageElapsedMs": 21.861375000000407,
+          "pendingFrames": 0,
+          "pendingAudioMs": 0,
+          "audioBudgetMs": 2000,
+          "packetLimit": 200,
+          "pendingFinalizations": 0,
+          "partialPendingMs": 0,
+          "partialLimited": false,
+          "streamingFinals": 0,
+          "processedAudioFrames": 450,
+          "voicedAudioFrames": 144,
+          "maxInputRms": 0.35611939305674944,
+          "utteranceBufferedMs": 0,
+          "utteranceVoicedMs": 0,
+          "utteranceSilenceMs": 0,
+          "inputOutcomes": {
+            "recognizing": 1,
+            "accepted": 1
+          }
+        },
+        "outcomes": {
+          "recognizing": 1,
+          "accepted": 1
+        },
+        "inputTimings": [
+          {
+            "endpointSilenceMs": 1100,
+            "bufferedAudioMs": 6920,
+            "finalRecheckMs": 898.7813329999999
+          }
+        ],
+        "comparisons": [],
+        "errors": [],
+        "singleUtterancePreservedAllThreeFacts": true,
+        "expectedVoice": true,
+        "passed": true
+      },
+      {
+        "name": "quiet-scaled",
+        "source": "previously generated synthetic speech; CPU VAD and two ASR models; controlled reply",
+        "physicalMicrophone": false,
+        "actualSpeaker": false,
+        "inputAudioMs": 6000,
+        "queries": [
+          "会议安排在明天下午4点，预算5万元方案周六交付。"
+        ],
+        "endpointState": {
+          "bufferedMs": 0,
+          "voicedMs": 0,
+          "silenceMs": 0,
+          "partialCharacters": 0
+        },
+        "diagnostics": {
+          "stage": "idle",
+          "stageElapsedMs": 20.410291000000143,
+          "pendingFrames": 0,
+          "pendingAudioMs": 0,
+          "audioBudgetMs": 2000,
+          "packetLimit": 200,
+          "pendingFinalizations": 0,
+          "partialPendingMs": 0,
+          "partialLimited": false,
+          "streamingFinals": 0,
+          "processedAudioFrames": 450,
+          "voicedAudioFrames": 164,
+          "maxInputRms": 0.05341796389554471,
+          "utteranceBufferedMs": 0,
+          "utteranceVoicedMs": 0,
+          "utteranceSilenceMs": 0,
+          "inputOutcomes": {
+            "recognizing": 1,
+            "accepted": 1
+          }
+        },
+        "outcomes": {
+          "recognizing": 1,
+          "accepted": 1
+        },
+        "inputTimings": [
+          {
+            "endpointSilenceMs": 1100,
+            "bufferedAudioMs": 7580,
+            "finalRecheckMs": 176.3960420000003
+          }
+        ],
+        "comparisons": [],
+        "errors": [],
+        "singleUtterancePreservedAllThreeFacts": true,
+        "expectedVoice": true,
+        "passed": true
+      },
+      {
+        "name": "artificial-midpoint-500ms-gap",
+        "source": "previously generated synthetic speech; CPU VAD and two ASR models; controlled reply",
+        "physicalMicrophone": false,
+        "actualSpeaker": false,
+        "inputAudioMs": 6500,
+        "queries": [
+          "会议安排在明天下午4点，预预算5万元方案周六交付。"
+        ],
+        "endpointState": {
+          "bufferedMs": 0,
+          "voicedMs": 0,
+          "silenceMs": 0,
+          "partialCharacters": 0
+        },
+        "diagnostics": {
+          "stage": "idle",
+          "stageElapsedMs": 22.130417000000307,
+          "pendingFrames": 0,
+          "pendingAudioMs": 0,
+          "audioBudgetMs": 2000,
+          "packetLimit": 200,
+          "pendingFinalizations": 0,
+          "partialPendingMs": 0,
+          "partialLimited": false,
+          "streamingFinals": 0,
+          "processedAudioFrames": 475,
+          "voicedAudioFrames": 152,
+          "maxInputRms": 0.35611939305674944,
+          "utteranceBufferedMs": 0,
+          "utteranceVoicedMs": 0,
+          "utteranceSilenceMs": 0,
+          "inputOutcomes": {
+            "recognizing": 1,
+            "accepted": 1,
+            "recognition_difference": 1
+          }
+        },
+        "outcomes": {
+          "recognizing": 1,
+          "accepted": 1,
+          "recognition_difference": 1
+        },
+        "inputTimings": [
+          {
+            "endpointSilenceMs": 1100,
+            "bufferedAudioMs": 7560,
+            "finalRecheckMs": 220.55074999999852
+          }
+        ],
+        "comparisons": [
+          {
+            "selected": "会议安排在明天下午4点，预预算5万元方案周六交付。",
+            "alternative": "会议安排在明天下午四点预算五万元方案周六交付"
+          }
+        ],
+        "errors": [],
+        "singleUtterancePreservedAllThreeFacts": true,
+        "expectedVoice": true,
+        "passed": true
+      },
+      {
+        "name": "silence",
+        "source": "previously generated synthetic speech; CPU VAD and two ASR models; controlled reply",
+        "physicalMicrophone": false,
+        "actualSpeaker": false,
+        "inputAudioMs": 3000,
+        "queries": [],
+        "endpointState": {
+          "bufferedMs": 0,
+          "voicedMs": 0,
+          "silenceMs": 0,
+          "partialCharacters": 0
+        },
+        "diagnostics": {
+          "stage": "idle",
+          "stageElapsedMs": 20.281499999997322,
+          "pendingFrames": 0,
+          "pendingAudioMs": 0,
+          "audioBudgetMs": 2000,
+          "packetLimit": 200,
+          "pendingFinalizations": 0,
+          "partialPendingMs": 0,
+          "partialLimited": false,
+          "streamingFinals": 0,
+          "processedAudioFrames": 300,
+          "voicedAudioFrames": 0,
+          "maxInputRms": 0,
+          "utteranceBufferedMs": 0,
+          "utteranceVoicedMs": 0,
+          "utteranceSilenceMs": 0,
+          "inputOutcomes": {}
+        },
+        "outcomes": {},
+        "inputTimings": [],
+        "comparisons": [],
+        "errors": [],
+        "singleUtterancePreservedAllThreeFacts": false,
+        "expectedVoice": false,
+        "passed": true
+      },
+      {
+        "name": "white-noise",
+        "source": "previously generated synthetic speech; CPU VAD and two ASR models; controlled reply",
+        "physicalMicrophone": false,
+        "actualSpeaker": false,
+        "inputAudioMs": 3000,
+        "queries": [],
+        "endpointState": {
+          "bufferedMs": 0,
+          "voicedMs": 0,
+          "silenceMs": 0,
+          "partialCharacters": 0
+        },
+        "diagnostics": {
+          "stage": "idle",
+          "stageElapsedMs": 19.995750000001863,
+          "pendingFrames": 0,
+          "pendingAudioMs": 0,
+          "audioBudgetMs": 2000,
+          "packetLimit": 200,
+          "pendingFinalizations": 0,
+          "partialPendingMs": 0,
+          "partialLimited": false,
+          "streamingFinals": 0,
+          "processedAudioFrames": 300,
+          "voicedAudioFrames": 0,
+          "maxInputRms": 0.0006828350727651544,
+          "utteranceBufferedMs": 0,
+          "utteranceVoicedMs": 0,
+          "utteranceSilenceMs": 0,
+          "inputOutcomes": {}
+        },
+        "outcomes": {},
+        "inputTimings": [],
+        "comparisons": [],
+        "errors": [],
+        "singleUtterancePreservedAllThreeFacts": false,
+        "expectedVoice": false,
+        "passed": true
+      },
+      {
+        "name": "fan-hum",
+        "source": "previously generated synthetic speech; CPU VAD and two ASR models; controlled reply",
+        "physicalMicrophone": false,
+        "actualSpeaker": false,
+        "inputAudioMs": 3000,
+        "queries": [],
+        "endpointState": {
+          "bufferedMs": 0,
+          "voicedMs": 0,
+          "silenceMs": 0,
+          "partialCharacters": 0
+        },
+        "diagnostics": {
+          "stage": "idle",
+          "stageElapsedMs": 20.242833000003884,
+          "pendingFrames": 0,
+          "pendingAudioMs": 0,
+          "audioBudgetMs": 2000,
+          "packetLimit": 200,
+          "pendingFinalizations": 0,
+          "partialPendingMs": 0,
+          "partialLimited": false,
+          "streamingFinals": 0,
+          "processedAudioFrames": 300,
+          "voicedAudioFrames": 0,
+          "maxInputRms": 0.001316571347696757,
+          "utteranceBufferedMs": 0,
+          "utteranceVoicedMs": 0,
+          "utteranceSilenceMs": 0,
+          "inputOutcomes": {}
+        },
+        "outcomes": {},
+        "inputTimings": [],
+        "comparisons": [],
+        "errors": [],
+        "singleUtterancePreservedAllThreeFacts": false,
+        "expectedVoice": false,
+        "passed": true
+      },
+      {
+        "name": "knocks",
+        "source": "previously generated synthetic speech; CPU VAD and two ASR models; controlled reply",
+        "physicalMicrophone": false,
+        "actualSpeaker": false,
+        "inputAudioMs": 3000,
+        "queries": [],
+        "endpointState": {
+          "bufferedMs": 0,
+          "voicedMs": 0,
+          "silenceMs": 0,
+          "partialCharacters": 0
+        },
+        "diagnostics": {
+          "stage": "idle",
+          "stageElapsedMs": 19.908208999993803,
+          "pendingFrames": 0,
+          "pendingAudioMs": 0,
+          "audioBudgetMs": 2000,
+          "packetLimit": 200,
+          "pendingFinalizations": 0,
+          "partialPendingMs": 0,
+          "partialLimited": false,
+          "streamingFinals": 0,
+          "processedAudioFrames": 300,
+          "voicedAudioFrames": 0,
+          "maxInputRms": 0.010193170183327903,
+          "utteranceBufferedMs": 0,
+          "utteranceVoicedMs": 0,
+          "utteranceSilenceMs": 0,
+          "inputOutcomes": {}
+        },
+        "outcomes": {},
+        "inputTimings": [],
+        "comparisons": [],
+        "errors": [],
+        "singleUtterancePreservedAllThreeFacts": false,
+        "expectedVoice": false,
+        "passed": true
+      }
+    ],
+    "passed": true
+  },
+  "shortTailFixture": {
+    "physicalMicrophone": false,
+    "actualSpeaker": false,
+    "realAsrModels": true,
+    "realLanguageModel": false,
+    "realMemoryConfirmation": false,
+    "rows": [
+      {
+        "name": "quiet-scaled",
+        "source": "previously generated synthetic speech; CPU VAD and two ASR models; controlled reply",
+        "physicalMicrophone": false,
+        "actualSpeaker": false,
+        "inputAudioMs": 6000,
+        "queries": [],
+        "endpointState": {
+          "bufferedMs": 7220,
+          "voicedMs": 3280,
+          "silenceMs": 740,
+          "partialCharacters": 22
+        },
+        "diagnostics": {
+          "stage": "idle",
+          "stageElapsedMs": 9492.687833,
+          "pendingFrames": 0,
+          "pendingAudioMs": 0,
+          "audioBudgetMs": 2000,
+          "packetLimit": 200,
+          "pendingFinalizations": 0,
+          "partialPendingMs": 0,
+          "partialLimited": false,
+          "streamingFinals": 0,
+          "processedAudioFrames": 370,
+          "voicedAudioFrames": 164,
+          "maxInputRms": 0.05341796389554471,
+          "utteranceBufferedMs": 7220,
+          "utteranceVoicedMs": 3280,
+          "utteranceSilenceMs": 740,
+          "inputOutcomes": {}
+        },
+        "outcomes": {},
+        "inputTimings": [],
+        "comparisons": [],
+        "errors": [],
+        "singleUtterancePreservedAllThreeFacts": false,
+        "expectedVoice": true,
+        "passed": false
+      }
+    ],
+    "passed": false
+  },
+  "workerGainExperimentReverted": true,
+  "pending": [
+    "new Android UI on a physical device",
+    "human spoken interruption",
+    "ten continuous human turns",
+    "complete three-fact correction and reuse",
+    "current objects, changes and occlusion",
+    "available headphones, calls, secure lock screen and real device resource checks"
+  ]
+}

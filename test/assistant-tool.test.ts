@@ -8,6 +8,23 @@ import {
 } from "../src/assistant-tool.js";
 
 describe("ClawSense assistant tool", () => {
+  it("can serve stored encounter evidence without starting an audio recheck", async () => {
+    const base = createPayload();
+    const payload = createPayload({
+      windows: [{ ...base.windows[0], transcriptText: "", events: [{ ...base.windows[0].events[0], transcript: "", analysisStatus: "degraded" }] }],
+      highlights: { ...base.highlights, audioCoverage: { totalAudioWindows: 1, transcriptReadyWindows: 0, pendingAudioWindows: 1, degradedAudioEvents: 1 } },
+    });
+    const buildAssistantContext = vi.fn(async () => payload);
+    const recheckAudioEvidence = vi.fn(async () => []);
+    const result = await resolveClawSenseContext({
+      reviewEngine: { normalizeDateInput: () => "2026-03-19", buildAssistantContext, recheckAudioEvidence } as any,
+      artifactUrlBase: () => "http://claw/api/clawsense/artifacts", allowAudioRecheck: false, allowSemanticRetrieval: false,
+    }, { startAt: 1770000000000, endAt: 1770003600000, question: "这场会议讨论了什么？" });
+    expect(result.ok).toBe(true);
+    expect(recheckAudioEvidence).not.toHaveBeenCalled();
+    expect(buildAssistantContext).toHaveBeenCalledWith(expect.objectContaining({ allowSemanticRetrieval: false }));
+  });
+
   it("renders a watch-for answer from review sections", async () => {
     const payload = createPayload();
     const tool = createClawSenseContextTool({

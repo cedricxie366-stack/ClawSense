@@ -3,11 +3,17 @@ package ai.openclaw.clawsense
 import ai.openclaw.clawsense.data.ClawSenseApi
 import ai.openclaw.clawsense.data.DeviceSessionRepository
 import ai.openclaw.clawsense.data.OkHttpClawSenseApi
+import ai.openclaw.clawsense.data.PendingUploadSpool
 import ai.openclaw.clawsense.data.SecureSessionStore
+import ai.openclaw.clawsense.digital.DigitalRepository
 import android.content.Context
+import java.io.File
 import kotlinx.serialization.json.Json
 
 object AppGraph {
+  @Volatile private var liveInstance: ai.openclaw.clawsense.live.LiveController? = null
+  fun live(context: Context = appContext): ai.openclaw.clawsense.live.LiveController = liveInstance ?: synchronized(this) { liveInstance ?: ai.openclaw.clawsense.live.LiveController(context.applicationContext).also { liveInstance = it } }
+
   private lateinit var appContext: Context
   private val json = Json {
     ignoreUnknownKeys = true
@@ -17,6 +23,7 @@ object AppGraph {
   @Volatile private var sessionStoreInstance: SecureSessionStore? = null
   @Volatile private var apiInstance: ClawSenseApi? = null
   @Volatile private var repositoryInstance: DeviceSessionRepository? = null
+  @Volatile private var digitalInstance: DigitalRepository? = null
 
   fun initialize(context: Context) {
     appContext = context.applicationContext
@@ -39,7 +46,12 @@ object AppGraph {
       repositoryInstance ?: DeviceSessionRepository(
         store = sessionStore(context),
         api = api(context),
+        pendingUploads = PendingUploadSpool(File(context.noBackupFilesDir, "upload-spool")),
       ).also { repositoryInstance = it }
     }
+  }
+
+  fun digital(context: Context = appContext): DigitalRepository = digitalInstance ?: synchronized(this) {
+    digitalInstance ?: DigitalRepository(context.applicationContext).also { digitalInstance = it }
   }
 }

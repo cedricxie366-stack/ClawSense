@@ -10,7 +10,7 @@ export function resolveAutoVideoTriggerReason(text: string): AutoVideoTriggerRea
   if (!normalized) {
     return null;
   }
-  if (/(不要录|别录|不用录|先别录|停止录|不要拍|别拍|不用拍|stop recording|do not record|don't record|no recording)/iu.test(normalized)) {
+  if (/(不要录|别录|不用录|先别录|停止录|不要拍|别拍|不用拍|stop recording|no recording|\b(?:do\s+not|don['’]t)\s+(?:record|capture|take\s+a\s+video)\b)/iu.test(normalized)) {
     return null;
   }
   if (/(录一下|录一段|录下来|记录一下|拍一下|拍一段|拍下来|帮我看一下|帮我看看|record this|capture this|take a video)/iu.test(normalized)) {

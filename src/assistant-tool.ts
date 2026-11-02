@@ -626,6 +626,8 @@ export async function resolveClawSenseContext(
   params: {
     reviewEngine: ClawSenseReviewEngine;
     artifactUrlBase: () => string;
+    allowAudioRecheck?: boolean;
+    allowSemanticRetrieval?: boolean;
   },
   rawParams: ClawSenseContextToolParams,
 ): Promise<ClawSenseContextResolution> {
@@ -706,8 +708,10 @@ export async function resolveClawSenseContext(
     deviceId: rawParams.deviceId || undefined,
     modality: rawParams.modality || undefined,
     artifactUrlBase: params.artifactUrlBase(),
+    allowSemanticRetrieval: params.allowSemanticRetrieval,
   });
   const audioRechecks =
+    params.allowAudioRecheck !== false &&
     shouldAttemptQueryTimeAudioReview(payload, focus, question) &&
     typeof (params.reviewEngine as { recheckAudioEvidence?: unknown }).recheckAudioEvidence === "function"
       ? await params.reviewEngine.recheckAudioEvidence({
@@ -732,6 +736,7 @@ export async function resolveClawSenseContext(
       deviceId: rawParams.deviceId || undefined,
       modality: rawParams.modality || undefined,
       artifactUrlBase: params.artifactUrlBase(),
+      allowSemanticRetrieval: params.allowSemanticRetrieval,
     });
   }
 

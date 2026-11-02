@@ -3,6 +3,9 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { Connection, Table } from "@lancedb/lancedb";
+import { contextFor } from "./context-store.js";
+import { currentContextAccess } from "./tool-context.js";
+import { withDeviceProcessing, withEvidenceProcessing, assertOpaqueRuntimeProcessing } from "./processing-context.js";
 import type { ClawSenseConfig } from "./config.js";
 import type { OpenClawConfig, PluginLogger } from "./openclaw-types.js";
 import {
@@ -193,7 +196,14 @@ export class ClawSenseMemoryStore {
     describeVideo?: ClawSenseAnalysisCallbacks["describeVideo"];
     transcribeAudio: ClawSenseAnalysisCallbacks["transcribeAudio"];
   }): Promise<ClawSenseIngestReceipt> {
+    return withDeviceProcessing(this.resolveStateDir(), params.device.deviceId, () => this.ingestInside(params));
+  }
+
+  private async ingestInside(params: Parameters<ClawSenseMemoryStore["ingest"]>[0]): Promise<ClawSenseIngestReceipt> {
+    const receivedAt = Date.now();
     const createdAt = params.capturedAt ?? Date.now();
+    if (!Number.isSafeInteger(createdAt) || createdAt < 0) throw new Error("invalid_capture_time");
+    await contextFor(this.resolveStateDir())?.assertCaptureNotDeleted(params.device.deviceId, createdAt, params.modality);
     const mediaInput = resolveArtifactMime({
       body: params.body,
       fileName: params.fileName,
@@ -251,6 +261,7 @@ export class ClawSenseMemoryStore {
       const memoryId = randomUUID();
       const retrievalEmbeddingsEnabled = this.resolveEffectiveEmbeddingBackend() !== "none";
       let embeddingModel: string | undefined;
+      let pendingRow: LanceRow | undefined;
       if (retrievalEmbeddingsEnabled && !this.journalOnlyMode) {
         try {
           await this.ensureTable();
@@ -267,7 +278,7 @@ export class ClawSenseMemoryStore {
               createdAt,
               vector: await this.embed(embeddingText),
             };
-            await this.table.add([row]);
+            pendingRow = row;
             embeddingModel = this.cfg.embeddingModel;
           }
         } catch (error) {
@@ -275,7 +286,13 @@ export class ClawSenseMemoryStore {
         }
       }
 
-      const { artifact, event } = await this.stateStore.recordCapture({
+      const commit = async () => {
+        await contextFor(this.resolveStateDir())?.assertCaptureNotDeleted(params.device.deviceId, createdAt, params.modality);
+        if (pendingRow && this.table) {
+          try { await this.table.add([pendingRow]); }
+          catch (error) { this.enableJournalOnlyMode(error); embeddingModel = undefined; }
+        }
+        return this.stateStore.recordCapture({
         memoryId,
         namespace: this.cfg.memoryNamespace,
         deviceId: params.device.deviceId,
@@ -287,6 +304,7 @@ export class ClawSenseMemoryStore {
         note: params.note || undefined,
         createdAt,
         capturedAt: createdAt,
+        receivedAt,
         sourcePath: stored.absolutePath,
         fileName: stored.fileName,
         mime: mediaInput.mime,
@@ -299,7 +317,10 @@ export class ClawSenseMemoryStore {
         analysisStatus: analysis.analysisStatus,
         analysisFailureReason: analysis.analysisFailureReason,
         sttProvider: analysis.sttProvider,
-      });
+        });
+      };
+      const context = contextFor(this.resolveStateDir());
+      const { artifact, event } = await (context ? context.consistent(commit) : commit());
 
       await this.pruneExpiredArtifacts();
       await this.enforceArtifactBudget();
@@ -334,7 +355,9 @@ export class ClawSenseMemoryStore {
     capturedAt?: number;
     note?: string;
   }): Promise<ClawSenseIngestReceipt> {
+    const receivedAt = Date.now();
     const createdAt = params.capturedAt ?? Date.now();
+    await contextFor(this.resolveStateDir())?.assertCaptureNotDeleted(params.device.deviceId, createdAt, params.modality);
     const mediaInput = resolveArtifactMime({
       body: params.body,
       fileName: params.fileName,
@@ -359,6 +382,7 @@ export class ClawSenseMemoryStore {
       note: params.note || undefined,
       createdAt,
       capturedAt: createdAt,
+      receivedAt,
       sourcePath: stored.absolutePath,
       fileName: stored.fileName,
       mime: mediaInput.mime,
@@ -369,7 +393,7 @@ export class ClawSenseMemoryStore {
       analysisProvider: "analysis-queue",
       analysisStatus: "degraded",
       analysisFailureReason: "analysis_pending",
-    });
+    }).catch(async (error) => { await fs.unlink(stored.absolutePath).catch(() => {}); throw error; });
 
     await this.pruneExpiredArtifacts();
     await this.enforceArtifactBudget();
@@ -421,7 +445,7 @@ export class ClawSenseMemoryStore {
       artifact.modality === "video"
         ? buildVideoInputDiagnostics(mediaInput.mime, mediaInput.mismatch)
         : null;
-    const analysis = await this.analyzeStoredCapture({
+    const analysis = await withEvidenceProcessing(this.resolveStateDir(), [{ kind: "analysis", id: event.eventId }], () => this.analyzeStoredCapture({
       modality: artifact.modality,
       body,
       fileName: artifact.fileName,
@@ -435,7 +459,7 @@ export class ClawSenseMemoryStore {
       describeImage: params.describeImage,
       describeVideo: params.describeVideo,
       transcribeAudio: params.transcribeAudio,
-    });
+    }));
 
     return await this.stateStore.backfillCaptureAnalysis({
       artifactId: artifact.artifactId,
@@ -510,8 +534,12 @@ export class ClawSenseMemoryStore {
       .filter((row) => (typeof endAt === "number" ? row.createdAt <= endAt : true))
       .sort((left, right) => right.score - left.score || right.createdAt - left.createdAt);
 
+    const context = contextFor(this.resolveStateDir());
+    const authorized = context ? new Set((await this.stateStore.listEvents()).map((event) => event.eventId)) : null;
+
     const deduped = new Map<string, NormalizedMemorySearchRow>();
     for (const item of normalized) {
+      if (authorized && !authorized.has(item.memoryId)) continue;
       if (!deduped.has(item.memoryId)) {
         deduped.set(item.memoryId, item);
       }
@@ -545,6 +573,20 @@ export class ClawSenseMemoryStore {
     await this.enforceArtifactBudget(now);
   }
 
+  async purgeIndexEntries(eventIds: string[]): Promise<void> {
+    if (!eventIds.length) return;
+    const managedDirectory = path.join(this.resolveStateDir(), "plugins", "clawsense", "memory-index");
+    const directory = this.cfg.memoryDbPath ?? managedDirectory;
+    if (!(await fs.access(directory).then(() => true, () => false))) return;
+    if (path.resolve(directory) !== path.resolve(managedDirectory)) throw new Error("external_index_purge_requires_isolated_cache");
+    const info = await fs.lstat(directory);
+    if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("unsafe_managed_index");
+    // Lance deletion alone retains old fragments/versions. Remove the rebuildable workspace cache.
+    this.table?.close(); this.db?.close();
+    this.table = null; this.db = null; this.initPromise = null; this.journalOnlyMode = false;
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+
   private async writeBinaryArtifact(params: {
     body: Buffer;
     fileName: string;
@@ -567,8 +609,9 @@ export class ClawSenseMemoryStore {
     const deviceAlias = toSafeSlug(params.device.name) || params.device.deviceId.slice(0, 8);
     const relativePath = path.join(year, month, day, deviceAlias, basename);
     const absolutePath = path.join(root, relativePath);
-    await fs.mkdir(path.dirname(absolutePath), { recursive: true });
-    await fs.writeFile(absolutePath, params.body);
+    await fs.mkdir(path.dirname(absolutePath), { recursive: true, mode: 0o700 });
+    const file = await fs.open(absolutePath, "wx", 0o600);
+    try { await file.writeFile(params.body); await file.sync(); } finally { await file.close(); }
     return {
       absolutePath,
       relativePath: stripTrailingSlash(relativePath.replace(/\\/g, "/")),
@@ -640,7 +683,7 @@ export class ClawSenseMemoryStore {
     const lancedb = await import("@lancedb/lancedb");
     const dbPath =
       this.cfg.memoryDbPath ??
-      path.join(os.homedir(), ".openclaw", "memory", "clawsense-lancedb");
+      path.join(this.resolveStateDir(), "plugins", "clawsense", "memory-index");
     this.db = await lancedb.connect(dbPath);
     const tables = await this.db.tableNames();
     if (tables.includes(TABLE_NAME)) {
@@ -881,6 +924,7 @@ export class ClawSenseMemoryStore {
 
     let runtimeFailureReason: string | undefined = failureReason;
     try {
+      await assertOpaqueRuntimeProcessing("runtime:stt");
       const response = await params.transcribeAudio({
         filePath: params.filePath,
         mime: params.input.mime,

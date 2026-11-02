@@ -1,10 +1,18 @@
 {
   "id": "clawsense",
-  "skills": ["skills"],
+  "skills": [
+    "skills"
+  ],
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
     "properties": {
+      "companionUrl": {
+        "type": "string"
+      },
+      "companionTokenFile": {
+        "type": "string"
+      },
       "publicBaseUrl": {
         "type": "string"
       },
@@ -133,6 +141,83 @@
       },
       "asrWorkerIncludeTranscribed": {
         "type": "boolean"
+      },
+      "primaryAgentContextScopes": {
+        "type": "array",
+        "description": "Optional explicit project/source/read scopes for the native OpenClaw agent. An empty array denies context access; omission preserves the legacy trusted host adapter.",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "projectId",
+            "operations"
+          ],
+          "properties": {
+            "projectId": {
+              "type": "string"
+            },
+            "encounterIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "sourceKinds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "audio",
+                  "image",
+                  "video",
+                  "shared_text",
+                  "shared_image",
+                  "contact_selection"
+                ]
+              }
+            },
+            "operations": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "read-metadata",
+                  "read-analysis",
+                  "read-raw",
+                  "read-result"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "primaryAgentContextCapabilities": {
+        "type": "array",
+        "description": "Explicit mutation capabilities for a scoped native OpenClaw agent. Owner identity/result confirmations remain separate.",
+        "items": {
+          "type": "string",
+          "enum": [
+            "create-encounter",
+            "update-encounter",
+            "record-user-correction",
+            "create-work",
+            "complete-work",
+            "reanalyze-evidence"
+          ]
+        }
+      },
+      "primaryAgentProcessingLocation": {
+        "type": "string",
+        "enum": [
+          "local-only",
+          "owned-devices",
+          "selected-external"
+        ],
+        "description": "Owner-declared native agent processing boundary. Default is selected-external; this setting is not an independent offline audit."
+      },
+      "live": {
+        "type": "object",
+        "description": "Opt-in Live service configuration; disabled when omitted."
       }
     }
   }

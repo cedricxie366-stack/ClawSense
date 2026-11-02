@@ -26,6 +26,16 @@ describe("ClawSenseStateStore", () => {
       },
     });
 
+  it("refuses to overwrite corrupt or unsupported existing history", async () => {
+    const file = path.join(rootDir, "plugins", "clawsense", "state.json");
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    for (const contents of ["broken JSON", JSON.stringify({ version: 999, events: ["keep"] })]) {
+      await fs.writeFile(file, contents);
+      await expect(createStore().upsertSetupToken(issueSetupToken(600))).rejects.toThrow("clawsense_state_unreadable");
+      expect(await fs.readFile(file, "utf8")).toBe(contents);
+    }
+  });
+
   it("consumes setup token only once", async () => {
     const store = createStore();
     const token = issueSetupToken(600);

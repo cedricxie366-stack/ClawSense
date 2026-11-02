@@ -1,0 +1,8 @@
+mlx-audio==0.5.9; sys_platform == "darwin"
+mlx-lm==0.32.0; sys_platform == "darwin"
+mlx-vlm==0.7.8; sys_platform == "darwin"
+sherpa-onnx==1.13.8
+numpy==2.5.4
+soundfile==0.14.0
+huggingface-hub==2.2.0
+psutil==7.2.2

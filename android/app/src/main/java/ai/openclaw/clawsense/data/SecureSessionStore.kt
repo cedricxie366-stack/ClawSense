@@ -11,7 +11,7 @@ import kotlinx.serialization.json.Json
 class SecureSessionStore(
   context: Context,
   private val json: Json,
-) {
+) : DeviceSessionPersistence {
   private val prefs: SharedPreferences by lazy {
     val masterKey = MasterKey.Builder(context)
       .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
@@ -25,44 +25,58 @@ class SecureSessionStore(
     )
   }
 
-  fun loadSession(): DeviceSession? {
+  override fun loadSession(): DeviceSession? {
     val raw = prefs.getString(KEY_SESSION, null) ?: return null
     return runCatching { json.decodeFromString<DeviceSession>(raw) }.getOrNull()
   }
 
-  fun saveSession(session: DeviceSession) {
+  override fun saveSession(session: DeviceSession) {
     prefs.edit().putString(KEY_SESSION, json.encodeToString(session)).apply()
   }
 
-  fun clearSession() {
+  override fun clearSession() {
     prefs.edit().remove(KEY_SESSION).apply()
   }
 
-  fun loadServiceEnabled(): Boolean = prefs.getBoolean(KEY_SERVICE_ENABLED, false)
+  fun loadPrimarySession(): DeviceSession? = prefs.getString("primary_device_session", null)?.let {
+    runCatching { json.decodeFromString<DeviceSession>(it) }.getOrNull()
+  }
 
-  fun saveServiceEnabled(enabled: Boolean) {
+  fun savePrimarySession(session: DeviceSession) {
+    prefs.edit().putString("primary_device_session", json.encodeToString(session)).apply()
+  }
+
+  fun primaryFingerprint(): String {
+    return prefs.getString("primary_install_id", null) ?: ("primary-" + java.util.UUID.randomUUID()).also {
+      prefs.edit().putString("primary_install_id", it).commit()
+    }
+  }
+
+  override fun loadServiceEnabled(): Boolean = prefs.getBoolean(KEY_SERVICE_ENABLED, false)
+
+  override fun saveServiceEnabled(enabled: Boolean) {
     prefs.edit().putBoolean(KEY_SERVICE_ENABLED, enabled).apply()
   }
 
-  fun loadRuntimeStatus(): ServiceRuntimeStatus {
+  override fun loadRuntimeStatus(): ServiceRuntimeStatus {
     val raw = prefs.getString(KEY_RUNTIME_STATUS, null)
       ?: return ServiceRuntimeStatus()
     return runCatching { json.decodeFromString<ServiceRuntimeStatus>(raw) }
       .getOrElse { ServiceRuntimeStatus() }
   }
 
-  fun saveRuntimeStatus(status: ServiceRuntimeStatus) {
+  override fun saveRuntimeStatus(status: ServiceRuntimeStatus) {
     prefs.edit().putString(KEY_RUNTIME_STATUS, json.encodeToString(status)).apply()
   }
 
-  fun loadCapturePreferences(): CapturePreferences {
+  override fun loadCapturePreferences(): CapturePreferences {
     val raw = prefs.getString(KEY_CAPTURE_PREFERENCES, null)
       ?: return CapturePreferences()
     return runCatching { json.decodeFromString<CapturePreferences>(raw) }
       .getOrElse { CapturePreferences() }
   }
 
-  fun saveCapturePreferences(preferences: CapturePreferences) {
+  override fun saveCapturePreferences(preferences: CapturePreferences) {
     prefs.edit().putString(KEY_CAPTURE_PREFERENCES, json.encodeToString(preferences)).apply()
   }
 

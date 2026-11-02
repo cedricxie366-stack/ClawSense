@@ -124,6 +124,49 @@ describe("local ASR backends", () => {
     ]);
   });
 
+  it("preserves all segments and language from multiline JSON surrounded by logs", () => {
+    const output = {
+      language: "zh",
+      segments: [
+        { start: 0.5, end: 2.0, text: "先确认数据口径。" },
+        { start: 2.0, end: 3.5, text: '页面写着 "{预算}" 和 [方案]。' },
+      ],
+    };
+    const parsed = parseLocalAsrCommandOutput([
+      "[INFO] Loading local ASR model...",
+      JSON.stringify(output, null, 2),
+      "[INFO] Processing completed.",
+    ].join("\n"));
+    expect(parsed.language).toBe("zh");
+    expect(parsed.transcript).toBe('先确认数据口径。 页面写着 "{预算}" 和 [方案]。');
+    expect(parsed.transcriptSegments).toEqual([
+      { startMs: 500, endMs: 2000, text: "先确认数据口径。" },
+      { startMs: 2000, endMs: 3500, text: '页面写着 "{预算}" 和 [方案]。' },
+    ]);
+  });
+
+  it("parses multiline batch JSON after diagnostics without treating a nested item as the result", () => {
+    const parsed = parseLocalAsrBatchCommandOutput([
+      "Loading batch model...",
+      JSON.stringify({ results: [
+        { id: "event-a", transcript: "第一段。" },
+        { id: "event-b", transcript: "第二段。" },
+      ] }, null, 2),
+    ].join("\n"), "local-asr:funasr:zh", [{ id: "event-a", filePath: "/tmp/a.wav" }, { id: "event-b", filePath: "/tmp/b.wav" }]);
+    expect(parsed.get("event-a")?.transcript).toBe("第一段。");
+    expect(parsed.get("event-b")?.transcript).toBe("第二段。");
+  });
+
+  it("does not accept a nested batch object when the outer JSON is incomplete", () => {
+    const parsed = parseLocalAsrBatchCommandOutput([
+      "Loading batch model...",
+      "{",
+      '  "results": [',
+      '    {"id":"event-a","transcript":"不完整输出。"}',
+    ].join("\n"), "local-asr:funasr:zh", [{ id: "event-a", filePath: "/tmp/a.wav" }]);
+    expect(parsed.size).toBe(0);
+  });
+
   it("synthesizes sentence segments when command JSON only contains a transcript", () => {
     const parsed = parseLocalAsrCommandOutput(
       JSON.stringify({

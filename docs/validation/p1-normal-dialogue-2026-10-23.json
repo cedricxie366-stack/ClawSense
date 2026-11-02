@@ -1,0 +1,759 @@
+{
+  "date": "2026-10-23",
+  "timezone": "Asia/Shanghai",
+  "hostVersion": "0.2.0-preview.10",
+  "androidVersion": "0.3.10-live-conversation-preview",
+  "androidVersionCode": 14,
+  "phone": {
+    "model": "OPPO Find X2 / PDEM10",
+    "android": 13
+  },
+  "p1Accepted": false,
+  "humanNaturalnessAccepted": false,
+  "publicRelease": "paused by user",
+  "processing": "owned Mac models; physical phone muted; no physical microphone or camera in these automatic checks",
+  "checks": {
+    "projectTests": 546,
+    "projectFiles": 40,
+    "androidJvmTests": 56,
+    "androidJvmFailures": 0,
+    "pythonTests": 6,
+    "calibrationTests": 3,
+    "crossAgentProtocol": true,
+    "generatedInputRealCpuCases": 7
+  },
+  "normalDialogue": {
+    "completed": true,
+    "microphoneFrames": 0,
+    "outputMuted": true,
+    "totalAudioSeconds": 75.67999999999999,
+    "firstWriteMedianMs": 1200.5,
+    "firstWriteMaxMs": 5171,
+    "maxObservedStarvationMs": 40,
+    "rows": [
+      {
+        "turn": 1,
+        "query": "测试客户小叶：周三下午两点开会，预算六万元，方案周五交付。请复述安排。",
+        "answer": "周三下午两点开会，预算六万元，方案周五交付。",
+        "semanticMarkersPassed": true,
+        "repeatTextMatches": true,
+        "receivedFrames": 103680,
+        "writtenFrames": 103680,
+        "playedFrames": 103680,
+        "sampleRate": 24000,
+        "packets": 18,
+        "audioFile": "turn-1.wav",
+        "pcmSha256": "065a764ac4ae321eec72934caf3570cffff2efab57ed26966298d3cb71b5ad29",
+        "fullPlayback": true,
+        "firstAudioMs": 3387,
+        "generationCompletedMs": 6449,
+        "playbackCompletedMs": 7829,
+        "maxObservedStarvationMs": 0
+      },
+      {
+        "turn": 2,
+        "query": "刚才的客户叫什么？",
+        "answer": "刚才的客户叫小叶。",
+        "semanticMarkersPassed": true,
+        "repeatTextMatches": true,
+        "receivedFrames": 65280,
+        "writtenFrames": 65280,
+        "playedFrames": 65280,
+        "sampleRate": 24000,
+        "packets": 12,
+        "audioFile": "turn-2.wav",
+        "pcmSha256": "4c04fdaac3594b7e1b0f6fbe150ea85ce8267a0591b66ccf01d153e072056265",
+        "fullPlayback": true,
+        "firstAudioMs": 4435,
+        "generationCompletedMs": 6536,
+        "playbackCompletedMs": 7265,
+        "maxObservedStarvationMs": 0
+      },
+      {
+        "turn": 3,
+        "query": "更正小叶的安排：会议改为周四下午三点，预算改为八万元。请用一句话汇总最新安排。",
+        "answer": "会议调整为周四下午三点，预算调整为八万元。",
+        "semanticMarkersPassed": true,
+        "repeatTextMatches": true,
+        "receivedFrames": 134400,
+        "writtenFrames": 134400,
+        "playedFrames": 134400,
+        "sampleRate": 24000,
+        "packets": 24,
+        "audioFile": "turn-3.wav",
+        "pcmSha256": "087885febfa77ef5abbe92f019624490ca2b82cbe83faa2ebdc3808b399ba98f",
+        "fullPlayback": true,
+        "firstAudioMs": 4566,
+        "generationCompletedMs": 8765,
+        "playbackCompletedMs": 10288,
+        "maxObservedStarvationMs": 0
+      },
+      {
+        "turn": 4,
+        "query": "为什么树叶一般是绿色的？请用两句话解释。",
+        "answer": "树叶是绿色的，因为叶子里有一种叫叶绿素的物质，能吸收阳光进行光合作用。它吸收红光和蓝光，反射绿光，所以我们看到的是绿色。",
+        "semanticMarkersPassed": true,
+        "repeatTextMatches": true,
+        "receivedFrames": 378240,
+        "writtenFrames": 378240,
+        "playedFrames": 378240,
+        "sampleRate": 24000,
+        "packets": 67,
+        "audioFile": "turn-4.wav",
+        "pcmSha256": "14f0276d82ced21b7fd3bbbffb73b89d4d18392f72c878ddf16a2cb0551f3c2e",
+        "fullPlayback": true,
+        "firstAudioMs": 1922,
+        "generationCompletedMs": 15770,
+        "playbackCompletedMs": 17751,
+        "maxObservedStarvationMs": 40
+      },
+      {
+        "turn": 5,
+        "query": "把谢谢你今天的帮助翻译成英语。",
+        "answer": "Thank you for your help today.",
+        "semanticMarkersPassed": true,
+        "repeatTextMatches": true,
+        "receivedFrames": 42240,
+        "writtenFrames": 42240,
+        "playedFrames": 42240,
+        "sampleRate": 24000,
+        "packets": 8,
+        "audioFile": "turn-5.wav",
+        "pcmSha256": "caaebf105d7888e2b205354d0190da6cd6ca471cf238c8d0250b9f921550a65a",
+        "fullPlayback": true,
+        "firstAudioMs": 1170,
+        "generationCompletedMs": 2301,
+        "playbackCompletedMs": 2965,
+        "maxObservedStarvationMs": 0
+      },
+      {
+        "turn": 6,
+        "query": "现在小叶的预算是多少？",
+        "answer": "小叶的预算是八万元。",
+        "semanticMarkersPassed": true,
+        "repeatTextMatches": true,
+        "receivedFrames": 71040,
+        "writtenFrames": 71040,
+        "playedFrames": 71040,
+        "sampleRate": 24000,
+        "packets": 13,
+        "audioFile": "turn-6.wav",
+        "pcmSha256": "5052d85f31a93827947283887eeccc2a4bee916a3cd4bc52da7aa7a4fbc83442",
+        "fullPlayback": true,
+        "firstAudioMs": 1231,
+        "generationCompletedMs": 3210,
+        "playbackCompletedMs": 4232,
+        "maxObservedStarvationMs": 0
+      },
+      {
+        "turn": 7,
+        "query": "请原样朗读：测试订单金额为1,234.50元，约在16:30核对。",
+        "answer": "测试订单金额为1,234.50元，约在16:30核对。",
+        "semanticMarkersPassed": true,
+        "repeatTextMatches": true,
+        "receivedFrames": 172800,
+        "writtenFrames": 172800,
+        "playedFrames": 172800,
+        "sampleRate": 24000,
+        "packets": 30,
+        "audioFile": "turn-7.wav",
+        "pcmSha256": "df97548fc0274023331c2e64c7356eede1d18a2d86529cba3a7b180f9030e4e4",
+        "fullPlayback": true,
+        "firstAudioMs": 669,
+        "generationCompletedMs": 5717,
+        "playbackCompletedMs": 7899,
+        "maxObservedStarvationMs": 0
+      },
+      {
+        "turn": 8,
+        "query": "请原样朗读这句英语：Please send the revised proposal before Friday afternoon and confirm the meeting time with the customer.",
+        "answer": "Please send the revised proposal before Friday afternoon and confirm the meeting time with the customer.",
+        "semanticMarkersPassed": true,
+        "repeatTextMatches": true,
+        "receivedFrames": 232320,
+        "writtenFrames": 232320,
+        "playedFrames": 232320,
+        "sampleRate": 24000,
+        "packets": 41,
+        "audioFile": "turn-8.wav",
+        "pcmSha256": "23998e96c8c1b445295bb41f411feb8422cf1a5cce1a54384094e07a15b5e2be",
+        "fullPlayback": true,
+        "firstAudioMs": 717,
+        "generationCompletedMs": 8422,
+        "playbackCompletedMs": 10419,
+        "maxObservedStarvationMs": 0
+      },
+      {
+        "turn": 9,
+        "query": "读全文",
+        "answer": "Please send the revised proposal before Friday afternoon and confirm the meeting time with the customer.",
+        "semanticMarkersPassed": true,
+        "repeatTextMatches": true,
+        "receivedFrames": 232320,
+        "writtenFrames": 232320,
+        "playedFrames": 232320,
+        "sampleRate": 24000,
+        "packets": 41,
+        "audioFile": "turn-9.wav",
+        "pcmSha256": "23998e96c8c1b445295bb41f411feb8422cf1a5cce1a54384094e07a15b5e2be",
+        "fullPlayback": true,
+        "firstAudioMs": 964,
+        "generationCompletedMs": 8714,
+        "playbackCompletedMs": 10699,
+        "maxObservedStarvationMs": 0
+      },
+      {
+        "turn": 10,
+        "query": "用两句话汇总小叶最新的会议、预算和方案交付安排。",
+        "answer": "小叶的会议安排在周四下午三点，预算为八万元，方案需在周五交付。",
+        "semanticMarkersPassed": true,
+        "repeatTextMatches": true,
+        "receivedFrames": 226560,
+        "writtenFrames": 226560,
+        "playedFrames": 226560,
+        "sampleRate": 24000,
+        "packets": 40,
+        "audioFile": "turn-10.wav",
+        "pcmSha256": "192c1a6e24fd046e6324dbc3b9fffc70d8ac36addb5efb1a91359a07d02ed8fd",
+        "fullPlayback": true,
+        "firstAudioMs": 5171,
+        "generationCompletedMs": 12760,
+        "playbackCompletedMs": 14729,
+        "maxObservedStarvationMs": 0
+      },
+      {
+        "turn": 11,
+        "query": "请原样朗读：客户小叶的预算是十万元。",
+        "answer": "客户小叶的预算是十万元。",
+        "semanticMarkersPassed": true,
+        "repeatTextMatches": true,
+        "receivedFrames": 86400,
+        "writtenFrames": 86400,
+        "playedFrames": 86400,
+        "sampleRate": 24000,
+        "packets": 15,
+        "audioFile": "turn-11.wav",
+        "pcmSha256": "3d35ba123652f19d729188703daf22605d5dd0cd97d9686094fdb1ff26b40e93",
+        "fullPlayback": true,
+        "firstAudioMs": 731,
+        "generationCompletedMs": 3315,
+        "playbackCompletedMs": 4383,
+        "maxObservedStarvationMs": 0
+      },
+      {
+        "turn": 12,
+        "query": "朗读材料不算，小叶的实际预算现在是多少？",
+        "answer": "小叶的预算是八万元。",
+        "semanticMarkersPassed": true,
+        "repeatTextMatches": true,
+        "receivedFrames": 71040,
+        "writtenFrames": 71040,
+        "playedFrames": 71040,
+        "sampleRate": 24000,
+        "packets": 13,
+        "audioFile": "turn-12.wav",
+        "pcmSha256": "5052d85f31a93827947283887eeccc2a4bee916a3cd4bc52da7aa7a4fbc83442",
+        "fullPlayback": true,
+        "firstAudioMs": 1147,
+        "generationCompletedMs": 3367,
+        "playbackCompletedMs": 4137,
+        "maxObservedStarvationMs": 0
+      }
+    ]
+  },
+  "receivedAudioAsr": {
+    "source": "Actual received phone PCM, local auto-language ASR; no microphone; ASR is not a human naturalness verdict",
+    "rows": [
+      {
+        "turn": 1,
+        "answer": "周三下午两点开会，预算六万元，方案周五交付。",
+        "transcript": "周三下午两点开会，预算6万元方案周五交付。",
+        "expectedCharacterCoverage": 1,
+        "transcriptLengthRatio": 1,
+        "durationSeconds": 4.32,
+        "peak": 0.453399658203125,
+        "clippedFraction": 0,
+        "rms": 0.08969306822332189
+      },
+      {
+        "turn": 2,
+        "answer": "刚才的客户叫小叶。",
+        "transcript": "刚才的客户叫小叶。",
+        "expectedCharacterCoverage": 1,
+        "transcriptLengthRatio": 1,
+        "durationSeconds": 2.72,
+        "peak": 0.35223388671875,
+        "clippedFraction": 0,
+        "rms": 0.06883321154145584
+      },
+      {
+        "turn": 3,
+        "answer": "会议调整为周四下午三点，预算调整为八万元。",
+        "transcript": "会议调整为周四下午3点，预算调整为8万元。",
+        "expectedCharacterCoverage": 1,
+        "transcriptLengthRatio": 1,
+        "durationSeconds": 5.6,
+        "peak": 0.67938232421875,
+        "clippedFraction": 0,
+        "rms": 0.11102136267797692
+      },
+      {
+        "turn": 4,
+        "answer": "树叶是绿色的，因为叶子里有一种叫叶绿素的物质，能吸收阳光进行光合作用。它吸收红光和蓝光，反射绿光，所以我们看到的是绿色。",
+        "transcript": "树叶是绿色的，因为叶子里有一种叫叶绿素的物质，能吸收阳光，进行光合作用。它吸收红光和蓝光反射绿光。所以我们看到的是绿色。",
+        "expectedCharacterCoverage": 1,
+        "transcriptLengthRatio": 1,
+        "durationSeconds": 15.76,
+        "peak": 0.48370361328125,
+        "clippedFraction": 0,
+        "rms": 0.08993528198267492
+      },
+      {
+        "turn": 5,
+        "answer": "Thank you for your help today.",
+        "transcript": "Thank you for your help today.",
+        "expectedCharacterCoverage": 1,
+        "transcriptLengthRatio": 1,
+        "durationSeconds": 1.76,
+        "peak": 0.334014892578125,
+        "clippedFraction": 0,
+        "rms": 0.06579609178269362
+      },
+      {
+        "turn": 6,
+        "answer": "小叶的预算是八万元。",
+        "transcript": "小叶的预算是8万元。",
+        "expectedCharacterCoverage": 1,
+        "transcriptLengthRatio": 1,
+        "durationSeconds": 2.96,
+        "peak": 0.450439453125,
+        "clippedFraction": 0,
+        "rms": 0.09226914716431524
+      },
+      {
+        "turn": 7,
+        "answer": "测试订单金额为1,234.50元，约在16:30核对。",
+        "transcript": "测试订单金额为1234.50元，约在16点30核对。",
+        "expectedCharacterCoverage": 1,
+        "transcriptLengthRatio": 1.0476190476190477,
+        "durationSeconds": 7.2,
+        "peak": 0.448760986328125,
+        "clippedFraction": 0,
+        "rms": 0.059403565617110875
+      },
+      {
+        "turn": 8,
+        "answer": "Please send the revised proposal before Friday afternoon and confirm the meeting time with the customer.",
+        "transcript": "Please send the revised proposal before Friday afternoon and confirm the meeting time with the customer.",
+        "expectedCharacterCoverage": 1,
+        "transcriptLengthRatio": 1,
+        "durationSeconds": 9.68,
+        "peak": 0.38043212890625,
+        "clippedFraction": 0,
+        "rms": 0.07277346238093967
+      },
+      {
+        "turn": 9,
+        "answer": "Please send the revised proposal before Friday afternoon and confirm the meeting time with the customer.",
+        "transcript": "Please send the revised proposal before Friday afternoon and confirm the meeting time with the customer.",
+        "expectedCharacterCoverage": 1,
+        "transcriptLengthRatio": 1,
+        "durationSeconds": 9.68,
+        "peak": 0.38043212890625,
+        "clippedFraction": 0,
+        "rms": 0.07277346238093967
+      },
+      {
+        "turn": 10,
+        "answer": "小叶的会议安排在周四下午三点，预算为八万元，方案需在周五交付。",
+        "transcript": "小叶的会议安排在周四下午3点，预算为8万元，方案需在周五交付。",
+        "expectedCharacterCoverage": 1,
+        "transcriptLengthRatio": 1,
+        "durationSeconds": 9.44,
+        "peak": 0.434326171875,
+        "clippedFraction": 0,
+        "rms": 0.08486690452993145
+      },
+      {
+        "turn": 11,
+        "answer": "客户小叶的预算是十万元。",
+        "transcript": "客户小叶的预算是10万元。",
+        "expectedCharacterCoverage": 0.9090909090909091,
+        "transcriptLengthRatio": 1.0909090909090908,
+        "durationSeconds": 3.6,
+        "peak": 0.467987060546875,
+        "clippedFraction": 0,
+        "rms": 0.10638511928218623
+      },
+      {
+        "turn": 12,
+        "answer": "小叶的预算是八万元。",
+        "transcript": "小叶的预算是8万元。",
+        "expectedCharacterCoverage": 1,
+        "transcriptLengthRatio": 1,
+        "durationSeconds": 2.96,
+        "peak": 0.450439453125,
+        "clippedFraction": 0,
+        "rms": 0.09226914716431524
+      }
+    ]
+  },
+  "finalFullReply": {
+    "source": "actual local generation and muted AudioTrack; no injected stop or microphone",
+    "answer": "会议安排在明天下午四点，预算五万元，方案周六交付。",
+    "writtenFrames": 144000,
+    "playedFrames": 144000,
+    "firstAudioMs": 940,
+    "generationCompletedMs": 6165,
+    "playbackCompletedMs": 7048,
+    "microphoneFrames": 0,
+    "outputMuted": true,
+    "humanListeningAccepted": false
+  },
+  "finalColdPreparation": {
+    "preparationMs": 6700,
+    "entryMs": 898,
+    "microphoneFrames": 0,
+    "hostPreparation": {
+      "ok": true,
+      "ready": true,
+      "preparationMs": 6649.640416,
+      "capabilitiesMs": 2870.4960410000003,
+      "finalWarmupMs": 3779.745084,
+      "initialization": {
+        "asr": {
+          "modelLoadMs": 821.1304999422282,
+          "probeMs": 821.1955418810248
+        },
+        "llm": {
+          "modelLoadMs": 2689.592666924,
+          "probeMs": 2689.619582844898
+        },
+        "tts": {
+          "modelLoadMs": 2558.3878341130912,
+          "probeMs": 2558.4002090618014
+        },
+        "final-asr": {
+          "modelLoadMs": 887.4691659584641,
+          "probeMs": 887.4968751333654
+        },
+        "vad": {
+          "modelLoadMs": 18.050000071525574,
+          "probeMs": 171.23129195533693
+        }
+      },
+      "mediaStarted": false
+    },
+    "cameraStarted": false,
+    "foregroundActivity": true
+  },
+  "finalStop": {
+    "source": "generated PCM through phone transport, actual ASR and AudioTrack; no physical microphone",
+    "rounds": [
+      {
+        "round": 1,
+        "captureStartToPlayerPauseMs": 266,
+        "oldAudioResumed": false,
+        "captureStartToStopCompletedMs": 269,
+        "nominalPcmMs": 364,
+        "actualFeedMs": 364,
+        "notice": "已停止说话，宿主任务的执行状态保持不变。",
+        "transcript": "停",
+        "stops": [
+          {
+            "arrivalMs": 264,
+            "completeMs": 269,
+            "pauseCompletedMs": 266,
+            "gateWaitMs": 0,
+            "pauseMs": 2,
+            "flushMs": 2
+          }
+        ]
+      },
+      {
+        "round": 2,
+        "captureStartToPlayerPauseMs": 293,
+        "oldAudioResumed": false,
+        "captureStartToStopCompletedMs": 295,
+        "nominalPcmMs": 364,
+        "actualFeedMs": 365,
+        "notice": "已停止说话，宿主任务的执行状态保持不变。",
+        "transcript": "停",
+        "stops": [
+          {
+            "arrivalMs": 292,
+            "completeMs": 295,
+            "pauseCompletedMs": 293,
+            "gateWaitMs": 0,
+            "pauseMs": 1,
+            "flushMs": 1
+          }
+        ]
+      },
+      {
+        "round": 3,
+        "captureStartToPlayerPauseMs": 286,
+        "oldAudioResumed": false,
+        "captureStartToStopCompletedMs": 287,
+        "nominalPcmMs": 364,
+        "actualFeedMs": 364,
+        "notice": "已停止说话，宿主任务的执行状态保持不变。",
+        "transcript": "停",
+        "stops": [
+          {
+            "arrivalMs": 284,
+            "completeMs": 287,
+            "pauseCompletedMs": 286,
+            "gateWaitMs": 1,
+            "pauseMs": 1,
+            "flushMs": 0
+          }
+        ]
+      },
+      {
+        "round": 4,
+        "captureStartToPlayerPauseMs": 290,
+        "oldAudioResumed": false,
+        "captureStartToStopCompletedMs": 293,
+        "nominalPcmMs": 364,
+        "actualFeedMs": 365,
+        "notice": "已停止说话，宿主任务的执行状态保持不变。",
+        "transcript": "停",
+        "stops": [
+          {
+            "arrivalMs": 289,
+            "completeMs": 293,
+            "pauseCompletedMs": 290,
+            "gateWaitMs": 0,
+            "pauseMs": 1,
+            "flushMs": 1
+          }
+        ]
+      },
+      {
+        "round": 5,
+        "captureStartToPlayerPauseMs": 267,
+        "oldAudioResumed": false,
+        "captureStartToStopCompletedMs": 271,
+        "nominalPcmMs": 364,
+        "actualFeedMs": 365,
+        "notice": "已停止说话，宿主任务的执行状态保持不变。",
+        "transcript": "停",
+        "stops": [
+          {
+            "arrivalMs": 265,
+            "completeMs": 271,
+            "pauseCompletedMs": 267,
+            "gateWaitMs": 0,
+            "pauseMs": 2,
+            "flushMs": 0
+          }
+        ]
+      },
+      {
+        "round": 6,
+        "captureStartToPlayerPauseMs": 271,
+        "oldAudioResumed": false,
+        "captureStartToStopCompletedMs": 274,
+        "nominalPcmMs": 364,
+        "actualFeedMs": 364,
+        "notice": "已停止说话，宿主任务的执行状态保持不变。",
+        "transcript": "停",
+        "stops": [
+          {
+            "arrivalMs": 269,
+            "completeMs": 274,
+            "pauseCompletedMs": 271,
+            "gateWaitMs": 0,
+            "pauseMs": 2,
+            "flushMs": 0
+          }
+        ]
+      },
+      {
+        "round": 7,
+        "captureStartToPlayerPauseMs": 289,
+        "oldAudioResumed": false,
+        "captureStartToStopCompletedMs": 290,
+        "nominalPcmMs": 364,
+        "actualFeedMs": 365,
+        "notice": "已停止说话，宿主任务的执行状态保持不变。",
+        "transcript": "停",
+        "stops": [
+          {
+            "arrivalMs": 288,
+            "completeMs": 290,
+            "pauseCompletedMs": 289,
+            "gateWaitMs": 0,
+            "pauseMs": 1,
+            "flushMs": 1
+          }
+        ]
+      },
+      {
+        "round": 8,
+        "captureStartToPlayerPauseMs": 481,
+        "oldAudioResumed": false,
+        "captureStartToStopCompletedMs": 483,
+        "nominalPcmMs": 364,
+        "actualFeedMs": 365,
+        "notice": "已停止说话，宿主任务的执行状态保持不变。",
+        "transcript": "停",
+        "stops": [
+          {
+            "arrivalMs": 480,
+            "completeMs": 483,
+            "pauseCompletedMs": 481,
+            "gateWaitMs": 0,
+            "pauseMs": 2,
+            "flushMs": 0
+          }
+        ]
+      },
+      {
+        "round": 9,
+        "captureStartToPlayerPauseMs": 298,
+        "oldAudioResumed": false,
+        "captureStartToStopCompletedMs": 299,
+        "nominalPcmMs": 364,
+        "actualFeedMs": 364,
+        "notice": "已停止说话，宿主任务的执行状态保持不变。",
+        "transcript": "停",
+        "stops": [
+          {
+            "arrivalMs": 297,
+            "completeMs": 299,
+            "pauseCompletedMs": 298,
+            "gateWaitMs": 0,
+            "pauseMs": 1,
+            "flushMs": 0
+          }
+        ]
+      },
+      {
+        "round": 10,
+        "captureStartToPlayerPauseMs": 423,
+        "oldAudioResumed": false,
+        "captureStartToStopCompletedMs": 424,
+        "nominalPcmMs": 364,
+        "actualFeedMs": 364,
+        "notice": "已停止说话，宿主任务的执行状态保持不变。",
+        "transcript": "停",
+        "stops": [
+          {
+            "arrivalMs": 422,
+            "completeMs": 424,
+            "pauseCompletedMs": 423,
+            "gateWaitMs": 0,
+            "pauseMs": 1,
+            "flushMs": 1
+          }
+        ]
+      }
+    ],
+    "newQuestionAnswered14": true,
+    "humanStopAccepted": false,
+    "completed": true,
+    "error": null,
+    "notice": null,
+    "outputMuted": true,
+    "socketDefaultNoDelay": false,
+    "socketNoDelayEnabled": true
+  },
+  "stopSummary": {
+    "medianMs": 289.5,
+    "nearestRankP95Ms": 481,
+    "strict300msPassed": false
+  },
+  "retainedFailures": [
+    {
+      "case": "late background performance check",
+      "firstAudioMs": 26441,
+      "stopTimedOut": true,
+      "evidence": [
+        "full-reply-phone-summary.log",
+        "packaged-stop.json"
+      ]
+    },
+    {
+      "case": "latest explicit budget overwritten by old budget",
+      "description": "Actual latest six万元 statement was wrongly replaced with old eight万元; fixed with scoped statement-repeat and conservative latest named budget handling."
+    },
+    {
+      "case": "pre-cache English full-text playback",
+      "maxObservedStarvationMs": 1633
+    }
+  ],
+  "verificationOrder": "12-turn and stop runs include activity + real VAD warmup; later short LLM readiness probe is covered by final cold/full-reply check; final long single-block phrase boundary is covered by the 546-test suite.",
+  "rawEvidenceSha256": {
+    "normal-dialogue-phone.json": "79a2f3deff5d3694b924bff04f48989ec7986fb497668db9adf76e217d019b45",
+    "received-audio-asr.json": "65709152104e0d30d3684a457156eca8ef1e317b6489ba0e22f65da95549554d",
+    "final-stop.json": "20aabd8d7efe2b618077bd2eb295e85457e62680e46027a35684f3f1c3968030",
+    "final-oppo-cold.json": "e6a512ab0e0393d795b03df7aa347b097fb29e17c456e244b196f8f294621740",
+    "full-reply-phone.json": "39dc073bc9ee59f9329c52460157375c89724d39dbd92623e85ec0d97d657b95",
+    "full-reply-phone-summary.log": "ecb03c5f33e4c5a642737ac8ce0ab08a0f42ead8df0e3855954ba18021de3a60",
+    "packaged-stop.json": "c1b1f2587a5153129d3b3eac269e1c3907616432b9c5f5dc74de1f3965de0803",
+    "tests-complete.log": "11ea652c235a0197afbb607650dc622f6be163a6a61f29c3d8252af07235265c",
+    "android-packaged.log": "3eb6ec992ce902fe30cfc0ce00a385630ab9d68abf0296db4b0228c5628712f5",
+    "python-tests-final.log": "62cfbeb2911bb226088bfb0918eb4b05008ea70b20bce854ee2ca8a564bd37a5",
+    "actual-asr-after.json": "a28e33001bb6695277a0614183883d9026110e6077c200a9333e04692a0645e8"
+  },
+  "remaining": [
+    "human continuous natural full-sentence listening",
+    "physical microphone stop and echo",
+    "current bright-object vision acceptance",
+    "strict stop latency <=300ms and response/cold tail",
+    "full original human/device/duration scope"
+  ],
+  "generatedInputCases": [
+    {
+      "name": "normal",
+      "passed": true,
+      "falseStop": false,
+      "physicalMicrophone": false,
+      "actualSpeaker": false
+    },
+    {
+      "name": "quiet-scaled",
+      "passed": true,
+      "falseStop": false,
+      "physicalMicrophone": false,
+      "actualSpeaker": false
+    },
+    {
+      "name": "artificial-midpoint-500ms-gap",
+      "passed": true,
+      "falseStop": false,
+      "physicalMicrophone": false,
+      "actualSpeaker": false
+    },
+    {
+      "name": "silence",
+      "passed": true,
+      "falseStop": false,
+      "physicalMicrophone": false,
+      "actualSpeaker": false
+    },
+    {
+      "name": "white-noise",
+      "passed": true,
+      "falseStop": false,
+      "physicalMicrophone": false,
+      "actualSpeaker": false
+    },
+    {
+      "name": "fan-hum",
+      "passed": true,
+      "falseStop": false,
+      "physicalMicrophone": false,
+      "actualSpeaker": false
+    },
+    {
+      "name": "knocks",
+      "passed": true,
+      "falseStop": false,
+      "physicalMicrophone": false,
+      "actualSpeaker": false
+    }
+  ]
+}

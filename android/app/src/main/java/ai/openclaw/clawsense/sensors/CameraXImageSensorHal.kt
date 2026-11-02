@@ -11,6 +11,7 @@ import android.os.Looper
 import android.util.Log
 import android.util.Size
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.CameraState
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -26,6 +27,8 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.LiveData
+import androidx.lifecycle.Observer
 import java.io.File
 import java.io.IOException
 import kotlinx.coroutines.Dispatchers
@@ -33,6 +36,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -71,7 +75,7 @@ class CameraXImageSensorHal(
         .build()
       val videoUseCase = VideoCapture.withOutput(recorder)
       provider.unbindAll()
-      provider.bindToLifecycle(
+      val camera = provider.bindToLifecycle(
         lifecycleOwner,
         CameraSelector.DEFAULT_BACK_CAMERA,
         imageUseCase,
@@ -79,7 +83,20 @@ class CameraXImageSensorHal(
       )
       imageCapture = imageUseCase
       videoCapture = videoUseCase
+      awaitCameraOpen(camera.cameraInfo.cameraState)
       Log.d(tag, "CameraX bound with image+video use cases target=1280x720 jpeg=75 videoQuality=SD")
+    }
+  }
+
+  private suspend fun awaitCameraOpen(state: LiveData<CameraState>) = withTimeout(8_000L) {
+    suspendCancellableCoroutine<Unit> { continuation ->
+      lateinit var observer: Observer<CameraState>
+      observer = Observer { value ->
+        if (continuation.isActive && value.type == CameraState.Type.OPEN) { state.removeObserver(observer); continuation.resume(Unit) }
+        else if (continuation.isActive && value.error != null) { state.removeObserver(observer); continuation.resumeWithException(IOException("Camera startup failed")) }
+      }
+      continuation.invokeOnCancellation { Handler(Looper.getMainLooper()).post { state.removeObserver(observer) } }
+      state.observeForever(observer)
     }
   }
 
@@ -148,11 +165,13 @@ class CameraXImageSensorHal(
       val file = File.createTempFile("clawsense-", ".jpg", context.cacheDir)
       suspendCancellableCoroutine { continuation ->
         val output = ImageCapture.OutputFileOptions.Builder(file).build()
+        continuation.invokeOnCancellation { file.delete() }
         capture.takePicture(
           output,
           ContextCompat.getMainExecutor(context),
           object : ImageCapture.OnImageSavedCallback {
             override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
+              if (!continuation.isActive) { file.delete(); return }
               val bytes = file.readBytes()
               file.delete()
               Log.d(tag, "Still capture saved bytes=${bytes.size}")
@@ -169,7 +188,7 @@ class CameraXImageSensorHal(
             override fun onError(exception: ImageCaptureException) {
               file.delete()
               Log.e(tag, "Still capture failed", exception)
-              continuation.resumeWithException(exception)
+              if (continuation.isActive) continuation.resumeWithException(exception)
             }
           },
         )
@@ -205,6 +224,7 @@ class CameraXImageSensorHal(
                   activeRecording = null
                 }
                 if (!continuation.isActive) {
+                  file.delete()
                   return@start
                 }
                 if (event.hasError()) {

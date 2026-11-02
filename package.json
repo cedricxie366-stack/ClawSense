@@ -1,8 +1,8 @@
 {
   "name": "clawsense",
-  "version": "0.1.0",
+  "version": "0.2.0-preview.12",
   "private": false,
-  "description": "Real-time multimodal evidence harness for physical-world agents on OpenClaw",
+  "description": "Real-world evidence, correctable memory and workflow handoff for agent plugins",
   "homepage": "https://github.com/cedricxie366-stack/ClawSense",
   "bugs": {
     "url": "https://github.com/cedricxie366-stack/ClawSense/issues"
@@ -14,18 +14,61 @@
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
+  "bin": {
+    "clawsense": "./dist/src/cli.js"
+  },
   "exports": {
     ".": "./dist/index.js"
   },
   "files": [
     "README.md",
+    "VISION.md",
     "LICENSE",
     "install.sh",
     "dist/**/*.js",
     "skills/**/*.md",
+    "agent-plugins/**/*",
+    "docs/pilot/**/*",
+    "docs/产品演进路线与执行计划.md",
+    "docs/contracts/live-runtime-v1.md",
+    "docs/validation/p1-p2-integrated-2026-10-15.md",
+    "docs/validation/p1-p2-human-acceptance-2026-10-15.md",
+    "docs/validation/p1-p2-closeout-2026-10-16.md",
+    "docs/validation/p1-p2-closeout-2026-10-16.json",
     "scripts/local-asr/*.py",
+    "scripts/live/prepare.py",
+    "scripts/live/worker.py",
+    "scripts/live/process_activity.py",
+    "scripts/live/dsh-prepare.mjs",
+    "scripts/live/requirements.txt",
     "openclaw.plugin.json",
-    "package.json"
+    "package.json",
+    "docs/validation/p1-autonomous-2026-10-16.md",
+    "docs/validation/p1-autonomous-2026-10-16.json",
+    "docs/validation/p1-autonomous-2026-10-19.md",
+    "docs/validation/p1-autonomous-2026-10-19.json",
+    "docs/validation/p1-human-2026-10-20.md",
+    "docs/validation/p1-input-offline-2026-10-20.md",
+    "docs/validation/p1-input-offline-2026-10-20.json",
+    "docs/validation/p1-oppo-recovery-2026-10-20.md",
+    "docs/research/android-vad-comparison-2026-10-16.md",
+    "docs/research/android-vad-comparison-2026-10-16.json",
+    "scripts/live/vision_policy.py",
+    "docs/validation/p1-ready-2026-10-21.md",
+    "docs/validation/p1-ready-2026-10-21.json",
+    "docs/validation/p1-latency-playback-2026-10-22.md",
+    "docs/validation/p1-latency-playback-2026-10-22.json",
+    "docs/validation/p1-normal-dialogue-2026-10-23.md",
+    "docs/validation/p1-normal-dialogue-2026-10-23.json",
+    "scripts/live/upstream/runtime.py",
+    "scripts/live/upstream/prepare.py",
+    "scripts/live/upstream/requirements.txt",
+    "docs/contracts/live-upstream-v1.md",
+    "docs/validation/p1-upstream-2026-10-29.md",
+    "docs/validation/p1-upstream-2026-10-29.json",
+    "docs/research/live-voice-landscape-2026-10-29.json",
+    "docs/validation/p1-upstream-device-2026-10-29.md",
+    "docs/releases/v0.2.0-preview.12.md"
   ],
   "openclaw": {
     "extensions": [
@@ -33,6 +76,8 @@
     ]
   },
   "scripts": {
+    "prepare:live": "python3 scripts/live/prepare.py",
+    "check:live": "npm run build && vitest run test/live",
     "build": "node -e \"require('node:fs').rmSync('dist',{ recursive:true, force:true })\" && tsc -p tsconfig.json",
     "check": "npm run build",
     "check:android-live": "bash ./scripts/check-android-live.sh",
@@ -57,6 +102,10 @@
     "check:stage-final:fixtures": "bash ./scripts/check-stage-final-fixtures.sh",
     "check:stage-final:index": "node ./scripts/index-stage-final-reports.mjs",
     "check:stage-final:live-guided": "bash ./scripts/run-final-live-validation.sh",
+    "check:cross-agent": "npm run build && vitest run --config vitest.config.ts test/cross-agent.test.ts && node scripts/check-cross-agent-stdio.mjs",
+    "check:calibration": "npm run build && node --test calibration-fixtures/*.test.mjs",
+    "check:package-install": "npm run build && node scripts/check-package-install.mjs",
+    "check:local-sensevoice": "npm run build && node scripts/check-local-sensevoice.mjs",
     "test": "vitest run --config vitest.config.ts",
     "log:dev": "bash ./scripts/dev-log.sh",
     "prepack": "npm run check && npm test"
@@ -66,13 +115,16 @@
   },
   "dependencies": {
     "@lancedb/lancedb": "^0.26.2",
+    "@modelcontextprotocol/sdk": "1.32.1",
     "@sinclair/typebox": "0.34.48",
     "openai": "^6.25.0",
-    "qrcode-terminal": "^0.12.0"
+    "qrcode-terminal": "^0.12.0",
+    "ws": "^8.22.0"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",
     "@types/qrcode-terminal": "^0.12.2",
+    "@types/ws": "^8.18.2",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
   },

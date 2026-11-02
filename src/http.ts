@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { ContextError } from "./context-store.js";
 
 export function createJsonRoute(
   path: string,
@@ -8,7 +9,7 @@ export function createJsonRoute(
   return {
     path,
     auth: options?.auth ?? ("plugin" as const),
-    handler,
+    handler: async (req: IncomingMessage, res: ServerResponse) => { try { return await handler(req, res); } catch (error) { if (!(error instanceof ContextError)) throw error; json(res, error.statusCode, { ok: false, error: error.code }); return true; } },
   };
 }
 

@@ -14,6 +14,117 @@ import {
 } from "../src/realtime-assistant.js";
 
 describe("realtime assistant helpers", () => {
+  it("answers a clock-time question from its meeting clause instead of a different deadline or the query itself", () => {
+    const context = createRecentContext();
+    context.recentTranscriptSpans = [
+      { ...context.recentTranscriptSpans[0]!, text: "刚才测试里的会议安排在几点？", capturedAt: 3 },
+      { ...context.recentTranscriptSpans[0]!, text: "测试背景对话：会议改到明天下午3点，资料周五发送。你觉得这个安排怎么样？", capturedAt: 2 },
+    ];
+    const result = answerAssistantQuery({ queryText: "刚才测试里的会议安排在几点？", recentContext: context });
+    expect(result.answerText).toContain("时间是明天下午3点");
+    expect(result.answerSpokenText).toContain("明天下午3点");
+    expect(result.answerText).not.toContain("不能直接确定");
+    expect(result.answerText).not.toContain("当前最值得注意");
+    expect(result.answerText).not.toContain("的原话：“刚才测试里的会议安排在几点");
+  });
+
+  it("does not invent a clock time from a date-only statement", () => {
+    const context = createRecentContext();
+    context.recentTranscriptSpans = [{ ...context.recentTranscriptSpans[0]!, text: "会议安排在周四。" }];
+    const result = answerAssistantQuery({ queryText: "会议安排在几点？", recentContext: context });
+    expect(result.answerText).toContain("没有给出具体几点");
+    expect(result.answerText).not.toContain("时间是周四");
+  });
+
+  it("speaks a concise time while keeping each original quote available on screen and for full reading", () => {
+    const context = createRecentContext();
+    context.recentTranscriptSpans = [
+      { ...context.recentTranscriptSpans[0]!, text: "会议安排在明天下午3点。", time: "22:22", capturedAt: 2 },
+      { ...context.recentTranscriptSpans[0]!, text: "会议安排在明天下午3点。", time: "22:16", capturedAt: 1 },
+    ];
+    const answer = answerAssistantQuery({ queryText: "会议安排在几点？", recentContext: context });
+    expect(answer.answerSpokenText).toBe("明天下午3点。原话已显示在屏幕上。");
+    expect(answer.answerText).toContain("22:22 的原话");
+    expect(answer.answerText).toContain("22:16 的原话");
+    const full = answerAssistantQuery({ queryText: "读全文", recentContext: context, previousTurn: { ...answer, timeRange: context.timeRange } });
+    expect(full.answerSpokenText).toBe(answer.answerText);
+  });
+
+  it("keeps uncertainty in concise speech instead of selecting one conflicting clock time", () => {
+    const context = createRecentContext();
+    context.recentTranscriptSpans = [
+      { ...context.recentTranscriptSpans[0]!, text: "会议安排在下午三点。", capturedAt: 2 },
+      { ...context.recentTranscriptSpans[0]!, text: "会议安排在下午四点。", capturedAt: 1 },
+    ];
+    const answer = answerAssistantQuery({ queryText: "会议安排在几点？", recentContext: context });
+    expect(answer.answerSpokenText).toContain("不能直接确定最终约定");
+    expect(answer.answerSpokenText).not.toContain("时间是下午三点");
+    expect(answer.answerText).toContain("下午三点");
+    expect(answer.answerText).toContain("下午四点");
+  });
+
+  it("keeps conflicting meeting clock times uncertain", () => {
+    const context = createRecentContext();
+    context.recentTranscriptSpans = [
+      { ...context.recentTranscriptSpans[0]!, text: "会议安排在下午三点。", capturedAt: 2 },
+      { ...context.recentTranscriptSpans[0]!, text: "会议安排在下午四点。", capturedAt: 1 },
+    ];
+    const result = answerAssistantQuery({ queryText: "会议安排在几点？", recentContext: context });
+    expect(result.answerText).toContain("不能直接确定最终约定");
+  });
+
+  it("does not promote information-seeking questions to tasks but retains explicit action requests", async () => {
+    const base = createAssistantContextPayload();
+    const query = "刚才测试里的会议安排在几点？";
+    const payload = createAssistantContextPayload({ windows: [
+      { ...base.windows[0]!, primarySummary: query, transcriptText: query, events: [{ ...base.windows[0]!.events[0]!, transcript: query }] },
+      { ...base.windows[0]!, windowId: "meeting-facts", primarySummary: "会议改到明天下午3点，资料周五发送。", transcriptText: "会议改到明天下午3点，资料周五发送。你觉得这个安排怎么样？", events: [{ ...base.windows[0]!.events[0]!, transcript: "会议改到明天下午3点，资料周五发送。你觉得这个安排怎么样？" }] },
+      { ...base.windows[0]!, windowId: "explicit-request", primarySummary: "请帮我确认会议安排在几点。", transcriptText: "请帮我确认会议安排在几点。", events: [{ ...base.windows[0]!.events[0]!, transcript: "请帮我确认会议安排在几点。" }] },
+    ] });
+    const { recentContext } = await buildRecentContextPayload({ reviewEngine: { buildAssistantContext: vi.fn(async () => payload) } as any, artifactUrlBase: "/api/clawsense/artifacts", question: query, modeHint: "meeting" });
+    expect(recentContext.taskHints.join(" ")).not.toContain(query.replace("？", ""));
+    expect(recentContext.taskHints.join(" ")).not.toContain("你觉得这个安排怎么样");
+    expect(recentContext.taskHints.join(" ")).toContain("会议改到明天下午3点");
+    expect(recentContext.taskHints.join(" ")).toContain("请帮我确认会议安排在几点");
+    expect(recentContext.attentionHints.join(" ")).not.toContain("待跟进：刚才测试里的会议安排在几点");
+  });
+
+  it("answers a specific delivery-time question from relevant speech without an unrelated scene", () => {
+    const context = createRecentContext();
+    context.modeUsed = "auto" as any;
+    context.sceneSummary = "";
+    context.recentTranscriptSpans = [
+      { ...context.recentTranscriptSpans[0]!, text: "明天去吃饭。", capturedAt: 2 },
+      { ...context.recentTranscriptSpans[0]!, text: "测试客户小林希望周五收到的方案预算是3万元。" },
+    ];
+    const result = answerAssistantQuery({ queryText: "过去一小时客户希望什么时候收到方案？", recentContext: context });
+    expect(result.answerText).toContain("时间是周五");
+    expect(result.answerSpokenText).toContain("周五");
+    expect(result.answerText).not.toContain("去吃饭");
+    expect(result.answerText).not.toContain("场景上看");
+    expect(result.answerSource).toBe("template");
+  });
+  it("keeps conflicting or negated dates as quoted evidence instead of picking a deadline", () => {
+    const context = createRecentContext();
+    context.recentTranscriptSpans = [{ ...context.recentTranscriptSpans[0]!, text: "方案不是周五交付，要改成周四，但还没确认。" }];
+    const result = answerAssistantQuery({ queryText: "方案什么时候交付？", recentContext: context });
+    expect(result.answerText).toContain("不能直接确定最终约定");
+    expect(result.answerText).toContain("还没确认");
+    expect(result.answerText).not.toContain("时间是周五");
+  });
+  it("does not read visual processing diagnostics as scene evidence", async () => {
+    const payload = createAssistantContextPayload();
+    const diagnostic = "Image captured, but the visual summary model was unavailable. Device note: active-window.";
+    payload.windows[0]!.primarySummary = diagnostic;
+    payload.windows[0]!.events[1]!.summary = diagnostic;
+    payload.summary = diagnostic;
+    const { recentContext } = await buildRecentContextPayload({ reviewEngine: { buildAssistantContext: vi.fn(async () => payload) } as any, artifactUrlBase: "/api/clawsense/artifacts", question: "刚才说了什么？" });
+    expect(recentContext.sceneSummary).toBe("");
+    expect(recentContext.topEvidence[0]!.summary).toContain("报价单");
+    const result = answerAssistantQuery({ queryText: "刚才说了什么？", recentContext });
+    expect(result.answerSpokenText).not.toMatch(/Image captured|Device note|unavailable/);
+    expect(answerAssistantQuery({ queryText: "刚才看到了什么？", recentContext }).answerText).toContain("不能确认");
+  });
   it("builds a recent-context payload from assistant context windows", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-24T15:30:00+08:00"));
@@ -684,6 +795,17 @@ describe("realtime assistant helpers", () => {
     });
     expect(full.answerText).toContain("上一轮完整回答");
     expect(full.answerSpokenText).toContain("毛利率计算口径");
+  });
+
+  it("reads the entire previous answer beyond the short-speech limit", () => {
+    const text = "客户希望周五收到方案，预算三万元。".repeat(100) + "最后一项是确认方案送达。";
+    const full = answerAssistantQuery({
+      queryText: "读全文",
+      recentContext: createRecentContext(),
+      previousTurn: { queryText: "整理客户需求", answerText: text, answerSpokenText: "客户希望周五收到方案。", answeredAt: 20, modeUsed: "meeting", timeRange: createRecentContext().timeRange },
+    });
+    expect(full.answerSpokenText).toBe(text);
+    expect(full.answerSpokenText).toContain("最后一项是确认方案送达");
   });
 
   it("answers scene questions conservatively from recent visual evidence", () => {

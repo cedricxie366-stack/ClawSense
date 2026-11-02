@@ -1,0 +1,86 @@
+{
+  "date": "2026-10-16",
+  "human": {
+    "feedbackVerbatim": "实际答案不错，语速正常，语音自然。",
+    "scope": "Camera-enabled general question plus direct translation follow-up; Android0.3.1 versionCode5; owned Mac local models",
+    "actualAnswersVerbatim": null,
+    "accepted": [
+      "answer relevance for this pair",
+      "normal rate for these replies",
+      "natural voice for these replies"
+    ],
+    "stageSignedOff": false
+  },
+  "repair": {
+    "app": "0.3.2-validation-window-preview-live-preview",
+    "versionCode": 6,
+    "apkSha256": "bfa65275f06aea4e6a1d64034345581c5fbb2b26e7f2fec8ae007b0b472d88f3",
+    "installedApkSha256": "bfa65275f06aea4e6a1d64034345581c5fbb2b26e7f2fec8ae007b0b472d88f3",
+    "changedScope": "Debug validation window persists across starts and process restart. No ASR/TTS/camera behavior changes."
+  },
+  "checks": {
+    "androidJvm": {
+      "tests": 48,
+      "failures": 0
+    },
+    "appAndTestApkBuild": "passed",
+    "persistentWindow": {
+      "deviceResult": {
+        "limitMs": 5000,
+        "consecutiveStarts": 2,
+        "configuredBeforeProcessRestart": true,
+        "connectedBeforeExpiry": true,
+        "microphoneReleased": true,
+        "hostShutdownRequired": false
+      },
+      "testSeconds": 13.74
+    },
+    "tenTypedTurns": {
+      "deviceResult": {
+        "turns": 10,
+        "typedTextToAudioTrackMs": [
+          9876,
+          1014,
+          768,
+          823,
+          1006,
+          9920,
+          2747,
+          805,
+          1240,
+          3499
+        ],
+        "expectedConfirmedBudget": "三万",
+        "buttonToAudioTrackPauseMs": 2,
+        "oldAudioResumed": false,
+        "microphoneUsedForTheseTurns": false,
+        "humanNaturalnessAccepted": false
+      },
+      "testSeconds": 70.724,
+      "medianTypedInputToAudioTrackMs": 1127.0,
+      "maxTypedInputToAudioTrackMs": 9920,
+      "samplesOver3500ms": 2,
+      "humanLatencyTargetSignedOff": false
+    },
+    "captureStoppedAtEnd": true
+  },
+  "failedAttempts": [
+    {
+      "kind": "test preparation",
+      "result": "Activity terminated before capture-validation preferences were written; the timeout assertion failed. Preserved log; rerun waited for Activity and checked disk before termination."
+    },
+    {
+      "kind": "old version limit",
+      "result": "Two-minute one-shot limit did not cover the second start; old service still running. Stopped original capture before patching."
+    }
+  ],
+  "remaining": [
+    "Spontaneous human ten-turn dialogue and mid-speech interruption",
+    "Long-form/name/date voice checks",
+    "Current visual scene, changes and occlusion",
+    "Human digital-to-work reuse story and device combinations",
+    "New model resource window and responsiveness tails; two typed cases near10 seconds"
+  ],
+  "publicRelease": "paused by user",
+  "recruitment": "paused by user"
+}

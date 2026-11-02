@@ -1,0 +1,1075 @@
+{
+  "date": "2026-10-29",
+  "timezone": "Asia/Shanghai",
+  "hostVersion": "0.2.0-preview.11",
+  "androidVersion": "0.3.11-upstream-live-preview",
+  "androidVersionCode": 15,
+  "installedOnPhysicalDevice": false,
+  "authorizedDeviceDetected": false,
+  "p1Accepted": false,
+  "publicRelease": "paused by user",
+  "physicalMicrophone": false,
+  "physicalCamera": false,
+  "audibleAutomaticOutput": false,
+  "upstreamPins": {
+    "pipecat": {
+      "commit": "7edf725648c07d227668cb3f9801923ea35bc83d",
+      "licenseSha256": "e31a733ecb79cbffafd5474e964e5eca15e0a0876a42b1d7253b51b198eb61aa"
+    },
+    "android-transports": {
+      "commit": "c42c4111941cf693fae9d0e39b754b5d871cd6c7",
+      "licenseSha256": "3f7ae4efea9d88003fbed40a836295685c8f582c63bef239cdc466dfe992437d"
+    },
+    "android-client": {
+      "commit": "49139ba8f93f4af09f2c9d554a562474fcec94a8",
+      "licenseSha256": "3f7ae4efea9d88003fbed40a836295685c8f582c63bef239cdc466dfe992437d"
+    },
+    "speech-to-speech": {
+      "commit": "bf39b6c38231f2961406d8c2e91c40e174dc5cbd",
+      "licenseSha256": "1db290a6ce5d11e74a63c05adbc1490da08688a300d6b4b19818bcfc4901af46"
+    }
+  },
+  "normalDialogue": {
+    "realModels": true,
+    "completed": true,
+    "errors": [],
+    "rows": [
+      {
+        "turn": 1,
+        "query": "请原样朗读：会议安排在明天下午四点，预算五万元，方案周六交付。",
+        "text": "会议安排在明天下午四点，预算五万元，方案周六交付。",
+        "interrupted": false,
+        "pcmSeconds": 6.0,
+        "frames": 144000,
+        "firstSinkMs": 2150,
+        "completedMs": 8460,
+        "physicalMicrophone": false,
+        "audibleOutput": false,
+        "pipelineErrors": []
+      },
+      {
+        "turn": 2,
+        "query": "客户小叶周五要方案，预算六万元。请复述安排。",
+        "text": "安排在周五向客户小叶提交方案，预算为六万元。",
+        "interrupted": false,
+        "pcmSeconds": 5.2,
+        "frames": 124800,
+        "firstSinkMs": 1035,
+        "completedMs": 6502,
+        "physicalMicrophone": false,
+        "audibleOutput": false,
+        "pipelineErrors": []
+      },
+      {
+        "turn": 3,
+        "query": "客户叫什么？",
+        "text": "客户叫小叶。",
+        "interrupted": false,
+        "pcmSeconds": 1.12,
+        "frames": 26880,
+        "firstSinkMs": 2488,
+        "completedMs": 3688,
+        "physicalMicrophone": false,
+        "audibleOutput": false,
+        "pipelineErrors": []
+      },
+      {
+        "turn": 4,
+        "query": "方案改为周四，预算改为八万元，请简短确认。",
+        "text": "方案调整为周四交付，预算改为八万元。",
+        "interrupted": false,
+        "pcmSeconds": 4.8,
+        "frames": 115200,
+        "firstSinkMs": 866,
+        "completedMs": 5920,
+        "physicalMicrophone": false,
+        "audibleOutput": false,
+        "pipelineErrors": []
+      },
+      {
+        "turn": 5,
+        "query": "小叶现在的安排是什么？",
+        "text": "客户小叶的方案现在安排在周四交付，预算为八万元。",
+        "interrupted": false,
+        "pcmSeconds": 5.92,
+        "frames": 142080,
+        "firstSinkMs": 1054,
+        "completedMs": 7234,
+        "physicalMicrophone": false,
+        "audibleOutput": false,
+        "pipelineErrors": []
+      },
+      {
+        "turn": 6,
+        "query": "为什么树叶是绿色的？",
+        "text": "树叶是绿色的，因为里面含有一种叫叶绿素的物质，它能吸收阳光进行光合作用。 叶绿素反射绿光，所以我们看到树叶是绿色的。",
+        "interrupted": false,
+        "pcmSeconds": 13.2,
+        "frames": 316800,
+        "firstSinkMs": 1420,
+        "completedMs": 15238,
+        "physicalMicrophone": false,
+        "audibleOutput": false,
+        "pipelineErrors": []
+      },
+      {
+        "turn": 7,
+        "query": "把谢谢你今天的帮助翻译成英语。",
+        "text": "Thank you for your help today.",
+        "interrupted": false,
+        "pcmSeconds": 1.76,
+        "frames": 42240,
+        "firstSinkMs": 828,
+        "completedMs": 2697,
+        "physicalMicrophone": false,
+        "audibleOutput": false,
+        "pipelineErrors": []
+      },
+      {
+        "turn": 8,
+        "query": "小叶的预算现在是多少？",
+        "text": "客户小叶的预算现在是八万元。",
+        "interrupted": false,
+        "pcmSeconds": 3.12,
+        "frames": 74880,
+        "firstSinkMs": 3008,
+        "completedMs": 6304,
+        "physicalMicrophone": false,
+        "audibleOutput": false,
+        "pipelineErrors": []
+      },
+      {
+        "turn": 9,
+        "query": "请原样朗读：测试订单金额为1,234.50元，约在16:30核对。",
+        "text": "测试订单金额为1,234.50元，约在16:30核对。",
+        "interrupted": false,
+        "pcmSeconds": 7.2,
+        "frames": 172800,
+        "firstSinkMs": 286,
+        "completedMs": 7844,
+        "physicalMicrophone": false,
+        "audibleOutput": false,
+        "pipelineErrors": []
+      },
+      {
+        "turn": 10,
+        "query": "请原样朗读：Please send the revised proposal before Friday afternoon and confirm the meeting time with the customer.",
+        "text": "Please send the revised proposal before Friday afternoon and confirm the meeting time with the customer.",
+        "interrupted": false,
+        "pcmSeconds": 9.68,
+        "frames": 232320,
+        "firstSinkMs": 328,
+        "completedMs": 10486,
+        "physicalMicrophone": false,
+        "audibleOutput": false,
+        "pipelineErrors": []
+      },
+      {
+        "turn": 11,
+        "query": "读全文",
+        "text": "Please send the revised proposal before Friday afternoon and confirm the meeting time with the customer.",
+        "interrupted": false,
+        "pcmSeconds": 9.68,
+        "frames": 232320,
+        "firstSinkMs": 290,
+        "completedMs": 10451,
+        "physicalMicrophone": false,
+        "audibleOutput": false,
+        "pipelineErrors": []
+      }
+    ]
+  },
+  "controlledPipecat": {
+    "realModels": true,
+    "completed": true,
+    "errors": [],
+    "rows": [
+      {
+        "turn": 1,
+        "query": "请原样朗读：会议安排在明天下午四点，预算五万元，方案周六交付。",
+        "text": "会议安排在明天下午四点，预算五万元，方案周六交付。",
+        "interrupted": false,
+        "pcmSeconds": 6.0,
+        "frames": 144000,
+        "firstSinkMs": 358,
+        "completedMs": 6675,
+        "physicalMicrophone": false,
+        "audibleOutput": false,
+        "pipelineErrors": []
+      },
+      {
+        "turn": 2,
+        "query": "请原样朗读：测试订单金额为1,234.50元，约在16:30核对。",
+        "text": "测试订单金额为1,234.50元，约在16:30核对。",
+        "interrupted": false,
+        "pcmSeconds": 7.2,
+        "frames": 172800,
+        "firstSinkMs": 361,
+        "completedMs": 7947,
+        "physicalMicrophone": false,
+        "audibleOutput": false,
+        "pipelineErrors": []
+      },
+      {
+        "turn": 3,
+        "query": "请原样朗读：Please send the revised proposal before Friday afternoon and confirm the meeting time with the customer.",
+        "text": "Please send the revised proposal before Friday afternoon and confirm the meeting time with the customer.",
+        "interrupted": false,
+        "pcmSeconds": 9.68,
+        "frames": 232320,
+        "firstSinkMs": 334,
+        "completedMs": 10498,
+        "physicalMicrophone": false,
+        "audibleOutput": false,
+        "pipelineErrors": []
+      }
+    ]
+  },
+  "controlledLegacy": {
+    "scope": "Old LiveSession output orchestration with the SAME new model/context boundary; not a historical full-stack benchmark",
+    "completed": true,
+    "rows": [
+      {
+        "query": "请原样朗读：会议安排在明天下午四点，预算五万元，方案周六交付。",
+        "firstSinkMs": 277,
+        "completedMs": 6324,
+        "pcmSeconds": 6,
+        "frames": 144000,
+        "physicalMicrophone": false,
+        "audibleOutput": false
+      },
+      {
+        "query": "请原样朗读：测试订单金额为1,234.50元，约在16:30核对。",
+        "firstSinkMs": 306,
+        "completedMs": 7562,
+        "pcmSeconds": 7.2,
+        "frames": 172800,
+        "physicalMicrophone": false,
+        "audibleOutput": false
+      },
+      {
+        "query": "请原样朗读：Please send the revised proposal before Friday afternoon and confirm the meeting time with the customer.",
+        "firstSinkMs": 305,
+        "completedMs": 10057,
+        "pcmSeconds": 9.68,
+        "frames": 232320,
+        "physicalMicrophone": false,
+        "audibleOutput": false
+      }
+    ]
+  },
+  "hfIndependent": {
+    "completed": true,
+    "scope": "Pinned HF runtime with existing local LLM/TTS weights and ONNX STT adapter; separate process, no ClawSense memory; not identical model sampling or physical playback",
+    "rows": [
+      {
+        "turn": 1,
+        "query": "请原样朗读：会议安排在明天下午四点，预算五万元，方案周六交付。",
+        "text": "会议安排在明天下午四点，预算五万元，方案周六交付。",
+        "audioSeconds": 5.344,
+        "firstReceivedMs": 3016,
+        "generationDoneMs": 6088,
+        "silentPlaybackCompletedMs": 8365,
+        "physicalMicrophone": false,
+        "audibleOutput": false,
+        "eventTypes": [
+          "conversation.item.created",
+          "response.content_part.added",
+          "response.content_part.done",
+          "response.created",
+          "response.done",
+          "response.output_audio.delta",
+          "response.output_audio.done",
+          "response.output_audio_transcript.delta",
+          "response.output_audio_transcript.done",
+          "response.output_item.added",
+          "response.output_item.done",
+          "session.updated"
+        ]
+      },
+      {
+        "turn": 2,
+        "query": "请原样朗读：测试订单金额为1,234.50元，约在16:30核对。",
+        "text": "测试订单金额为1,234.50元，约在16:30核对。",
+        "audioSeconds": 7.232,
+        "firstReceivedMs": 2302,
+        "generationDoneMs": 6393,
+        "silentPlaybackCompletedMs": 9537,
+        "physicalMicrophone": false,
+        "audibleOutput": false,
+        "eventTypes": [
+          "conversation.item.created",
+          "response.content_part.added",
+          "response.content_part.done",
+          "response.created",
+          "response.done",
+          "response.output_audio.delta",
+          "response.output_audio.done",
+          "response.output_audio_transcript.delta",
+          "response.output_audio_transcript.done",
+          "response.output_item.added",
+          "response.output_item.done"
+        ]
+      },
+      {
+        "turn": 3,
+        "query": "请原样朗读：Please send the revised proposal before Friday afternoon and confirm the meeting time with the customer.",
+        "text": "Please send the revised proposal before Friday afternoon and confirm the meeting time with the customer.",
+        "audioSeconds": 6.848,
+        "firstReceivedMs": 2041,
+        "generationDoneMs": 5903,
+        "silentPlaybackCompletedMs": 8893,
+        "physicalMicrophone": false,
+        "audibleOutput": false,
+        "eventTypes": [
+          "conversation.item.created",
+          "response.content_part.added",
+          "response.content_part.done",
+          "response.created",
+          "response.done",
+          "response.output_audio.delta",
+          "response.output_audio.done",
+          "response.output_audio_transcript.delta",
+          "response.output_audio_transcript.done",
+          "response.output_item.added",
+          "response.output_item.done"
+        ]
+      }
+    ]
+  },
+  "audioRetranscription": {
+    "meaning": "Local ASR of actual generated PCM; not a human voice-naturalness verdict",
+    "rows": [
+      {
+        "file": "upstream-turn-1.wav",
+        "seconds": 6.0,
+        "transcript": "会议安排在明天下午4点，预算5万元方案周六交付。",
+        "rms": 0.10345933586359024,
+        "clippedFraction": 0.0,
+        "physicalMicrophone": false,
+        "audibleOutput": false
+      },
+      {
+        "file": "upstream-turn-9.wav",
+        "seconds": 7.2,
+        "transcript": "测试订单金额为1234.50元，约在16点30核对。",
+        "rms": 0.059403564780950546,
+        "clippedFraction": 0.0,
+        "physicalMicrophone": false,
+        "audibleOutput": false
+      },
+      {
+        "file": "upstream-turn-10.wav",
+        "seconds": 9.68,
+        "transcript": "Please send the revised proposal before Friday afternoon and confirm the meeting time with the customer.",
+        "rms": 0.07277346402406693,
+        "clippedFraction": 0.0,
+        "physicalMicrophone": false,
+        "audibleOutput": false
+      },
+      {
+        "file": "hf-turn-1.wav",
+        "seconds": 5.344,
+        "transcript": "会议安排在明天下午4点，预算5万元方案周六交付。",
+        "rms": 0.10945134609937668,
+        "clippedFraction": 0.0,
+        "physicalMicrophone": false,
+        "audibleOutput": false
+      },
+      {
+        "file": "hf-turn-2.wav",
+        "seconds": 7.232,
+        "transcript": "测试订单金额为1234.50元，约在16点30伏G对。",
+        "rms": 0.09467773884534836,
+        "clippedFraction": 0.0,
+        "physicalMicrophone": false,
+        "audibleOutput": false
+      },
+      {
+        "file": "hf-turn-3.wav",
+        "seconds": 6.848,
+        "transcript": "Please send the revised proposal before Friday afternoon and confirm the meeting time with a customer.",
+        "rms": 0.09066492319107056,
+        "clippedFraction": 0.0,
+        "physicalMicrophone": false,
+        "audibleOutput": false
+      }
+    ]
+  },
+  "asrComparison": {
+    "scope": "Same generated utterances, actual CPU models; compute time excludes capture, network and endpointing; not a real-human accuracy benchmark",
+    "rows": [
+      {
+        "file": "upstream-turn-1.wav",
+        "paraformer": "会议安排在明天下午四点预算五万元方案周六交付",
+        "sensevoice": "会议安排在明天下午4点，预算5万元方案周六交付。",
+        "onlineWholeFileComputeMs": 213,
+        "offlineWholeFileComputeMs": 113,
+        "input": "generated PCM, not physical microphone"
+      },
+      {
+        "file": "upstream-turn-9.wav",
+        "paraformer": "测试订单金额为一千两百三十四点五零元约在十六点三十核对",
+        "sensevoice": "测试订单金额为1234.50元，约在16点30核对。",
+        "onlineWholeFileComputeMs": 235,
+        "offlineWholeFileComputeMs": 121,
+        "input": "generated PCM, not physical microphone"
+      },
+      {
+        "file": "stop-fixture.wav",
+        "paraformer": "停",
+        "sensevoice": "停。",
+        "onlineWholeFileComputeMs": 18,
+        "offlineWholeFileComputeMs": 29,
+        "input": "generated PCM, not physical microphone"
+      }
+    ]
+  },
+  "webrtcNormal": {
+    "physicalMicrophone": false,
+    "audibleOutput": false,
+    "transport": "actual aiortc DTLS/SRTP with official SmallWebRTC",
+    "completed": true,
+    "injectedSpeechFrames": 300,
+    "receivedAudioFrames": 544,
+    "nonSilentFrames": 132,
+    "events": [
+      {
+        "label": "rtvi-ai",
+        "type": "user-input",
+        "data": {
+          "text": "会议安排在明天下午4点。",
+          "input_type": "transcription",
+          "timestamp": "2026-10-28T18:40:26.692+00:00",
+          "final": true,
+          "user_id": ""
+        }
+      },
+      {
+        "label": "rtvi-ai",
+        "type": "user-transcription",
+        "data": {
+          "text": "会议安排在明天下午4点。",
+          "user_id": "",
+          "timestamp": "2026-10-28T18:40:26.692+00:00",
+          "final": true
+        }
+      },
+      {
+        "label": "rtvi-ai",
+        "type": "bot-transcription",
+        "data": {
+          "text": "明天下午4点有会议。"
+        }
+      },
+      {
+        "label": "rtvi-ai",
+        "type": "user-input",
+        "data": {
+          "text": "预算5万元。",
+          "input_type": "transcription",
+          "timestamp": "2026-10-28T18:40:28.342+00:00",
+          "final": true,
+          "user_id": ""
+        }
+      },
+      {
+        "label": "rtvi-ai",
+        "type": "user-transcription",
+        "data": {
+          "text": "预算5万元。",
+          "user_id": "",
+          "timestamp": "2026-10-28T18:40:28.342+00:00",
+          "final": true
+        }
+      },
+      {
+        "label": "rtvi-ai",
+        "type": "user-input",
+        "data": {
+          "text": "方案周六交付。",
+          "input_type": "transcription",
+          "timestamp": "2026-10-28T18:40:30.251+00:00",
+          "final": true,
+          "user_id": ""
+        }
+      },
+      {
+        "label": "rtvi-ai",
+        "type": "user-transcription",
+        "data": {
+          "text": "方案周六交付。",
+          "user_id": "",
+          "timestamp": "2026-10-28T18:40:30.251+00:00",
+          "final": true
+        }
+      },
+      {
+        "label": "rtvi-ai",
+        "type": "bot-transcription",
+        "data": {
+          "text": "预算5万元，周六交付。"
+        }
+      },
+      {
+        "label": "rtvi-ai",
+        "type": "bot-output",
+        "data": {
+          "text": "明天下午4点有会议。",
+          "text_type": "sentence",
+          "aggregated_by": "sentence",
+          "segment_id": 302,
+          "spoken": false,
+          "will_be_spoken": true,
+          "spoken_status": "new",
+          "spoken_progress": {
+            "accumulated_text": "",
+            "remaining_text": "明天下午4点有会议。"
+          }
+        }
+      },
+      {
+        "label": "rtvi-ai",
+        "type": "bot-output",
+        "data": {
+          "text": "预算5万元，周六交付。",
+          "text_type": "sentence",
+          "aggregated_by": "sentence",
+          "segment_id": 548,
+          "spoken": false,
+          "will_be_spoken": true,
+          "spoken_status": "new",
+          "spoken_progress": {
+            "accumulated_text": "",
+            "remaining_text": "预算5万元，周六交付。"
+          }
+        }
+      },
+      {
+        "label": "rtvi-ai",
+        "type": "bot-output",
+        "data": {
+          "text": "预算5万元，周六交付。",
+          "text_type": "sentence",
+          "aggregated_by": "sentence",
+          "segment_id": 548,
+          "spoken": true,
+          "will_be_spoken": true,
+          "spoken_status": "completed",
+          "spoken_progress": {
+            "accumulated_text": "预算5万元，周六交付。",
+            "remaining_text": ""
+          }
+        }
+      }
+    ]
+  },
+  "webrtcStop": {
+    "physicalMicrophone": false,
+    "audibleOutput": false,
+    "transport": "actual aiortc DTLS/SRTP with official SmallWebRTC",
+    "completed": true,
+    "stopToLastReceivedNonSilentMs": 718,
+    "resumedAfterOneSecond": false,
+    "recoveryAnswer": "结果是14。结果是14。",
+    "injectedSpeechFrames": 32,
+    "receivedAudioFrames": 326,
+    "nonSilentFrames": 119,
+    "events": [
+      {
+        "label": "rtvi-ai",
+        "type": "user-input",
+        "data": {
+          "text": "请原样朗读：火山内部的岩浆和气体压力不断增加，达到一定程度后会沿裂缝喷出地表。火山内部的岩浆和气体压力不断增加，达到一定程度后会沿裂缝喷出地表。火山内部的岩浆和气体压力不断增加，达到一定程度后会沿裂缝喷出地表。火山内部的岩浆和气体压力不断增加，达到一定程度后会沿裂缝喷出地表。",
+          "input_type": "chat",
+          "timestamp": "2026-10-28T19:14:55.867+00:00",
+          "final": true,
+          "msg_id": "585026d1-4935-408d-9cf1-28ac3921037f"
+        }
+      },
+      {
+        "label": "rtvi-ai",
+        "type": "bot-transcription",
+        "data": {
+          "text": "火山内部的岩浆和气体压力不断增加，达到一定程度后会沿裂缝喷出地表。火山内部的岩浆和气体压力不断增加，达到一定程度后会沿裂缝喷出地表。火山内部的岩浆和气体压力不断增加，达到一定程度后会沿裂缝喷出地表。火山内部的岩浆和气体压力不断增加，达到一定程度后会沿裂缝喷出地表。"
+        }
+      },
+      {
+        "label": "rtvi-ai",
+        "type": "bot-output",
+        "data": {
+          "text": "火山内部的岩浆和气体压力不断增加，达到一定程度后会沿裂缝喷出地表。",
+          "text_type": "sentence",
+          "aggregated_by": "sentence",
+          "segment_id": 83,
+          "spoken": false,
+          "will_be_spoken": true,
+          "spoken_status": "new",
+          "spoken_progress": {
+            "accumulated_text": "",
+            "remaining_text": "火山内部的岩浆和气体压力不断增加，达到一定程度后会沿裂缝喷出地表。"
+          }
+        }
+      },
+      {
+        "label": "rtvi-ai",
+        "type": "user-input",
+        "data": {
+          "text": "停。",
+          "input_type": "transcription",
+          "timestamp": "2026-10-28T19:14:57.850+00:00",
+          "final": true,
+          "user_id": ""
+        }
+      },
+      {
+        "label": "rtvi-ai",
+        "type": "user-transcription",
+        "data": {
+          "text": "停。",
+          "user_id": "",
+          "timestamp": "2026-10-28T19:14:57.850+00:00",
+          "final": true
+        }
+      },
+      {
+        "label": "rtvi-ai",
+        "type": "user-input",
+        "data": {
+          "text": "六加八是多少？",
+          "input_type": "chat",
+          "timestamp": "2026-10-28T19:15:00.440+00:00",
+          "final": true,
+          "msg_id": "d5f779c1-e369-469b-bba0-aa56538c860e"
+        }
+      },
+      {
+        "label": "rtvi-ai",
+        "type": "bot-transcription",
+        "data": {
+          "text": "结果是14。"
+        }
+      },
+      {
+        "label": "rtvi-ai",
+        "type": "bot-output",
+        "data": {
+          "text": "结果是14。",
+          "text_type": "sentence",
+          "aggregated_by": "sentence",
+          "segment_id": 437,
+          "spoken": false,
+          "will_be_spoken": true,
+          "spoken_status": "new",
+          "spoken_progress": {
+            "accumulated_text": "",
+            "remaining_text": "结果是14。"
+          }
+        }
+      },
+      {
+        "label": "rtvi-ai",
+        "type": "bot-output",
+        "data": {
+          "text": "结果是14。",
+          "text_type": "sentence",
+          "aggregated_by": "sentence",
+          "segment_id": 437,
+          "spoken": true,
+          "will_be_spoken": true,
+          "spoken_status": "completed",
+          "spoken_progress": {
+            "accumulated_text": "结果是14。",
+            "remaining_text": ""
+          }
+        }
+      }
+    ],
+    "eventTypes": [
+      "bot-ready",
+      "bot-interrupted",
+      "user-input",
+      "user-llm-text",
+      "bot-llm-started",
+      "bot-llm-text",
+      "bot-transcription",
+      "bot-llm-stopped",
+      "bot-tts-started",
+      "bot-started-speaking",
+      "bot-output",
+      "user-started-speaking",
+      "bot-interrupted",
+      "bot-stopped-speaking",
+      "user-input",
+      "user-transcription",
+      "metrics",
+      "bot-interrupted",
+      "user-input",
+      "user-llm-text",
+      "bot-llm-started",
+      "bot-llm-text",
+      "bot-transcription",
+      "bot-llm-stopped",
+      "bot-tts-started",
+      "bot-started-speaking",
+      "bot-output",
+      "user-llm-text",
+      "user-stopped-speaking",
+      "bot-tts-stopped",
+      "bot-output",
+      "bot-tts-text",
+      "bot-stopped-speaking"
+    ],
+    "errorEvents": [],
+    "transcripts": [
+      {
+        "text": "火山内部的岩浆和气体压力不断增加，达到一定程度后会沿裂缝喷出地表。",
+        "text_type": "sentence",
+        "aggregated_by": "sentence",
+        "segment_id": 83,
+        "spoken": false,
+        "will_be_spoken": true,
+        "spoken_status": "new",
+        "spoken_progress": {
+          "accumulated_text": "",
+          "remaining_text": "火山内部的岩浆和气体压力不断增加，达到一定程度后会沿裂缝喷出地表。"
+        }
+      },
+      {
+        "text": "停。",
+        "user_id": "",
+        "timestamp": "2026-10-28T19:14:57.850+00:00",
+        "final": true
+      },
+      {
+        "text": "结果是14。",
+        "text_type": "sentence",
+        "aggregated_by": "sentence",
+        "segment_id": 437,
+        "spoken": false,
+        "will_be_spoken": true,
+        "spoken_status": "new",
+        "spoken_progress": {
+          "accumulated_text": "",
+          "remaining_text": "结果是14。"
+        }
+      },
+      {
+        "text": "结果是14。",
+        "text_type": "sentence",
+        "aggregated_by": "sentence",
+        "segment_id": 437,
+        "spoken": true,
+        "will_be_spoken": true,
+        "spoken_status": "completed",
+        "spoken_progress": {
+          "accumulated_text": "结果是14。",
+          "remaining_text": ""
+        }
+      }
+    ]
+  },
+  "noiseCases": [
+    {
+      "physicalMicrophone": false,
+      "audibleOutput": false,
+      "transport": "actual aiortc DTLS/SRTP with official SmallWebRTC",
+      "completed": true,
+      "noiseCase": "white",
+      "injectedSpeechFrames": 150,
+      "receivedAudioFrames": 371,
+      "nonSilentFrames": 0,
+      "events": [],
+      "eventTypes": [
+        "bot-ready"
+      ],
+      "errorEvents": [],
+      "transcripts": []
+    },
+    {
+      "physicalMicrophone": false,
+      "audibleOutput": false,
+      "transport": "actual aiortc DTLS/SRTP with official SmallWebRTC",
+      "completed": true,
+      "noiseCase": "fan",
+      "injectedSpeechFrames": 150,
+      "receivedAudioFrames": 371,
+      "nonSilentFrames": 0,
+      "events": [],
+      "eventTypes": [
+        "bot-ready"
+      ],
+      "errorEvents": [],
+      "transcripts": []
+    },
+    {
+      "physicalMicrophone": false,
+      "audibleOutput": false,
+      "transport": "actual aiortc DTLS/SRTP with official SmallWebRTC",
+      "completed": true,
+      "noiseCase": "knocks",
+      "injectedSpeechFrames": 150,
+      "receivedAudioFrames": 370,
+      "nonSilentFrames": 0,
+      "events": [],
+      "eventTypes": [
+        "bot-ready"
+      ],
+      "errorEvents": [],
+      "transcripts": []
+    }
+  ],
+  "realBoundaries": {
+    "completed": true,
+    "physicalSensors": false,
+    "rows": [
+      {
+        "case": "restart_session_reuses_authorized_memory",
+        "passed": true,
+        "answer": "小叶的预算是六万元。"
+      },
+      {
+        "case": "new_red_image",
+        "passed": true,
+        "answer": "当前画面中央是一个红色的正方形。",
+        "physicalCamera": false
+      },
+      {
+        "case": "new_blue_image",
+        "passed": true,
+        "answer": "当前画面中央是一个纯蓝色的正方形。",
+        "physicalCamera": false
+      },
+      {
+        "case": "stale_image_rejected",
+        "passed": true
+      },
+      {
+        "case": "processing_revocation_and_teardown",
+        "passed": true
+      }
+    ]
+  },
+  "checks": {
+    "projectTests": 558,
+    "projectFiles": 41,
+    "androidJvmTests": 56,
+    "sidecarPythonTests": 4,
+    "calibrationTests": 3,
+    "crossAgentProtocol": true,
+    "physicalHumanAcceptance": false
+  },
+  "claims": {
+    "normalFirstSinkMedianMs": 1035,
+    "stopMetric": "synthetic injection start to last non-silent RECEIVED WebRTC frame; not Android speaker silence or comparable to previous player.pause timings",
+    "stop300msAcceptance": false,
+    "frameTimestampBasis": "server-receive; device capture clock not calibrated",
+    "hfAudioDifferences": [
+      "核对 retranscribed as 伏G对 in money/time sentence",
+      "the customer retranscribed as a customer"
+    ],
+    "speechProviderDecision": "retain existing calibrated Qwen3-TTS runtime for this candidate; HF remains separate comparator"
+  },
+  "retainedFailures": [
+    "initial model preparation timeout",
+    "during-build first output wait ~14s and TTS no-audio warning",
+    "asynchronous playback receipt misattributed to following response",
+    "checkpoint initially outside managed deletion roots; orphan synthetic files cleaned without relaxing whitelist",
+    "duplicate cancel control broke recovery; removed extra RPC so Pipecat owns cancellation",
+    "sandbox-denied loopback tests rerun successfully with local-listener permission"
+  ],
+  "remaining": [
+    "final candidate install on authorized phone",
+    "human complete/natural speech and volume",
+    "acoustic echo and real spoken interruption",
+    "current physical object recognition",
+    "original P1 ten-turn/device/duration/latency gates"
+  ],
+  "rawEvidenceSha256": {
+    "pipeline-receipts.log": "a039b66a0ba8a49014ab3f775160077e5a76d8e42040937b98b774108a4d308c",
+    "pipeline-controlled.json": "ed9e0257c5ca60bfeb63b5f09a97b1ca0e82a6cd9893a5c50ccc9eb811a6f79f",
+    "legacy-controlled.json": "8d5463683aed396183e7ce31036a3f2e4bef5b6c59bad4a5f8cd963be578b17e",
+    "hf-comparison.json": "e16bcb1d9b4eb29e47996ecf95369dc8862343c77a9a5b2a2a6b5b60a340d2c7",
+    "audio-comparison.json": "3377e61587caf4944fa61fa3af8004cd498d95b95ca62d0de3e72854c121f2d5",
+    "asr-comparison.json": "9af62058bee02c7617f5906598bcf4dbd5f9deed4bd31a9f4cd40cb2cfc62128",
+    "webrtc-stop-pass-1.json": "e50373022157539c0374645689171423c837cdaa8124ac802b066318b36df6df",
+    "boundaries-real.json": "52e5e5d6f776a32f0519f7d55ca32cd3e919e82f8dc45565a86ae5b9dd7bb584",
+    "tests-final.log": "e8fe553a614079684bfc95c9a45b4ae092b0891ad46d0e3c5b4ca27e6310cdc2",
+    "android-candidate.log": "73aadd63cd46374374eb55c9bbb042d6df9f672e09ab2f8167f3116a444ccd92",
+    "python-final.log": "fa57a53de600df647899937de64aa7d904018b9cf351e2b84ca3a09e260619e8",
+    "android-delivery.log": "39852fee308283f9b90fb2d9c885a6d983b38246a97a29dbdd322767e420b808",
+    "webrtc-button-stop.json": "9f3fddb143c62398715ac021a0c2e34f668181301ce28ef72ad16d0a6417d1d1"
+  },
+  "webrtcButtonStop": {
+    "physicalMicrophone": false,
+    "audibleOutput": false,
+    "transport": "actual aiortc DTLS/SRTP with official SmallWebRTC",
+    "completed": true,
+    "stopToLastReceivedNonSilentMs": 160,
+    "resumedAfterOneSecond": false,
+    "recoveryAnswer": "结果是14。结果是14。",
+    "injectedSpeechFrames": 0,
+    "receivedAudioFrames": 308,
+    "nonSilentFrames": 90,
+    "events": [
+      {
+        "label": "rtvi-ai",
+        "type": "user-input",
+        "data": {
+          "text": "请原样朗读：火山内部的岩浆和气体压力不断增加，达到一定程度后会沿裂缝喷出地表。火山内部的岩浆和气体压力不断增加，达到一定程度后会沿裂缝喷出地表。火山内部的岩浆和气体压力不断增加，达到一定程度后会沿裂缝喷出地表。火山内部的岩浆和气体压力不断增加，达到一定程度后会沿裂缝喷出地表。",
+          "input_type": "chat",
+          "timestamp": "2026-10-28T19:38:34.147+00:00",
+          "final": true,
+          "msg_id": "c2e122e9-59a3-4ca6-bc36-ef4449048842"
+        }
+      },
+      {
+        "label": "rtvi-ai",
+        "type": "bot-transcription",
+        "data": {
+          "text": "火山内部的岩浆和气体压力不断增加，达到一定程度后会沿裂缝喷出地表。火山内部的岩浆和气体压力不断增加，达到一定程度后会沿裂缝喷出地表。火山内部的岩浆和气体压力不断增加，达到一定程度后会沿裂缝喷出地表。火山内部的岩浆和气体压力不断增加，达到一定程度后会沿裂缝喷出地表。"
+        }
+      },
+      {
+        "label": "rtvi-ai",
+        "type": "bot-output",
+        "data": {
+          "text": "火山内部的岩浆和气体压力不断增加，达到一定程度后会沿裂缝喷出地表。",
+          "text_type": "sentence",
+          "aggregated_by": "sentence",
+          "segment_id": 87,
+          "spoken": false,
+          "will_be_spoken": true,
+          "spoken_status": "new",
+          "spoken_progress": {
+            "accumulated_text": "",
+            "remaining_text": "火山内部的岩浆和气体压力不断增加，达到一定程度后会沿裂缝喷出地表。"
+          }
+        }
+      },
+      {
+        "label": "rtvi-ai",
+        "type": "user-input",
+        "data": {
+          "text": "六加八是多少？",
+          "input_type": "chat",
+          "timestamp": "2026-10-28T19:38:38.233+00:00",
+          "final": true,
+          "msg_id": "dea7a51f-f882-4dcc-975d-af379168a2dd"
+        }
+      },
+      {
+        "label": "rtvi-ai",
+        "type": "bot-transcription",
+        "data": {
+          "text": "结果是14。"
+        }
+      },
+      {
+        "label": "rtvi-ai",
+        "type": "bot-output",
+        "data": {
+          "text": "结果是14。",
+          "text_type": "sentence",
+          "aggregated_by": "sentence",
+          "segment_id": 365,
+          "spoken": false,
+          "will_be_spoken": true,
+          "spoken_status": "new",
+          "spoken_progress": {
+            "accumulated_text": "",
+            "remaining_text": "结果是14。"
+          }
+        }
+      },
+      {
+        "label": "rtvi-ai",
+        "type": "bot-output",
+        "data": {
+          "text": "结果是14。",
+          "text_type": "sentence",
+          "aggregated_by": "sentence",
+          "segment_id": 365,
+          "spoken": true,
+          "will_be_spoken": true,
+          "spoken_status": "completed",
+          "spoken_progress": {
+            "accumulated_text": "结果是14。",
+            "remaining_text": ""
+          }
+        }
+      }
+    ],
+    "eventTypes": [
+      "bot-ready",
+      "bot-interrupted",
+      "user-input",
+      "user-llm-text",
+      "bot-llm-started",
+      "bot-llm-text",
+      "bot-transcription",
+      "bot-llm-stopped",
+      "bot-tts-started",
+      "bot-started-speaking",
+      "bot-output",
+      "bot-interrupted",
+      "bot-stopped-speaking",
+      "bot-interrupted",
+      "user-input",
+      "user-llm-text",
+      "bot-llm-started",
+      "bot-llm-text",
+      "bot-transcription",
+      "bot-llm-stopped",
+      "bot-tts-started",
+      "bot-started-speaking",
+      "bot-output",
+      "bot-tts-stopped",
+      "bot-output",
+      "bot-tts-text",
+      "bot-stopped-speaking"
+    ],
+    "errorEvents": [],
+    "transcripts": [
+      {
+        "text": "火山内部的岩浆和气体压力不断增加，达到一定程度后会沿裂缝喷出地表。",
+        "text_type": "sentence",
+        "aggregated_by": "sentence",
+        "segment_id": 87,
+        "spoken": false,
+        "will_be_spoken": true,
+        "spoken_status": "new",
+        "spoken_progress": {
+          "accumulated_text": "",
+          "remaining_text": "火山内部的岩浆和气体压力不断增加，达到一定程度后会沿裂缝喷出地表。"
+        }
+      },
+      {
+        "text": "结果是14。",
+        "text_type": "sentence",
+        "aggregated_by": "sentence",
+        "segment_id": 365,
+        "spoken": false,
+        "will_be_spoken": true,
+        "spoken_status": "new",
+        "spoken_progress": {
+          "accumulated_text": "",
+          "remaining_text": "结果是14。"
+        }
+      },
+      {
+        "text": "结果是14。",
+        "text_type": "sentence",
+        "aggregated_by": "sentence",
+        "segment_id": 365,
+        "spoken": true,
+        "will_be_spoken": true,
+        "spoken_status": "completed",
+        "spoken_progress": {
+          "accumulated_text": "结果是14。",
+          "remaining_text": ""
+        }
+      }
+    ]
+  }
+}

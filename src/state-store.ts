@@ -10,6 +10,9 @@ import {
 } from "./utils.js";
 import type { AudioSpeakerTimelineSegment, AudioTranscriptSegment } from "./openai-client.js";
 import type { PluginLogger } from "./openclaw-types.js";
+import { coordinatedMutation, coordinatedRead, atomicContextJson } from "./context-coordinator.js";
+import { contextFor, mutationSignatures } from "./context-store.js";
+import { currentContextAccess } from "./tool-context.js";
 
 const STATE_RELATIVE_DIR = ["plugins", "clawsense"] as const;
 const STATE_FILE_NAME = "state.json";
@@ -54,6 +57,8 @@ export type ClawSenseArtifactRecord = {
   storageRelPath: string;
   retentionExpiresAt: number;
   deletedAt?: number;
+  deletionReason?: string;
+  contentHash?: string;
 };
 
 export type ClawSenseCaptureEvent = {
@@ -69,6 +74,8 @@ export type ClawSenseCaptureEvent = {
   note?: string;
   createdAt: number;
   capturedAt: number;
+  receivedAt?: number;
+  analysisProducedAt?: number;
   sourcePath: string;
   embeddingModel?: string;
   analysisMode:
@@ -491,6 +498,7 @@ export class ClawSenseStateStore {
     note?: string;
     createdAt: number;
     capturedAt: number;
+    receivedAt?: number;
     sourcePath: string;
     fileName: string;
     mime?: string;
@@ -507,7 +515,8 @@ export class ClawSenseStateStore {
     projectRefs?: string[];
     tags?: string[];
   }): Promise<{ artifact: ClawSenseArtifactRecord; event: ClawSenseCaptureEvent }> {
-    return await this.mutate((state) => {
+    return await this.mutate(async (state) => {
+      await contextFor(this.resolveStateDir())?.assertCaptureNotDeleted(params.deviceId, params.capturedAt, params.modality);
       const artifact: ClawSenseArtifactRecord = {
         artifactId: randomUUID(),
         deviceId: params.deviceId,
@@ -552,6 +561,8 @@ export class ClawSenseStateStore {
         createdAt: params.createdAt,
         capturedAt: params.capturedAt,
         sourcePath: params.sourcePath,
+        ...(params.receivedAt === undefined ? {} : { receivedAt: params.receivedAt }),
+        ...((params.analysisStatus ?? "succeeded") === "succeeded" ? { analysisProducedAt: Date.now() } : {}),
         embeddingModel: params.embeddingModel,
         analysisMode: params.analysisMode,
         analysisProvider: params.analysisProvider,
@@ -608,7 +619,9 @@ export class ClawSenseStateStore {
   }
 
   async getArtifact(artifactId: string): Promise<ClawSenseArtifactRecord | null> {
-    return (await this.readState()).artifacts.find((item) => item.artifactId === artifactId) ?? null;
+    const context = contextFor(this.resolveStateDir());
+    if (context) { try { await context.assertAccess({ kind: "artifact", id: artifactId }, "read-raw", currentContextAccess()); } catch { return null; } }
+    return (await this.readState(true)).artifacts.find((item) => item.artifactId === artifactId) ?? null;
   }
 
   async listEvents(): Promise<ClawSenseCaptureEvent[]> {
@@ -667,6 +680,7 @@ export class ClawSenseStateStore {
     attemptedAt?: number;
   }): Promise<{ updated: boolean; event: ClawSenseCaptureEvent | null }> {
     return await this.mutate((state) => {
+      if (state.artifacts.some((artifact) => artifact.artifactId === params.artifactId && artifact.deletionReason === "evidence-and-derived")) return { updated: false, event: null };
       const normalizedTranscript = normalizeSemanticText(params.transcript) || undefined;
       const normalizedSummary = normalizeSemanticText(params.summary) || undefined;
       const normalizedTranscriptSegments = normalizeTranscriptSegments(params.transcriptSegments);
@@ -754,6 +768,7 @@ export class ClawSenseStateStore {
           next = { ...next, tags: nextTags };
           updated = true;
         }
+        if (next !== event) next = { ...next, analysisProducedAt: Date.now() };
         if (attemptedAt !== next.lastAudioBackfillAttemptAt) {
           next = {
             ...next,
@@ -1085,7 +1100,7 @@ export class ClawSenseStateStore {
         if (artifact.deletedAt || artifact.retentionExpiresAt > now) {
           return artifact;
         }
-        const deleted = { ...artifact, deletedAt: now };
+        const deleted = { ...artifact, deletedAt: now, deletionReason: "retention" };
         removed.push(deleted);
         return deleted;
       });
@@ -1123,7 +1138,11 @@ export class ClawSenseStateStore {
     await fs.mkdir(path.dirname(this.statePath), { recursive: true });
   }
 
-  private async readState(): Promise<StoredState> {
+  private async readState(internal = false): Promise<StoredState> {
+    return coordinatedRead(this.resolveStateDir(), () => this.readStateInside(internal));
+  }
+
+  private async readStateInside(internal = false): Promise<StoredState> {
     try {
       const raw = await fs.readFile(this.statePath, "utf8");
       const parsed = JSON.parse(raw) as Partial<StoredState> | Partial<StoredStateV1>;
@@ -1148,35 +1167,41 @@ export class ClawSenseStateStore {
             ? (parsed as StoredState).memoryCards
             : [],
         };
-        return await this.repairStateIfNeeded(normalized);
+        const repaired = await this.repairStateIfNeeded(normalized);
+        const context = contextFor(this.resolveStateDir());
+        return !internal && context ? await context.filterLegacy("physical", repaired, currentContextAccess()) as StoredState : repaired;
       }
       if (parsed.version === 1) {
         const migrated = await this.repairStateIfNeeded(migrateV1(parsed as StoredStateV1));
         await this.writeState(migrated);
-        return migrated;
+        const context = contextFor(this.resolveStateDir());
+        return !internal && context ? await context.filterLegacy("physical", migrated, currentContextAccess()) as StoredState : migrated;
       }
-      return structuredClone(EMPTY_STATE);
+      throw new Error("unsupported_clawsense_state_version");
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-        this.logger.warn(`[clawsense] failed to read state: ${String(error)}`);
-      }
-      return structuredClone(EMPTY_STATE);
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return structuredClone(EMPTY_STATE);
+      this.logger.warn("[clawsense] state is unreadable; refusing to replace existing history");
+      throw new Error("clawsense_state_unreadable", { cause: error });
     }
   }
 
   private async writeState(next: StoredState): Promise<void> {
     await this.ensureStateDir();
-    const tempPath = `${this.statePath}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
-    await fs.writeFile(tempPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
-    await fs.rename(tempPath, this.statePath);
+    await atomicContextJson(this.statePath, next);
   }
 
-  private async mutate<T>(mutator: (state: StoredState) => T): Promise<T> {
+  private async mutate<T>(mutator: (state: StoredState) => T | Promise<T>): Promise<T> {
+    return coordinatedMutation(this.resolveStateDir(), () => this.mutateInside(mutator));
+  }
+  private async mutateInside<T>(mutator: (state: StoredState) => T | Promise<T>): Promise<T> {
     const operation = this.mutationChain
       .catch(() => undefined)
       .then(async () => {
-        const state = await this.readState();
-        const result = mutator(state);
+        const state = await this.readState(true);
+        const context = contextFor(this.resolveStateDir());
+        const before = context ? mutationSignatures("physical", state) : {};
+        const result = await mutator(state);
+        await context?.authorizeMutation("physical", before, state, currentContextAccess());
         await this.writeState(state);
         return result;
       });

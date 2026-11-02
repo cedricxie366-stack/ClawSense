@@ -1,0 +1,177 @@
+{
+  "date": "2026-10-16",
+  "status": "candidate_ready_for_concentrated_human_acceptance",
+  "startedDate": "2026-10-15",
+  "versions": {
+    "npm": "0.2.0-preview.2",
+    "android": "0.3.0-live-work-preview",
+    "androidPackage": "ai.openclaw.clawsense.livepreview"
+  },
+  "checks": {
+    "projectTests": 473,
+    "androidJvmTests": 48,
+    "crossAgentPassed": true,
+    "calibrationChecks": 3,
+    "calibrationPassed": true,
+    "emulatorSelectedChecksPassed": 7,
+    "sourceDiffWhitespacePassed": true
+  },
+  "tenRoundComparison": {
+    "scope": "same cloned calibration library, host accepted synthetic text to PCM; both builds include phrase-prefix fix",
+    "before": {
+      "p50Ms": 1188.7,
+      "maxMs": 2963.1,
+      "contextMedianMs": 613.5
+    },
+    "after": {
+      "p50Ms": 728.9,
+      "maxMs": 2454.1,
+      "contextMedianMs": 382.5
+    }
+  },
+  "finalThirtyTextTurns": {
+    "rounds": 30,
+    "hostAcceptedTextToFirstPcm": {
+      "p50Ms": 726.2714994999988,
+      "sampleP95NearestRankMs": 1951.604958,
+      "maxMs": 2469.5461250000008
+    },
+    "semanticFailures": [],
+    "failures": [],
+    "humanSpeech": false,
+    "phoneUsed": false,
+    "sampleNotHumanP95": true
+  },
+  "device": {
+    "physicalPhoneConnected": false,
+    "kind": "read-only headless Android emulator",
+    "avdName": "Medium_Phone_API_36.1",
+    "model": "sdk_gphone64_arm64",
+    "realPhoneAcceptance": false,
+    "tenTypedRounds": {
+      "turns": 10,
+      "typedTextToAudioTrackMs": [
+        5822,
+        1712,
+        612,
+        486,
+        859,
+        2130,
+        2575,
+        526,
+        505,
+        1558
+      ],
+      "expectedConfirmedBudget": "三万",
+      "buttonToAudioTrackPauseMs": 3,
+      "oldAudioResumed": false,
+      "microphoneUsedForTheseTurns": false,
+      "humanNaturalnessAccepted": false
+    },
+    "controlledFocusLoss": {
+      "controlledFocusLoss": true,
+      "realTelephoneCall": false,
+      "microphoneReleased": true,
+      "automaticallyResumed": false
+    },
+    "backgroundAndEmulatedSleep": {
+      "emulatorOnly": true,
+      "backgroundAndScreenSleep": true,
+      "releasedAfterEnd": true,
+      "physicalSecureLockscreenAccepted": false
+    },
+    "lostHost": {
+      "hostStopped": true,
+      "microphoneReleased": true,
+      "automaticallyReconnected": false
+    },
+    "syntheticSpeech": {
+      "questionTranscript": "小陈希望什么时候收到方案？",
+      "deadline": "周四",
+      "syntheticLastVoicedFrameToAudioTrackMs": 899,
+      "syntheticStopLastVoicedFrameToAudioTrackPauseMs": -120,
+      "firstPauseFromStopInputStartMs": 215,
+      "firstPauseFromLastVoicedFrameMs": -120,
+      "spokenStopRecognized": true,
+      "oldAudioResumed": false,
+      "syntheticPcm": true,
+      "humanMicrophoneSpeech": false
+    },
+    "p2Story": {
+      "syntheticCustomer": true,
+      "androidDigitalImport": true,
+      "ownerConfirmation": true,
+      "actualDshAndCodex": true,
+      "actualFiles": true,
+      "rejectedDraft": true,
+      "acceptedReplacement": true,
+      "reconnectReuse": true,
+      "offlineCached": true,
+      "deletedSourceHidden": true,
+      "humanSceneAccepted": false
+    },
+    "offlineControl": {
+      "steps": [
+        "actual_hosts_and_review_reached",
+        "cache_without_transport"
+      ],
+      "elapsedMs": 32503.814833,
+      "realComputerPoweredOff": false
+    },
+    "p2FinalTestDurationSeconds": 31.921,
+    "stoppedAtDelivery": true
+  },
+  "failuresRetained": [
+    {
+      "case": "initial model-only fixture",
+      "cause": "transcript was a string instead of array; corrected to actual runtime contract"
+    },
+    {
+      "case": "initial Android build command",
+      "cause": "instrumentation build type defaulted to debug; explicit livePreview property fixed task selection"
+    },
+    {
+      "case": "P2 after enabling an external route",
+      "cause": "previous owned-device-only sources were correctly denied external disclosure; no permissions widened; error made explicit and regression added"
+    },
+    {
+      "case": "P2 recovery harness",
+      "cause": "stale online marker from previous failed run; clear markers before next test; final complete case passed without relaxing offline assertion"
+    }
+  ],
+  "distribution": {
+    "publiclyPublished": false,
+    "npmIdentity": "401 Unauthorized",
+    "exactPackageInstallAndHashes": "manifest.json accompanying the candidate bundle",
+    "modelsOrCredentialsIncluded": false,
+    "androidApplicationChangedThisRound": false
+  },
+  "pilot": {
+    "targetParticipants": [
+      5,
+      10
+    ],
+    "durationDays": 14,
+    "enrolled": 0,
+    "invitationsSent": 0,
+    "automaticFeedbackUpload": false,
+    "guide": "../pilot/README.md"
+  },
+  "remaining": [
+    "human voice naturalness and ten spoken turns",
+    "real camera relevance",
+    "multiple speakers, headphones, actual calls and secure physical lockscreen",
+    "long capture and energy",
+    "human response and interruption P95",
+    "public release identity",
+    "mixed history external delivery currently fails closed rather than automatically selecting an authorized subset"
+  ],
+  "notClaimed": [
+    "pure-phone inference",
+    "native full-duplex",
+    "all host brands accepted",
+    "P1/P2 stage sign-off",
+    "P3 entered"
+  ],
+  "completedAt": "2026-10-15T16:09:29.607598+00:00"
+}

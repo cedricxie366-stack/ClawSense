@@ -1,0 +1,73 @@
+{
+  "reviewedAt": "2026-10-29",
+  "timezone": "Asia/Shanghai",
+  "scope": "Open-source live voice/video reuse and public Doubao architecture",
+  "method": "Official repositories, source files, documentation, release notes, model cards and public issue reports; no local comparative benchmark or live capture this turn",
+  "status": "research recommendation; no production migration or P1 acceptance",
+  "evaluationOrder": [
+    {"candidate": "Pipecat + official Android SmallWebRTC", "role": "first orchestration and media reuse candidate", "reason": "Replace custom Live orchestration with a reusable pipeline while retaining local model and ClawSense context choices", "pending": ["Kotlin/toolchain compatibility", "single microphone ownership", "Chinese turn detection", "speakerphone echo", "local/VPN connectivity", "revocation and cancellation integration"]},
+    {"candidate": "Hugging Face speech-to-speech", "role": "independent owned-device baseline", "reason": "Published local robot deployment and swappable model pipeline; evaluate as an alternative session engine, not a second controller inside Pipecat", "pending": ["Chinese ASR configuration rather than default Parakeet v3", "speakerphone echo path", "target Mac memory and generation speed", "visual and evidence integration"]},
+    {"candidate": "LiveKit Agents + self-hosted media server", "role": "media/platform alternative", "reason": "Integrated realtime clients and agent infrastructure", "pending": ["service footprint", "local-only model selection", "separate model license", "advanced hosted feature dependencies"]}
+  ],
+  "additionalCandidates": [
+    {"name": "TEN", "decision": "Study components and examples; whole-framework end-user-device and competitive-use restrictions require a separate adoption decision"},
+    {"name": "Xiaozhi ESP32", "decision": "Reference actual hardware ownership, AEC, streaming and MCP; firmware is not an Android drop-in"},
+    {"name": "OpenAvatarChat", "decision": "Reference modular Chinese conversation and beta agent/vision integration; avatar generation is outside current need"},
+    {"name": "FastRTC", "decision": "Small isolated audio/video proof of concept; do not infer production phone acceptance from a web demo"},
+    {"name": "MiniCPM-o 4.5", "decision": "Native omni candidate with official duplex runner; target hardware, model license and documented limitations must be checked separately"},
+    {"name": "Moshi / MoshiVis", "decision": "Native duplex research reference; not selected as the Chinese product baseline"}
+  ],
+  "doubao": {
+    "appEvidence": ["2026-04-09 Seeduplex full-duplex speech announcement", "2026-08-05 SeedRealtime audio-visual full-duplex announcement"],
+    "developerProducts": ["RTC ASR+LLM+TTS with CustomLLM", "Realtime speech service", "S2S plus LLM hybrid orchestration"],
+    "importantDistinction": "Public App model descriptions, exposed API variants and RTC orchestration are separate evidence. Public API access does not establish exact feature parity with the App.",
+    "unknown": ["complete App serving topology", "exact current App account rollout", "complete SeedRealtime training architecture and reproducible independent benchmark", "target-device performance"]
+  },
+  "reuseBoundary": {
+    "upstream": ["media transport and device handling", "turn management", "interruptible generation and playback", "model adapters", "observability and upstream regression cases"],
+    "clawsense": ["capture consent and visible state", "source-backed private memory and corrections", "audience and processing permissions", "context minimization and revocation", "agent handoff and accepted-result reuse"],
+    "invariants": ["one microphone owner and one turn controller per session", "stopping speech does not falsely claim an external task was cancelled", "interrupted unplayed text is not treated as heard", "no inferred public disclosure", "cloud credentials or providers are not silently enabled"]
+  },
+  "comparisonDesign": [
+    "Run upstream baseline with synthetic content before attaching ClawSense memory",
+    "Compare orchestration with the same model set before comparing replacement ASR/TTS models",
+    "Complete Chinese sentences, numbers, corrections, natural pauses, background negatives, explicit stop/recovery, and fresh-object image changes",
+    "Measure cold preparation and end-of-speech-to-audible-output separately; report all failures and latency distribution",
+    "Keep automated replay muted; physical echo and naturalness require the final concentrated device check",
+    "Retain current candidate and dated acceptance; adopt a pinned upstream release only after the comparison passes"
+  ],
+  "sources": [
+    {"topic":"Pipecat framework", "url":"https://github.com/pipecat-ai/pipecat", "type":"official repository"},
+    {"topic":"Pipecat license", "url":"https://raw.githubusercontent.com/pipecat-ai/pipecat/main/LICENSE", "observed":"BSD-2-Clause", "type":"license text"},
+    {"topic":"Android direct WebRTC", "url":"https://docs.pipecat.ai/api-reference/client/android/transports/small-webrtc", "type":"official documentation"},
+    {"topic":"Android transport distribution", "url":"https://github.com/pipecat-ai/pipecat-client-android-transports", "type":"official repository"},
+    {"topic":"Turn completion", "url":"https://github.com/pipecat-ai/smart-turn", "type":"official repository"},
+    {"topic":"Local Chinese segmented recognition", "url":"https://docs.pipecat.ai/api-reference/server/services/stt/funasr", "type":"official documentation"},
+    {"topic":"Output cancellation source", "url":"https://raw.githubusercontent.com/pipecat-ai/pipecat/main/src/pipecat/transports/base_output.py", "type":"source code"},
+    {"topic":"Interrupted output regression", "url":"https://github.com/pipecat-ai/pipecat/releases/tag/v1.13.0", "type":"official dated release; not asserted latest"},
+    {"topic":"Reported transcript cancellation race", "url":"https://github.com/pipecat-ai/pipecat/issues/5683", "type":"public report; needs-repro at review"},
+    {"topic":"LiveKit framework", "url":"https://github.com/livekit/agents", "type":"official repository"},
+    {"topic":"LiveKit model restrictions", "url":"https://raw.githubusercontent.com/livekit/agents/main/MODEL_LICENSE", "type":"license text"},
+    {"topic":"LiveKit local/hosted detector boundary", "url":"https://docs.livekit.io/agents/logic/turns/turn-detector/", "type":"official documentation"},
+    {"topic":"Interruption configuration", "url":"https://docs.livekit.io/reference/agents/turn-handling-options/", "type":"official documentation"},
+    {"topic":"Frame-based vision", "url":"https://docs.livekit.io/agents/multimodality/vision/video/", "type":"official documentation"},
+    {"topic":"Mobile acoustic echo", "url":"https://github.com/livekit/agents/issues/3758", "type":"public device report; not a universal current defect"},
+    {"topic":"Local voice runtime", "url":"https://github.com/huggingface/speech-to-speech", "type":"official repository; deployment scale is maintainer-reported"},
+    {"topic":"Real robot local deployment", "url":"https://huggingface.co/blog/local-reachy-mini-conversation", "type":"official implementation write-up"},
+    {"topic":"Robot voice and vision with Pipecat", "url":"https://huggingface.co/blog/nvidia-reachy-mini", "type":"official implementation write-up; example TTS is hosted"},
+    {"topic":"Default Parakeet language boundary", "url":"https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3", "type":"official model card"},
+    {"topic":"TEN reuse conditions", "url":"https://raw.githubusercontent.com/TEN-framework/ten-framework/main/LICENSE", "type":"license text"},
+    {"topic":"Hardware voice agent", "url":"https://github.com/78/xiaozhi-esp32", "type":"official repository"},
+    {"topic":"Modular avatar and agent integration", "url":"https://github.com/HumanAIGC-Engineering/OpenAvatarChat", "type":"official repository"},
+    {"topic":"Small realtime prototype", "url":"https://github.com/gradio-app/fastrtc", "type":"official repository"},
+    {"topic":"Native omni requirements and limitations", "url":"https://github.com/OpenBMB/MiniCPM-V/blob/main/docs/minicpm_o4dot5_en.md", "type":"official model documentation"},
+    {"topic":"Native audio streams", "url":"https://github.com/kyutai-labs/moshi", "type":"official repository"},
+    {"topic":"Vision speech adaptation", "url":"https://github.com/kyutai-labs/moshivis", "type":"official repository"},
+    {"topic":"Alternative Chinese streaming TTS", "url":"https://github.com/QwenAudio/CosyVoice", "type":"official repository"},
+    {"topic":"Doubao speech evolution", "url":"https://seed.bytedance.com/zh/blog/introducing-seed-full-duplex-speech-llm-attentive-listening-robust-interference-suppression-enabling-more-natural-interaction", "type":"official announcement", "publishedAt":"2026-04-09"},
+    {"topic":"Doubao audiovisual evolution", "url":"https://seed.bytedance.com/zh/blog/seedrealtime-audio-visual-full-duplex-llm-released-toward-omni-modal-natural-interaction", "type":"official announcement", "publishedAt":"2026-08-05"},
+    {"topic":"RTC modular implementation", "url":"https://docs.volcengine.com/docs/ark/rtc-ai?lang=zh", "type":"official documentation"},
+    {"topic":"Custom LLM and hybrid configuration", "url":"https://docs.volcengine.com/docs/real_time_communication/IntegratedAIaudiovideointeractivesolution?lang=zh&redirect=1", "type":"official indexed documentation"},
+    {"topic":"Hybrid vision and tool limitations", "url":"https://docs.volcengine.com/docs/real_time_communication/Accessend-to-endreal-timespeechlargemodel?lang=en", "type":"official indexed documentation; direct page rendering incomplete"}
+  ]
+}

@@ -1,0 +1,71 @@
+{
+  "startedDate": "2026-10-14",
+  "completedAt": "2026-10-14T18:56:44.257233+00:00",
+  "implementationSource": "codex/live-companion @ 67271b7",
+  "hostTests": 452,
+  "liveLogicChecks": 42,
+  "androidJvmTests": 46,
+  "realModelChecks": 11,
+  "physicalAndroidAutomaticChecks": 5,
+  "additionalAcousticInputChecks": 1,
+  "originalPreferencesUnchanged": true,
+  "installedApkMatches": true,
+  "humanNaturalnessAccepted": false,
+  "phoneLocalInferenceAccepted": false,
+  "fullDuplexAccepted": false,
+  "publiclyPublished": false,
+  "validationScope": "five Android cases with affected-path retest after ASR finalization and safe-stop fixes; external synthesized voice through physical microphone separately verified",
+  "artifacts": {
+    "clawsense-live-preview.apk": "f961a057502ff1bd44c1f65925aa4852bfae9dad62f676ca5c7bc36691008098",
+    "clawsense-live-tests.apk": "b9ab9a815a99d4811469c3c30240851b6955a213a6ff7a85697be9bf2784d11b",
+    "clawsense-0.1.0.tgz": "2c8fb92e19495622b114ffb781b118d7f7f6bae7c9ebcd7c5d5051d25be59efc"
+  },
+  "deviceMetrics": {
+    "conversation": {
+      "turns": 10,
+      "typedTextToAudioTrackMs": [
+        1796,
+        613,
+        600,
+        564,
+        559,
+        1765,
+        1553,
+        483,
+        526,
+        1654
+      ],
+      "buttonToAudioTrackPauseMs": 3,
+      "oldAudioResumed": false,
+      "microphoneUsedForTheseTurns": false,
+      "humanNaturalnessAccepted": false
+    },
+    "synthetic-speech": {
+      "questionTranscript": "小伴小陈希望什么时候收到方案？",
+      "deadline": "周四",
+      "syntheticLastVoicedFrameToAudioTrackMs": 1966,
+      "syntheticStopLastVoicedFrameToAudioTrackPauseMs": 771,
+      "spokenStopRecognized": true,
+      "oldAudioResumed": false,
+      "syntheticPcm": true,
+      "humanMicrophoneSpeech": false
+    },
+    "microphone": {
+      "microphoneFrames": 106,
+      "echoOpenedTurn": false,
+      "releasedAfterEnd": true,
+      "humanNaturalnessAccepted": false
+    },
+    "prestart-settings": {
+      "publicModeSavedBeforeMicrophone": true,
+      "microphoneStarted": false
+    },
+    "acoustic-input": {
+      "transcript": "小伴7加5是多少？",
+      "answer": "结果是12。",
+      "physicalMicrophoneUsed": true,
+      "source": "Mac speaker, system synthesized Chinese",
+      "humanSpeakerUsed": false
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "note": "Document snapshots only; associated code and runtime were not merged.",
+  "reports": [
+    {
+      "file": "g1-dsh-2026-10-14.md",
+      "sha256": "c50aa573e447c3c75cde67605192d8175536894b5b5f3cd20eda8ea8e2d2793b",
+      "source": "/Users/cedric/Documents/ClawSense/docs/validation/g1-dsh-2026-10-14.md"
+    },
+    {
+      "file": "g0-g1-closeout-2026-10-14.md",
+      "sha256": "823f052d3015a579ddfca910f49adf268c097bfe96ccd91fd10644e2eda28c49",
+      "source": "/Users/cedric/Documents/ClawSense/docs/validation/g0-g1-closeout-2026-10-14.md"
+    }
+  ]
+}

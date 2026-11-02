@@ -458,14 +458,8 @@ export function parseLocalAsrCommandOutput(stdout: string): {
     const parsed = JSON.parse(trimmed) as unknown;
     return parseLocalAsrJsonOutput(parsed);
   } catch {
-    const jsonLine = extractLastJsonLine(trimmed);
-    if (jsonLine) {
-      try {
-        return parseLocalAsrJsonOutput(JSON.parse(jsonLine) as unknown);
-      } catch {
-        // Fall through to treating stdout as plain text.
-      }
-    }
+    const parsed = parseLocalAsrRawJson(trimmed);
+    if (parsed !== null) return parseLocalAsrJsonOutput(parsed);
     const transcript = normalizeLocalAsrTranscriptText(trimmed);
     return {
       transcript,
@@ -535,20 +529,6 @@ export function parseLocalAsrBatchCommandOutput(
   return results;
 }
 
-function extractLastJsonLine(stdout: string): string | undefined {
-  const lines = stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  for (let index = lines.length - 1; index >= 0; index -= 1) {
-    const line = lines[index];
-    if (
-      (line.startsWith("{") && line.endsWith("}")) ||
-      (line.startsWith("[") && line.endsWith("]"))
-    ) {
-      return line;
-    }
-  }
-  return undefined;
-}
-
 function parseLocalAsrRawJson(stdout: string): unknown | null {
   const trimmed = stdout.trim();
   if (!trimmed) {
@@ -557,15 +537,46 @@ function parseLocalAsrRawJson(stdout: string): unknown | null {
   try {
     return JSON.parse(trimmed) as unknown;
   } catch {
-    const jsonLine = extractLastJsonLine(trimmed);
-    if (!jsonLine) {
-      return null;
+    // Commands may print diagnostics around a pretty-printed JSON result.
+    // Scan complete outer values so an inner segment cannot replace its parent
+    // (and lose language, batch IDs, or the other segments).
+    let lastValue: unknown | null = null;
+    let start = -1;
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    let lineStart = true;
+    for (let index = 0; index < trimmed.length; index += 1) {
+      const character = trimmed[index];
+      if (start === -1) {
+        if (character === "\n") { lineStart = true; continue; }
+        if (lineStart && /[\t\r ]/.test(character)) continue;
+        if (!lineStart || (character !== "{" && character !== "[")) { lineStart = false; continue; }
+        start = index;
+        depth = 1;
+        inString = false;
+        escaped = false;
+        lineStart = false;
+        continue;
+      }
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (character === "\\") escaped = true;
+        else if (character === '"') inString = false;
+        continue;
+      }
+      if (character === '"') inString = true;
+      else if (character === "{" || character === "[") depth += 1;
+      else if (character === "}" || character === "]") {
+        depth -= 1;
+        if (depth === 0) {
+          try { lastValue = JSON.parse(trimmed.slice(start, index + 1)) as unknown; }
+          catch { /* A diagnostic such as [INFO] is not a result. */ }
+          start = -1;
+        }
+      }
     }
-    try {
-      return JSON.parse(jsonLine) as unknown;
-    } catch {
-      return null;
-    }
+    return lastValue;
   }
 }
 

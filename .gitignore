@@ -11,3 +11,7 @@ android/app/build/
 docs/求职/
 docs/grants/**/private/
 tmp/
+output/playwright/
+.playwright-cli/
+
+__pycache__/

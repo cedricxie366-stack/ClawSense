@@ -1,0 +1,245 @@
+{
+  "date": "2026-10-16",
+  "vadProductionRuntimeChanged": false,
+  "androidPrototype": {
+    "input": "synthetic PCM, processed without real-time pacing",
+    "microphoneUsed": false,
+    "physicalPhone": false,
+    "librarySourceCommit": "a4450c2b5fb0f2d14a9ef2ac727e0ee2ae9a9116",
+    "nativeRelease": "1.0.8",
+    "rows": [
+      {
+        "case": "question",
+        "threshold": "upstream-default",
+        "pcmDurationMs": 6694.6875,
+        "firstStartAudioMs": 1312,
+        "endCallbacks": 1,
+        "continuedBytes": 409600,
+        "wallMs": 42,
+        "processCpuMs": 33
+      },
+      {
+        "case": "quiet-question",
+        "threshold": "upstream-default",
+        "pcmDurationMs": 6694.6875,
+        "firstStartAudioMs": 1248,
+        "endCallbacks": 1,
+        "continuedBytes": 411648,
+        "wallMs": 37,
+        "processCpuMs": 30
+      },
+      {
+        "case": "stop",
+        "threshold": "upstream-default",
+        "pcmDurationMs": 3364,
+        "firstStartAudioMs": 1248,
+        "endCallbacks": 1,
+        "continuedBytes": 198656,
+        "wallMs": 13,
+        "processCpuMs": 12
+      },
+      {
+        "case": "silence",
+        "threshold": "upstream-default",
+        "pcmDurationMs": 10000,
+        "firstStartAudioMs": null,
+        "endCallbacks": 0,
+        "continuedBytes": 0,
+        "wallMs": 40,
+        "processCpuMs": 35
+      },
+      {
+        "case": "noise",
+        "threshold": "upstream-default",
+        "pcmDurationMs": 10000,
+        "firstStartAudioMs": null,
+        "endCallbacks": 0,
+        "continuedBytes": 0,
+        "wallMs": 72,
+        "processCpuMs": 60
+      },
+      {
+        "case": "knocks",
+        "threshold": "upstream-default",
+        "pcmDurationMs": 10000,
+        "firstStartAudioMs": null,
+        "endCallbacks": 0,
+        "continuedBytes": 0,
+        "wallMs": 83,
+        "processCpuMs": 72
+      },
+      {
+        "case": "question",
+        "threshold": "short-turn-2-14",
+        "pcmDurationMs": 6694.6875,
+        "firstStartAudioMs": 1184,
+        "endCallbacks": 1,
+        "continuedBytes": 268288,
+        "wallMs": 28,
+        "processCpuMs": 27
+      },
+      {
+        "case": "quiet-question",
+        "threshold": "short-turn-2-14",
+        "pcmDurationMs": 6694.6875,
+        "firstStartAudioMs": 1088,
+        "endCallbacks": 1,
+        "continuedBytes": 272384,
+        "wallMs": 23,
+        "processCpuMs": 23
+      },
+      {
+        "case": "stop",
+        "threshold": "short-turn-2-14",
+        "pcmDurationMs": 3364,
+        "firstStartAudioMs": 1152,
+        "endCallbacks": 1,
+        "continuedBytes": 57344,
+        "wallMs": 14,
+        "processCpuMs": 14
+      },
+      {
+        "case": "silence",
+        "threshold": "short-turn-2-14",
+        "pcmDurationMs": 10000,
+        "firstStartAudioMs": null,
+        "endCallbacks": 0,
+        "continuedBytes": 0,
+        "wallMs": 27,
+        "processCpuMs": 27
+      },
+      {
+        "case": "noise",
+        "threshold": "short-turn-2-14",
+        "pcmDurationMs": 10000,
+        "firstStartAudioMs": null,
+        "endCallbacks": 0,
+        "continuedBytes": 0,
+        "wallMs": 43,
+        "processCpuMs": 42
+      },
+      {
+        "case": "knocks",
+        "threshold": "short-turn-2-14",
+        "pcmDurationMs": 10000,
+        "firstStartAudioMs": null,
+        "endCallbacks": 0,
+        "continuedBytes": 0,
+        "wallMs": 32,
+        "processCpuMs": 32
+      }
+    ]
+  },
+  "directV5": {
+    "implementation": "sherpa-onnx 1.13.8 / direct Silero",
+    "modelSha256": "2623a2953f6ff3d2c1e61740c6cdb7168133479b267dfef114a4a3cc5bdd788f",
+    "samples": [
+      {
+        "case": "speech",
+        "durationMs": 3694.6875,
+        "sileroActiveMs": 3328,
+        "rmsActiveMs": 3392,
+        "firstSileroMs": 160,
+        "cpuMs": 14.72,
+        "humanSpeech": false
+      },
+      {
+        "case": "quiet-speech",
+        "durationMs": 3694.6875,
+        "sileroActiveMs": 3392,
+        "rmsActiveMs": 3104,
+        "firstSileroMs": 160,
+        "cpuMs": 11.34,
+        "humanSpeech": false
+      },
+      {
+        "case": "silence",
+        "durationMs": 10000.0,
+        "sileroActiveMs": 0,
+        "rmsActiveMs": 0,
+        "firstSileroMs": null,
+        "cpuMs": 30.53,
+        "humanSpeech": false
+      },
+      {
+        "case": "noise",
+        "durationMs": 10000.0,
+        "sileroActiveMs": 0,
+        "rmsActiveMs": 9984,
+        "firstSileroMs": null,
+        "cpuMs": 31.48,
+        "humanSpeech": false
+      },
+      {
+        "case": "knocks",
+        "durationMs": 10000.0,
+        "sileroActiveMs": 0,
+        "rmsActiveMs": 896,
+        "firstSileroMs": null,
+        "cpuMs": 30.67,
+        "humanSpeech": false
+      }
+    ]
+  },
+  "limits": [
+    "Synthetic supplied PCM, no microphone",
+    "JNI on emulator; direct adapter on Mac; no cross-platform speed or accuracy ranking",
+    "Different thresholds and padding",
+    "No complete dependency/distribution-license attestation",
+    "No claim of complete phone-local Live"
+  ],
+  "productionDirectVersusFixedRms": {
+    "implementation": "sherpa-onnx 1.13.8 / direct Silero",
+    "modelSha256": "9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6",
+    "samples": [
+      {
+        "case": "speech",
+        "durationMs": 3694.6875,
+        "sileroActiveMs": 3328,
+        "rmsActiveMs": 3392,
+        "firstSileroMs": 128,
+        "cpuMs": 10.3,
+        "humanSpeech": false
+      },
+      {
+        "case": "quiet-speech",
+        "durationMs": 3694.6875,
+        "sileroActiveMs": 3392,
+        "rmsActiveMs": 3104,
+        "firstSileroMs": 128,
+        "cpuMs": 9.91,
+        "humanSpeech": false
+      },
+      {
+        "case": "silence",
+        "durationMs": 10000.0,
+        "sileroActiveMs": 0,
+        "rmsActiveMs": 0,
+        "firstSileroMs": null,
+        "cpuMs": 25.36,
+        "humanSpeech": false
+      },
+      {
+        "case": "noise",
+        "durationMs": 10000.0,
+        "sileroActiveMs": 0,
+        "rmsActiveMs": 9984,
+        "firstSileroMs": null,
+        "cpuMs": 25.39,
+        "humanSpeech": false
+      },
+      {
+        "case": "knocks",
+        "durationMs": 10000.0,
+        "sileroActiveMs": 0,
+        "rmsActiveMs": 896,
+        "firstSileroMs": null,
+        "cpuMs": 27.43,
+        "humanSpeech": false
+      }
+    ],
+    "limits": "Synthetic authorized speech and generated noise only; TV/other speakers and phone energy require separate checks. RealTimeCut wrapper is not benchmarked by these numbers.",
+    "rmsReferenceThreshold": 0.0015,
+    "adaptiveRmsFallbackBenchmarked": false
+  }
+}

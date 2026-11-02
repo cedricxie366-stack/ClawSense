@@ -1,5 +1,7 @@
 package ai.openclaw.clawsense.data
 
+import kotlinx.serialization.Serializable
+
 import ai.openclaw.clawsense.BuildConfig
 import android.content.Context
 import android.os.Build
@@ -56,6 +58,7 @@ class OkHttpClawSenseApi(
       heartbeatIntervalSec = response.heartbeatIntervalSec,
       memoryNamespace = response.memoryNamespace,
       pairedAt = response.pairedAt,
+      digitalContextEnabled = response.digitalContextEnabled,
     )
   }
 
@@ -139,8 +142,14 @@ class OkHttpClawSenseApi(
     return HeartbeatResult(
       heartbeatIntervalSec = response.heartbeatIntervalSec,
       captureDirective = response.captureDirective,
+      cacheValidation = response.cacheValidation,
     )
   }
+
+  override suspend fun validateCachedContext(session: DeviceSession, snapshotId: String): ContextCacheValidation = request<CacheValidationRequest, ContextCacheValidation>(
+    url = "${session.uploadBaseUrl}/cache/validate", body = CacheValidationRequest(snapshotId), bearer = session.deviceSecret, deviceId = session.deviceId,
+  )
+  @Serializable private data class CacheValidationRequest(val snapshotId: String)
 
   private suspend inline fun <reified B : Any, reified T> request(
     url: String,
@@ -168,6 +177,7 @@ class OkHttpClawSenseApi(
       val raw = response.body?.string().orEmpty()
       if (!response.isSuccessful) {
         val message = "HTTP ${response.code}: ${raw.ifBlank { response.message }}"
+        if (response.code == 410 && decodeApiError(raw)?.error == "capture_deleted") throw ClawSenseDeletedCaptureException("服务端已删除这条素材，不再补传。")
         if (response.code == 401) {
           val apiError = decodeApiError(raw)
           val reason = apiError?.reason?.takeIf { it.isNotBlank() } ?: "unauthorized"
@@ -254,7 +264,7 @@ class OkHttpClawSenseApi(
   @kotlinx.serialization.Serializable
   private data class IngestUploadResponse(
     val ok: Boolean = true,
-    val stored: Boolean = true,
+    val stored: Boolean = false,
     val analysisQueued: Boolean? = null,
     val queueDepth: Int? = null,
     val analysisQueueDepth: Int? = null,
@@ -274,6 +284,7 @@ class OkHttpClawSenseApi(
     val ok: Boolean,
     val heartbeatIntervalSec: Int = 60,
     val captureDirective: CaptureVideoDirective? = null,
+    val cacheValidation: ContextCacheValidation? = null,
   )
 
   @kotlinx.serialization.Serializable
@@ -307,6 +318,8 @@ class OkHttpClawSenseApi(
 class ClawSenseAuthException(
   message: String,
 ) : IOException(message)
+
+class ClawSenseDeletedCaptureException(message: String) : IOException(message)
 
 class ClawSenseBackpressureException(
   message: String,

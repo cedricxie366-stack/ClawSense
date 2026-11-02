@@ -1,5 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { inferPublicBaseUrl } from "../src/utils.js";
+import { inferPublicBaseUrl, withProtocol } from "../src/utils.js";
+
+describe("withProtocol", () => {
+  it("preserves HTTP schemes regardless of case without rewriting the host or path", () => {
+    expect(withProtocol("HTTPS://Example.com/clawsense")).toBe("HTTPS://Example.com/clawsense");
+    expect(withProtocol("HTTP://192.0.2.10:18789")).toBe("HTTP://192.0.2.10:18789");
+    expect(withProtocol("hTtPs://Example.com/CaseSensitive")).toBe("hTtPs://Example.com/CaseSensitive");
+  });
+
+  it("adds a protocol to bare hosts and does not mistake host names for schemes", () => {
+    expect(withProtocol("192.0.2.10:18789")).toBe("http://192.0.2.10:18789");
+    expect(withProtocol("https-example.com/path")).toBe("http://https-example.com/path");
+  });
+});
 
 describe("inferPublicBaseUrl", () => {
   afterEach(() => {

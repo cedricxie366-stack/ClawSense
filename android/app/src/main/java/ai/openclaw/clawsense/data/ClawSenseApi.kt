@@ -18,4 +18,5 @@ interface ClawSenseApi {
   suspend fun queryAssistant(session: DeviceSession, request: AssistantQueryRequest): AssistantQueryResponse
 
   suspend fun sendHeartbeat(session: DeviceSession, heartbeat: HeartbeatRequest): HeartbeatResult
+  suspend fun validateCachedContext(session: DeviceSession, snapshotId: String): ContextCacheValidation? = null
 }

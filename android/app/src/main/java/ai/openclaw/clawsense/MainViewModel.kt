@@ -63,6 +63,7 @@ class MainViewModel(
         assistant = runtime.assistantSnapshot,
         isBusy = form.isBusy,
         statusMessage = form.statusMessage,
+        pairingError = form.pairingError,
         setupCode = form.setupCode,
         manualHost = form.manualHost,
         manualToken = form.manualToken,
@@ -167,7 +168,7 @@ class MainViewModel(
     block: suspend () -> DeviceSession,
   ) {
     viewModelScope.launch {
-      formState.update { it.copy(isBusy = true, statusMessage = "正在和 ClawSense 服务端握手…") }
+      formState.update { it.copy(isBusy = true, pairingError = null, statusMessage = "正在连接主机…") }
       runCatching { block() }
         .onSuccess { session ->
           if (!preserveServiceEnabled) {
@@ -179,6 +180,8 @@ class MainViewModel(
               statusMessage = "配对成功：${session.deviceId.take(8)}…",
               manualHost = session.host,
               manualToken = "",
+              setupCode = "",
+              pairingError = null,
             )
           }
         }
@@ -186,7 +189,8 @@ class MainViewModel(
           formState.update {
             it.copy(
               isBusy = false,
-              statusMessage = error.message ?: "配对失败，请检查 Host / Token。",
+              statusMessage = error.message ?: "配对失败，请检查主机地址和令牌。",
+              pairingError = error.message ?: "连接失败，请重试。",
             )
           }
         }
@@ -203,6 +207,7 @@ data class MainUiState(
   val assistant: AssistantInteractionSnapshot = AssistantInteractionSnapshot(),
   val isBusy: Boolean = false,
   val statusMessage: String? = null,
+  val pairingError: String? = null,
   val setupCode: String = "",
   val manualHost: String = "",
   val manualToken: String = "",
@@ -212,6 +217,7 @@ data class MainUiState(
 private data class FormState(
   val isBusy: Boolean = false,
   val statusMessage: String? = null,
+  val pairingError: String? = null,
   val setupCode: String = "",
   val manualHost: String = "",
   val manualToken: String = "",

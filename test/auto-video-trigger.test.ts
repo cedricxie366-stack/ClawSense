@@ -28,5 +28,14 @@ describe("resolveAutoVideoTriggerReason", () => {
   it("does not trigger when the user explicitly disables recording", () => {
     expect(resolveAutoVideoTriggerReason("不用录，这里只是闲聊")).toBeNull();
     expect(resolveAutoVideoTriggerReason("Please do not record this screen")).toBeNull();
+    expect(resolveAutoVideoTriggerReason("Please don't take a video of this screen")).toBeNull();
+    expect(resolveAutoVideoTriggerReason("Do not take a video during this private discussion")).toBeNull();
+    expect(resolveAutoVideoTriggerReason("Don’t capture this important chart")).toBeNull();
+    expect(resolveAutoVideoTriggerReason("DO NOT   TAKE A VIDEO of the whiteboard")).toBeNull();
+  });
+
+  it("keeps a positive recording request when an unrelated verb is negated", () => {
+    expect(resolveAutoVideoTriggerReason("Don't forget to take a video of this screen")).toBe("explicit_record_request");
+    expect(resolveAutoVideoTriggerReason("Please take a video of this screen")).toBe("explicit_record_request");
   });
 });

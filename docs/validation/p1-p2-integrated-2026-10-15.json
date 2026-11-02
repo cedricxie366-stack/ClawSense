@@ -1,0 +1,104 @@
+{
+  "date": "2026-10-15",
+  "status": "integrated_preview_human_acceptance_pending",
+  "versions": {
+    "npm": "0.2.0-preview.1",
+    "android": "0.3.0-live-work-preview",
+    "androidPackage": "ai.openclaw.clawsense.livepreview"
+  },
+  "checks": {
+    "projectTests": 466,
+    "androidJvmTests": 48,
+    "crossAgentFixturePassed": true,
+    "calibrationPassed": true,
+    "cleanPackageInstallPassed": true,
+    "liveTargetedTests": 53
+  },
+  "model": {
+    "ttsRepository": "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit",
+    "ttsRevision": "41d3337e8b7f2843a75841595fc14e4b9a7a4b96",
+    "ttsLicense": "apache-2.0",
+    "modelsRunOnOwnedMac": true,
+    "purePhoneInferenceAccepted": false,
+    "fullDuplexAccepted": false
+  },
+  "device": {
+    "model": "OPPO Find X2 / PDEM10",
+    "android": "13",
+    "syntheticP2StoryPassed": true,
+    "actualDshAndCodexFiles": true,
+    "offlineTransportRemovedAndPoolEvicted": true,
+    "realComputerPoweredOff": false,
+    "nativeMaskCropOcrPassed": true,
+    "realCurrentCameraPathPassed": true,
+    "humanVisualRelevanceAccepted": false,
+    "humanNaturalnessAccepted": false,
+    "humanTenSpokenTurnsAccepted": false,
+    "finalP2AfterCachePriorityPassed": true,
+    "captureStoppedAtDelivery": true
+  },
+  "distribution": {
+    "tarball": "clawsense-0.2.0-preview.1.tgz",
+    "tarballSha256": "25bfb36af8f75290ac85b7d3c22745b0d4b41f81ab9e8a4c3708c465c42a61ff",
+    "apkSha256": "e00b67a3800b84d68ed4bae8bb61a690d3bc70d6f9ff48b0c3c1d7b654b3adc2",
+    "publiclyPublished": false,
+    "npmAuthentication": "401 Unauthorized"
+  },
+  "sustained": {
+    "status": "passed",
+    "elapsedMs": 1819889,
+    "rounds": 96,
+    "textToAudioTrackP50Ms": 2116.5,
+    "sampleP95Ms": 4091,
+    "appPssMinKiB": 186021,
+    "appPssMaxKiB": 197194,
+    "microphoneOpen": false,
+    "usbCharging": true,
+    "batteryLifeAccepted": false,
+    "buildScope": "before batched snapshot optimization",
+    "input": "controlled synthetic text with actual Android AudioTrack",
+    "humanConversationAccepted": false
+  },
+  "remainingHumanChecklist": "p1-p2-human-acceptance-2026-10-15.md",
+  "postOptimizationTenTypedRounds": {
+    "turns": 10,
+    "typedTextToAudioTrackMs": [
+      7356,
+      983,
+      911,
+      940,
+      936,
+      6393,
+      2362,
+      895,
+      891,
+      2335
+    ],
+    "expectedConfirmedBudget": "四万",
+    "buttonToAudioTrackPauseMs": 9,
+    "oldAudioResumed": false,
+    "microphoneUsedForTheseTurns": false,
+    "humanNaturalnessAccepted": false
+  },
+  "syntheticSpeechStop": {
+    "questionTranscript": "小陈希望什么时候收到方案？",
+    "deadline": "周四",
+    "syntheticLastVoicedFrameToAudioTrackMs": 1906,
+    "syntheticStopLastVoicedFrameToAudioTrackPauseMs": -96,
+    "firstPauseFromStopInputStartMs": 242,
+    "firstPauseFromLastVoicedFrameMs": -96,
+    "spokenStopRecognized": true,
+    "oldAudioResumed": false,
+    "syntheticPcm": true,
+    "humanMicrophoneSpeech": false
+  },
+  "realDshCancellation": {
+    "realDshProcess": true,
+    "state": "cancelled",
+    "runnerStopMs": 225,
+    "resultCode": "dsh_rpc_error_-32603",
+    "cancellationUndoesExternalEffects": false
+  },
+  "remainingPerformance": "Ten-round sample P50 961.5ms, sample max7356ms; no claim of target P95. Spoken stop single305/242ms samples do not establish human P95.",
+  "completedAt": "2026-10-14T22:22:58.631425+00:00"
+}

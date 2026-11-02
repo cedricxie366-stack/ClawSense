@@ -7,6 +7,7 @@ import ai.openclaw.clawsense.R
 import ai.openclaw.clawsense.data.AssistantInteractionPhase
 import ai.openclaw.clawsense.data.AssistantInteractionSnapshot
 import ai.openclaw.clawsense.data.AssistantModeHint
+import ai.openclaw.clawsense.data.assistantFailureMessage
 import ai.openclaw.clawsense.data.AssistantQueryResponse
 import ai.openclaw.clawsense.data.AssistantRecentContextWindowHint
 import ai.openclaw.clawsense.data.CaptureMode
@@ -38,6 +39,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -46,6 +50,7 @@ import kotlinx.coroutines.withContext
 
 class SensorForegroundService : LifecycleService() {
   private val tag = "ClawSenseService"
+  @Volatile private var assistantContentGeneration = 0L
   private val repository: DeviceSessionRepository by lazy { AppGraph.repository(this) }
   private val audioHal by lazy {
     AndroidAudioSensorHal(
@@ -59,6 +64,10 @@ class SensorForegroundService : LifecycleService() {
       ),
     )
   }
+  private val live by lazy { AppGraph.live(this) }
+  private var liveOnly = false
+  private var liveVisual = false
+  private val liveFrameMutex = Mutex()
   private val imageHal by lazy { CameraXImageSensorHal(this) }
   private val assistantTts by lazy { AssistantTtsController(this) }
 
@@ -66,10 +75,12 @@ class SensorForegroundService : LifecycleService() {
   private var stillCaptureJob: Job? = null
   private var videoCaptureJob: Job? = null
   private var assistantQueryTimeoutJob: Job? = null
+  private var assistantAmbientResumeJob: Job? = null
   private val shutdownScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
   private val shutdownMutex = Mutex()
   private val assistantMutex = Mutex()
   private var started = false
+  private var validationImageOnly = false
   @Volatile private var shuttingDown = false
   @Volatile private var sensorsReleased = false
   @Volatile private var audioSensorRunning = false
@@ -106,20 +117,50 @@ class SensorForegroundService : LifecycleService() {
     const val MAX_THROTTLED_STILL_INTERVAL_MS = 5 * 60 * 1000L
   }
 
+  override fun onCreate() {
+    super.onCreate()
+    lifecycleScope.launch {
+      live.state.map { (it.connected || it.connecting) to it.error }.distinctUntilChanged().collect { (active, error) ->
+        if (started && !shuttingDown) {
+          if (!active && liveOnly && error != null) {
+            beginShutdown(removeNotification = true)
+          } else {
+            if (!active && error != null) { audioHal.setLiveConsumer(null); live.captureFrame = null }
+            val audio = hasPermission(Manifest.permission.RECORD_AUDIO)
+            val camera = (!liveOnly || liveVisual) && hasPermission(Manifest.permission.CAMERA)
+            startForegroundCompat(buildNotification(if (active) "Live 已开启，可在应用中结束。" else notificationText(audio, camera)), audioEnabled = audio, imageEnabled = camera)
+          }
+        }
+      }
+    }
+  }
+
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     if (SensorServiceController.isStopAction(intent)) {
       Log.d(tag, "Stop action received")
       repository.setServiceEnabled(false)
-      repository.updateRuntimeStatus(
-        ServiceRuntimeStatus(
-          phase = ServicePhase.STOPPED,
-          mode = CaptureMode.NONE,
-        ),
-      )
       WorkScheduler.cancelHeartbeat(this)
       beginShutdown(removeNotification = true)
       return START_NOT_STICKY
     }
+
+    if (intent?.action == SensorServiceController.ACTION_LIVE_STOP) {
+      live.disconnect()
+      live.captureFrame = null
+      audioHal.setLiveConsumer(null)
+      if (liveOnly && started) beginShutdown(removeNotification = true) else if (!started) stopSelf()
+      return START_NOT_STICKY
+    }
+    if (intent?.action == SensorServiceController.ACTION_LIVE_START) {
+      if (ai.openclaw.clawsense.live.UpstreamLiveActivity.active) { stopSelf(); return START_NOT_STICKY }
+      if (!started) liveOnly = true
+      liveVisual = intent.getBooleanExtra("visual", false) && hasPermission(Manifest.permission.CAMERA)
+      live.setVisualEnabled(liveVisual)
+      live.captureFrame = if (liveVisual) { { liveFrameMutex.withLock { imageHal.captureStill() } } } else null
+      audioHal.setLiveConsumer({ frame -> live.feed(frame) }, recordAmbient = !liveOnly)
+      lifecycleScope.launch { stopAssistantSpeaking(); live.connect(if (intent.getBooleanExtra("native", false)) "native" else "local", invited = true) }
+    }
+    if (!started) validationImageOnly = SensorServiceController.consumeDebugImageOnly()
 
     if (SensorServiceController.isAssistantQueryAction(intent)) {
       lifecycleScope.launch {
@@ -137,8 +178,9 @@ class SensorForegroundService : LifecycleService() {
       }
     }
 
+    if (ai.openclaw.clawsense.live.UpstreamLiveActivity.active && !started) { stopSelf(); return START_NOT_STICKY }
     val hasAudioPermission = hasPermission(Manifest.permission.RECORD_AUDIO)
-    val hasCameraPermission = hasPermission(Manifest.permission.CAMERA)
+    val hasCameraPermission = (!liveOnly || liveVisual) && hasPermission(Manifest.permission.CAMERA)
     startForegroundCompat(
       buildNotification(notificationText(hasAudioPermission, hasCameraPermission)),
       audioEnabled = hasAudioPermission,
@@ -150,22 +192,34 @@ class SensorForegroundService : LifecycleService() {
       shuttingDown = false
       sensorsReleased = false
       Log.d(tag, "Foreground service starting")
-      repository.setServiceEnabled(true)
+      repository.setServiceEnabled(!liveOnly)
       repository.updateRuntimeStatus(
         ServiceRuntimeStatus(
           phase = ServicePhase.STARTING,
           mode = CaptureMode.NONE,
         ),
       )
-      WorkScheduler.scheduleHeartbeat(this)
+      if (!liveOnly) WorkScheduler.scheduleHeartbeat(this)
       lifecycleScope.launch {
         runSensorLoops()
+      }
+      val debugCaptureLimitMs = SensorServiceController.consumeDebugCaptureLimit(this)
+      if (debugCaptureLimitMs > 0L) {
+        lifecycleScope.launch {
+          delay(debugCaptureLimitMs)
+          if (!shuttingDown) {
+            repository.setServiceEnabled(false)
+            WorkScheduler.cancelHeartbeat(this@SensorForegroundService)
+            Log.i(tag, "Debug validation capture expired after ${debugCaptureLimitMs}ms")
+            beginShutdown(removeNotification = true)
+          }
+        }
       }
     } else {
       val currentStatus = repository.runtimeStatus.value
       repository.updateRuntimeStatus(currentStatus.copy(updatedAt = System.currentTimeMillis()))
     }
-    return START_STICKY
+    return if (liveOnly) START_NOT_STICKY else START_STICKY
   }
 
   override fun onDestroy() {
@@ -173,20 +227,15 @@ class SensorForegroundService : LifecycleService() {
     stillCaptureJob?.cancel()
     videoCaptureJob?.cancel()
     resetRuntimeTracking()
-    repository.updateRuntimeStatus(
-      ServiceRuntimeStatus(
-        phase = ServicePhase.STOPPED,
-        mode = CaptureMode.NONE,
-      ),
-    )
+    if (!shuttingDown) { shuttingDown = true; live.disconnect() }
+    repository.updateRuntimeStatus(repository.runtimeStatus.value.copy(phase = if (sensorsReleased) ServicePhase.STOPPED else ServicePhase.STOPPING, mode = if (sensorsReleased) CaptureMode.NONE else repository.runtimeStatus.value.mode))
     repository.updateAssistantSnapshot(
-      AssistantInteractionSnapshot(
-        phase = AssistantInteractionPhase.PASSIVE_SENSING,
-      ),
+      stoppedAssistantSnapshot(repository.assistantSnapshot.value, System.currentTimeMillis()),
     )
     if (!sensorsReleased) {
       shutdownScope.launch {
         stopSensorHals()
+        repository.updateRuntimeStatus(ServiceRuntimeStatus(phase = ServicePhase.STOPPED, mode = CaptureMode.NONE))
       }
     }
     super.onDestroy()
@@ -214,7 +263,7 @@ class SensorForegroundService : LifecycleService() {
     }
 
     val hasAudioPermission = hasPermission(Manifest.permission.RECORD_AUDIO)
-    val hasCameraPermission = hasPermission(Manifest.permission.CAMERA)
+    val hasCameraPermission = (!liveOnly || liveVisual) && hasPermission(Manifest.permission.CAMERA)
     var audioActive = false
     var imageActive = false
 
@@ -250,6 +299,7 @@ class SensorForegroundService : LifecycleService() {
         .onSuccess {
           audioActive = true
           audioSensorRunning = true
+          live.setEchoAvailable(audioHal.echoAvailable)
           Log.d(tag, "Audio HAL started")
         }
         .onFailure {
@@ -325,6 +375,20 @@ class SensorForegroundService : LifecycleService() {
             ),
           )
           nextHeartbeatIntervalSec = heartbeatResult.heartbeatIntervalSec.coerceAtLeast(30)
+          val cache = heartbeatResult.cacheValidation
+          val currentAnswer = repository.assistantSnapshot.value
+          if (cache != null && cache.state != "current" && cache.snapshotId == currentAnswer.contextSnapshotId) {
+            assistantContentGeneration++
+            assistantTts.stopSpeaking()
+            repository.updateAssistantSnapshot(currentAnswer.copy(
+              phase = AssistantInteractionPhase.WAKEWORD_ARMED,
+              queryText = null, answerText = null, answerSpokenText = null, contextSnapshotId = null,
+              lastError = "回答来源或授权已变化，已清除旧回答。",
+            ))
+            armAssistantEchoDrain()
+            markAssistantReady(lastError = "回答来源已失效，请重新提问。")
+            Log.i(tag, "Assistant cached response invalidated")
+          }
           heartbeatResult.captureDirective?.let { directive ->
             maybeTriggerAutoVideoClip(directive)
           }
@@ -344,9 +408,11 @@ class SensorForegroundService : LifecycleService() {
       }
     }
 
-    if (imageActive) {
+    if (imageActive && !liveOnly) {
       stillCaptureJob = lifecycleScope.launch {
-        nextStillCaptureDueAtMs = SystemClock.elapsedRealtime() + BASELINE_STILL_INTERVAL_MS
+        // Establish visual evidence on explicit service start; subsequent
+        // captures keep the baseline/active-window cadence and throttle rules.
+        nextStillCaptureDueAtMs = SystemClock.elapsedRealtime()
         while (true) {
           val now = SystemClock.elapsedRealtime()
           val waitMs = nextStillCaptureDueAtMs - now
@@ -413,6 +479,8 @@ class SensorForegroundService : LifecycleService() {
       return
     }
     shuttingDown = true
+    repository.updateRuntimeStatus(repository.runtimeStatus.value.copy(phase = ServicePhase.STOPPING))
+    live.disconnect()
     heartbeatJob?.cancel()
     stillCaptureJob?.cancel()
     videoCaptureJob?.cancel()
@@ -443,11 +511,15 @@ class SensorForegroundService : LifecycleService() {
         .onFailure { Log.w(tag, "Camera HAL stop failed", it) }
       runCatching { assistantTts.shutdown() }
         .onFailure { Log.w(tag, "Assistant TTS shutdown failed", it) }
+      audioHal.setLiveConsumer(null)
       sensorsReleased = true
     }
   }
 
   private fun resetRuntimeTracking() {
+    assistantAmbientResumeJob?.cancel()
+    assistantAmbientResumeJob = null
+    audioHal.setAmbientCaptureSuppressed(true)
     started = false
     audioSensorRunning = false
     videoSensorRunning = false
@@ -708,6 +780,25 @@ class SensorForegroundService : LifecycleService() {
     assistantAmbientDropUntilWallMs = nowWallMs + ASSISTANT_ECHO_DRAIN_MS
   }
 
+  private fun pauseAmbientCapture() {
+    assistantAmbientResumeJob?.cancel()
+    assistantAmbientResumeJob = null
+    audioHal.setAmbientCaptureSuppressed(true)
+  }
+
+  private fun resumeAmbientCaptureAfterDrain() {
+    assistantAmbientResumeJob?.cancel()
+    assistantAmbientResumeJob = lifecycleScope.launch {
+      val remaining = (assistantAmbientDropUntilWallMs - System.currentTimeMillis()).coerceAtLeast(0L)
+      if (remaining > 0L) delay(remaining)
+      val phase = repository.assistantSnapshot.value.phase
+      if (!shuttingDown && phase != AssistantInteractionPhase.RECORDING_QUERY &&
+        phase != AssistantInteractionPhase.WAITING_ANSWER && phase != AssistantInteractionPhase.SPEAKING_ANSWER) {
+        audioHal.setAmbientCaptureSuppressed(false)
+      }
+    }
+  }
+
   private fun noteValue(note: String, key: String): String? {
     val prefix = "$key="
     return note
@@ -717,6 +808,7 @@ class SensorForegroundService : LifecycleService() {
   }
 
   private suspend fun triggerAssistantQuery(modeHint: AssistantModeHint) {
+    if (live.state.value.connected || live.state.value.connecting) { repository.recordError("Live 已开启，请在 Live 中继续交流。"); return }
     if (!audioSensorRunning) {
       repository.updateAssistantSnapshot(
         AssistantInteractionSnapshot(
@@ -729,25 +821,18 @@ class SensorForegroundService : LifecycleService() {
     }
     var shouldArmQuery = false
     assistantMutex.withLock {
-      val phase = repository.assistantSnapshot.value.phase
-      if (
-        phase == AssistantInteractionPhase.RECORDING_QUERY ||
-          phase == AssistantInteractionPhase.WAITING_ANSWER ||
-          phase == AssistantInteractionPhase.SPEAKING_ANSWER
-      ) {
-        repository.updateAssistantSnapshot(
-          repository.assistantSnapshot.value.copy(
-            phase = AssistantInteractionPhase.ERROR_RECOVERY,
-            lastUpdatedAt = System.currentTimeMillis(),
-            lastError = "助手正在处理上一轮问题，请等它说完再问。",
-          ),
-        )
+      val snapshot = repository.assistantSnapshot.value
+      val rejected = rejectBusyAssistantQuery(snapshot, System.currentTimeMillis())
+      if (rejected != null) {
+        repository.updateAssistantSnapshot(rejected)
       } else {
+        pauseAmbientCapture()
         repository.updateAssistantSnapshot(
-          AssistantInteractionSnapshot(
+          snapshot.copy(
             phase = AssistantInteractionPhase.RECORDING_QUERY,
             lastUpdatedAt = System.currentTimeMillis(),
             mode = modeHint,
+            lastError = null,
           ),
         )
         shouldArmQuery = true
@@ -873,15 +958,16 @@ class SensorForegroundService : LifecycleService() {
         return
       }
       Log.e(tag, "Assistant query failed", error)
+      val message = assistantFailureMessage(error, repository.session.value?.host)
       repository.updateAssistantSnapshot(
         AssistantInteractionSnapshot(
           phase = AssistantInteractionPhase.ERROR_RECOVERY,
           lastUpdatedAt = System.currentTimeMillis(),
-          lastError = "助手回答失败：${error.message ?: "未知错误"}",
+          lastError = message,
         ),
       )
       markAssistantReady(
-        lastError = "助手回答失败：${error.message ?: "未知错误"}",
+        lastError = message,
       )
     }
   }
@@ -907,6 +993,9 @@ class SensorForegroundService : LifecycleService() {
   }
 
   private suspend fun speakAssistantResponse(response: AssistantQueryResponse) {
+    if (live.state.value.connected || live.state.value.connecting) { markAssistantReady(response = response); return }
+    val contentGeneration = assistantContentGeneration
+    pauseAmbientCapture()
     armAssistantEchoDrain()
     repository.updateAssistantSnapshot(
       AssistantInteractionSnapshot(
@@ -916,10 +1005,12 @@ class SensorForegroundService : LifecycleService() {
         queryText = response.queryText,
         answerText = response.answerText,
         answerSpokenText = response.answerSpokenText,
+        contextSnapshotId = response.contextSnapshotId,
         answeredAt = response.answeredAt,
       ),
     )
     val ttsResult = assistantTts.speak(response.answerSpokenText)
+    if (contentGeneration != assistantContentGeneration) return
     val stoppedByUser = assistantSpeechStopRequested
     assistantSpeechStopRequested = false
     if (ttsResult.isFailure) {
@@ -933,6 +1024,7 @@ class SensorForegroundService : LifecycleService() {
           queryText = response.queryText,
           answerText = response.answerText,
           answerSpokenText = response.answerSpokenText,
+          contextSnapshotId = response.contextSnapshotId,
           answeredAt = response.answeredAt,
           lastError = failureMessage,
         ),
@@ -981,28 +1073,32 @@ class SensorForegroundService : LifecycleService() {
         },
       ),
     )
+    resumeAmbientCaptureAfterDrain()
   }
 
   private fun markAssistantReady(
     response: AssistantQueryResponse? = null,
     lastError: String? = null,
   ) {
+    val previous = repository.assistantSnapshot.value
     repository.updateAssistantSnapshot(
-      AssistantInteractionSnapshot(
+      previous.copy(
         phase = if (audioSensorRunning) {
           AssistantInteractionPhase.WAKEWORD_ARMED
         } else {
           AssistantInteractionPhase.PASSIVE_SENSING
         },
         lastUpdatedAt = System.currentTimeMillis(),
-        mode = response?.modeUsed ?: AssistantModeHint.AUTO,
-        queryText = response?.queryText,
-        answerText = response?.answerText,
-        answerSpokenText = response?.answerSpokenText,
-        answeredAt = response?.answeredAt,
+        mode = response?.modeUsed ?: previous.mode,
+        queryText = response?.queryText ?: previous.queryText,
+        answerText = response?.answerText ?: previous.answerText,
+        answerSpokenText = response?.answerSpokenText ?: previous.answerSpokenText,
+        contextSnapshotId = response?.contextSnapshotId ?: previous.contextSnapshotId,
+        answeredAt = response?.answeredAt ?: previous.answeredAt,
         lastError = lastError,
       ),
     )
+    resumeAmbientCaptureAfterDrain()
   }
 
   private fun startForegroundCompat(
@@ -1059,7 +1155,8 @@ class SensorForegroundService : LifecycleService() {
     if (permission == Manifest.permission.POST_NOTIFICATIONS && Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
       return true
     }
-    return ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
+    val granted = ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
+    return isPermissionAllowedForCapture(permission, granted, validationImageOnly)
   }
 
   private fun notificationText(hasAudioPermission: Boolean, hasCameraPermission: Boolean): String {

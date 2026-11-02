@@ -462,6 +462,7 @@ export class ClawSenseReviewEngine {
     modality?: "audio" | "image" | "video";
     artifactUrlBase: string;
     now?: number;
+    allowSemanticRetrieval?: boolean;
   }): Promise<{
     scope: "last-hour" | "today" | "custom-range";
     date: string;
@@ -608,7 +609,7 @@ export class ClawSenseReviewEngine {
     const review = scope === "today" ? await this.getOrGenerateDailyReview(date) : undefined;
     const consolidation =
       scope === "today" ? await this.getOrGenerateDailyConsolidation(date) : undefined;
-    const semanticWindowIds = await this.resolveSemanticWindowHints({
+    const semanticWindowIds = params.allowSemanticRetrieval === false ? [] : await this.resolveSemanticWindowHints({
       question: params.question,
       startAt,
       endAt,

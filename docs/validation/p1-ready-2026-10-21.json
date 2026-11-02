@@ -1,0 +1,496 @@
+{
+  "date": "2026-10-21",
+  "timezone": "Asia/Shanghai",
+  "hostVersion": "0.2.0-preview.8",
+  "androidVersion": "0.3.8-live-ready-preview",
+  "androidVersionCode": 12,
+  "stage": "P1 candidate awaiting human check; cold-start and 300ms stop target remain open",
+  "p1Accepted": false,
+  "p2": "integrated preview retained",
+  "p3Started": false,
+  "publicRelease": "paused by user",
+  "device": {
+    "model": "OPPO Find X2 / PDEM10",
+    "android": 13,
+    "transport": "USB"
+  },
+  "processing": {
+    "mode": "user-owned phone and Mac",
+    "phoneOnlyInference": false,
+    "newExternalModelCalls": false,
+    "macMemoryGiB": 16
+  },
+  "checks": {
+    "projectTests": 527,
+    "projectFiles": 40,
+    "crossAgentProtocol": true,
+    "calibrationTests": 3,
+    "androidJvmTests": 54,
+    "androidJvmFailures": 0,
+    "pythonVisionPolicyTests": 3,
+    "realHostAcceptanceRepeated": false
+  },
+  "phonePreparation": {
+    "preparationMs": 13141,
+    "entryMs": 179,
+    "microphoneFrames": 0,
+    "cameraStarted": false,
+    "foregroundActivity": true,
+    "host": {
+      "ok": true,
+      "ready": true,
+      "preparationMs": 13108.014124999998,
+      "capabilitiesMs": 3382.643874999999,
+      "finalWarmupMs": 9725.387583,
+      "initialization": {
+        "asr": {
+          "modelLoadMs": 1049.7647088486701,
+          "probeMs": 1049.7809587977827
+        },
+        "llm": {
+          "modelLoadMs": 2401.1165827978402,
+          "probeMs": 2401.1218750383705
+        },
+        "tts": {
+          "modelLoadMs": 3179.1352091822773,
+          "probeMs": 3179.1715829167515
+        },
+        "final-asr": {
+          "modelLoadMs": 928.4967079292983,
+          "probeMs": 928.5113750956953
+        },
+        "vad": {
+          "modelLoadMs": 32.92075009085238,
+          "probeMs": 32.92500018142164
+        }
+      },
+      "mediaStarted": false
+    }
+  },
+  "phoneStop": {
+    "source": "generated PCM through phone transport, actual ASR and AudioTrack; no physical microphone",
+    "rounds": [
+      {
+        "round": 1,
+        "captureStartToPlayerPauseMs": 312,
+        "oldAudioResumed": false,
+        "captureStartToStopCompletedMs": 313,
+        "nominalPcmMs": 364,
+        "actualFeedMs": 365,
+        "notice": "已停止说话，宿主任务的执行状态保持不变。",
+        "transcript": "停",
+        "stops": [
+          {
+            "arrivalMs": 308,
+            "completeMs": 313,
+            "pauseCompletedMs": 312,
+            "gateWaitMs": 0,
+            "pauseMs": 4,
+            "flushMs": 1
+          }
+        ]
+      },
+      {
+        "round": 2,
+        "captureStartToPlayerPauseMs": 354,
+        "oldAudioResumed": false,
+        "captureStartToStopCompletedMs": 354,
+        "nominalPcmMs": 364,
+        "actualFeedMs": 365,
+        "notice": "已停止说话，宿主任务的执行状态保持不变。",
+        "transcript": "停",
+        "stops": [
+          {
+            "arrivalMs": 353,
+            "completeMs": 354,
+            "pauseCompletedMs": 354,
+            "gateWaitMs": 0,
+            "pauseMs": 1,
+            "flushMs": 0
+          }
+        ]
+      },
+      {
+        "round": 3,
+        "captureStartToPlayerPauseMs": 461,
+        "oldAudioResumed": false,
+        "captureStartToStopCompletedMs": 465,
+        "nominalPcmMs": 364,
+        "actualFeedMs": 364,
+        "notice": "已停止说话，宿主任务的执行状态保持不变。",
+        "transcript": "停",
+        "stops": [
+          {
+            "arrivalMs": 460,
+            "completeMs": 465,
+            "pauseCompletedMs": 461,
+            "gateWaitMs": 0,
+            "pauseMs": 1,
+            "flushMs": 1
+          }
+        ]
+      }
+    ],
+    "newQuestionAnswered14": true,
+    "humanStopAccepted": false,
+    "completed": true,
+    "error": null,
+    "notice": null,
+    "socketDefaultNoDelay": false,
+    "socketNoDelayEnabled": true
+  },
+  "phoneVision": {
+    "source": "typed natural speech variant; actual camera, local vision and phone playback",
+    "answer": "当前画面太暗，我看不清具体物体。",
+    "captureCount": 1,
+    "microphoneFrames": 0,
+    "textToPhoneWriteMs": 2108,
+    "visualConnectionMs": 4440,
+    "finalBrightSceneHumanAcceptance": false
+  },
+  "imageOrientation": {
+    "cases": [
+      {
+        "orientation": 1,
+        "passed": true,
+        "width": 120,
+        "height": 80,
+        "wireExif": 0
+      },
+      {
+        "orientation": 2,
+        "passed": true,
+        "width": 120,
+        "height": 80,
+        "wireExif": 0
+      },
+      {
+        "orientation": 3,
+        "passed": true,
+        "width": 120,
+        "height": 80,
+        "wireExif": 0
+      },
+      {
+        "orientation": 4,
+        "passed": true,
+        "width": 120,
+        "height": 80,
+        "wireExif": 0
+      },
+      {
+        "orientation": 5,
+        "passed": true,
+        "width": 80,
+        "height": 120,
+        "wireExif": 0
+      },
+      {
+        "orientation": 6,
+        "passed": true,
+        "width": 80,
+        "height": 120,
+        "wireExif": 0
+      },
+      {
+        "orientation": 7,
+        "passed": true,
+        "width": 80,
+        "height": 120,
+        "wireExif": 0
+      },
+      {
+        "orientation": 8,
+        "passed": true,
+        "width": 80,
+        "height": 120,
+        "wireExif": 0
+      }
+    ],
+    "cameraStarted": false,
+    "microphoneStarted": false
+  },
+  "recorderPackets": {
+    "frames": 85,
+    "maxPacketMs": 20.0,
+    "totalAudioMs": 1700.0,
+    "audioStored": false,
+    "audioSentToModel": false,
+    "released": true
+  },
+  "isolatedVoiceLoadComparison": [
+    {
+      "mode": "eager",
+      "ready": true,
+      "initialization": {
+        "asr": {
+          "modelLoadMs": 1092.4889999441803,
+          "probeMs": 1092.509999871254
+        },
+        "llm": {
+          "modelLoadMs": 7044.96895801276,
+          "probeMs": 7048.377959057689
+        },
+        "tts": {
+          "modelLoadMs": 7504.866084083915,
+          "probeMs": 7504.954457981512
+        },
+        "final-asr": {
+          "modelLoadMs": 968.3284999337047,
+          "probeMs": 968.3452921453863
+        },
+        "vad": {
+          "modelLoadMs": 32.22141694277525,
+          "probeMs": 32.22674992866814
+        }
+      },
+      "initMs": 11448.502583000001,
+      "firstAudioMs": 228.7350830000014,
+      "pcmBytes": 119040,
+      "pcmSha256": "4ff0696c9c3fb22233b0ccae62bd1ffdb115e5db35abe050c9e858e793f385ec"
+    },
+    {
+      "mode": "lazy",
+      "ready": true,
+      "initialization": {
+        "asr": {
+          "modelLoadMs": 722.3568328190595,
+          "probeMs": 722.3647919017822
+        },
+        "llm": {
+          "modelLoadMs": 2005.7189161889255,
+          "probeMs": 2005.7264999486506
+        },
+        "tts": {
+          "modelLoadMs": 2881.4716250635684,
+          "probeMs": 2881.4885411411524
+        },
+        "final-asr": {
+          "modelLoadMs": 673.3826249837875,
+          "probeMs": 673.3901249244809
+        },
+        "vad": {
+          "modelLoadMs": 20.3767498023808,
+          "probeMs": 20.382374990731478
+        }
+      },
+      "initMs": 4366.493375,
+      "firstAudioMs": 197.77779199999713,
+      "pcmBytes": 119040,
+      "pcmSha256": "4ff0696c9c3fb22233b0ccae62bd1ffdb115e5db35abe050c9e858e793f385ec"
+    },
+    {
+      "mode": "eager",
+      "ready": true,
+      "initialization": {
+        "asr": {
+          "modelLoadMs": 816.2969162221998,
+          "probeMs": 816.305834101513
+        },
+        "llm": {
+          "modelLoadMs": 3512.7141252160072,
+          "probeMs": 3512.7220840658993
+        },
+        "tts": {
+          "modelLoadMs": 5184.784332988784,
+          "probeMs": 5184.808624908328
+        },
+        "final-asr": {
+          "modelLoadMs": 821.8461670912802,
+          "probeMs": 821.8526658602059
+        },
+        "vad": {
+          "modelLoadMs": 41.81045782752335,
+          "probeMs": 41.814582888036966
+        }
+      },
+      "initMs": 5820.137875,
+      "firstAudioMs": 232.40295799999876,
+      "pcmBytes": 119040,
+      "pcmSha256": "4ff0696c9c3fb22233b0ccae62bd1ffdb115e5db35abe050c9e858e793f385ec"
+    },
+    {
+      "mode": "lazy",
+      "ready": true,
+      "initialization": {
+        "asr": {
+          "modelLoadMs": 750.3430000506341,
+          "probeMs": 750.3501658793539
+        },
+        "llm": {
+          "modelLoadMs": 2066.45549996756,
+          "probeMs": 2066.4626250509173
+        },
+        "tts": {
+          "modelLoadMs": 2651.257124962285,
+          "probeMs": 2651.2928339652717
+        },
+        "final-asr": {
+          "modelLoadMs": 697.1601669210941,
+          "probeMs": 697.1677499823272
+        },
+        "vad": {
+          "modelLoadMs": 36.77212493494153,
+          "probeMs": 36.777707980945706
+        }
+      },
+      "initMs": 4297.809540999999,
+      "firstAudioMs": 210.2299579999999,
+      "pcmBytes": 119040,
+      "pcmSha256": "4ff0696c9c3fb22233b0ccae62bd1ffdb115e5db35abe050c9e858e793f385ec"
+    }
+  ],
+  "finalSavedImageReplay": {
+    "source": "saved physical frames and synthetic cards; actual local vision model; no new camera capture",
+    "preloadMs": 1761.82325,
+    "rows": [
+      {
+        "label": "cup",
+        "ms": 2740.7358329999997,
+        "text": "一个透明玻璃杯。"
+      },
+      {
+        "label": "cup-angle",
+        "ms": 871.1067919999996,
+        "text": "一个透明玻璃杯。"
+      },
+      {
+        "label": "cup-other-angle",
+        "ms": 855.1307910000005,
+        "text": "一个透明玻璃杯。"
+      },
+      {
+        "label": "shapes",
+        "ms": 809.4401660000003,
+        "text": "画面中有一个红色的圆形和一个蓝色的方形，它们都位于白色背景上。"
+      },
+      {
+        "label": "changed",
+        "ms": 691.6055000000006,
+        "text": "一个蓝色的正方形。"
+      },
+      {
+        "label": "covered",
+        "ms": 7.917583000000377,
+        "text": "当前画面太暗，我看不清具体物体。",
+        "quality": "insufficient"
+      }
+    ]
+  },
+  "cpuStopReplay": {
+    "source": "generated PCM paced from capture start; real CPU VAD and ASR, controlled response and simulated playback; no microphone/speaker",
+    "rows": [
+      {
+        "round": 1,
+        "frameMs": 20,
+        "hostStopMs": 258,
+        "newTopic": false,
+        "transcripts": [
+          "停"
+        ],
+        "errors": []
+      },
+      {
+        "round": 2,
+        "frameMs": 20,
+        "hostStopMs": 243,
+        "newTopic": false,
+        "transcripts": [
+          "停"
+        ],
+        "errors": []
+      },
+      {
+        "round": 3,
+        "frameMs": 20,
+        "hostStopMs": 244,
+        "newTopic": false,
+        "transcripts": [
+          "停"
+        ],
+        "errors": []
+      },
+      {
+        "round": 4,
+        "frameMs": 20,
+        "hostStopMs": 249,
+        "newTopic": false,
+        "transcripts": [
+          "停"
+        ],
+        "errors": []
+      },
+      {
+        "round": 5,
+        "frameMs": 20,
+        "hostStopMs": 243,
+        "newTopic": false,
+        "transcripts": [
+          "停"
+        ],
+        "errors": []
+      },
+      {
+        "round": 6,
+        "frameMs": 20,
+        "hostStopMs": 247,
+        "newTopic": false,
+        "transcripts": [
+          "停"
+        ],
+        "errors": []
+      },
+      {
+        "round": 7,
+        "frameMs": 20,
+        "hostStopMs": 243,
+        "newTopic": false,
+        "transcripts": [
+          "停"
+        ],
+        "errors": []
+      },
+      {
+        "round": 8,
+        "frameMs": 20,
+        "hostStopMs": 243,
+        "newTopic": false,
+        "transcripts": [
+          "停"
+        ],
+        "errors": []
+      },
+      {
+        "round": 9,
+        "frameMs": 20,
+        "hostStopMs": 245,
+        "newTopic": false,
+        "transcripts": [
+          "停"
+        ],
+        "errors": []
+      },
+      {
+        "round": 10,
+        "frameMs": 20,
+        "hostStopMs": 244,
+        "newTopic": false,
+        "transcripts": [
+          "停"
+        ],
+        "errors": []
+      }
+    ],
+    "p95": 258,
+    "passed": true
+  },
+  "remaining": [
+    "human correction/background/stop/current-object short round",
+    "full cold preparation tail",
+    "actual phone and human stop P95 <= 300ms",
+    "headset/call/secure-lock/power device combinations"
+  ],
+  "privateEvidenceDirectory": ".local/p1-final-2026-10-20",
+  "rawImagesAndAudioIncluded": false,
+  "distributionEvidence": "Private artifacts/manifest.json and clean-install.json refer to exact local tarball and APK; no public publication."
+}
